@@ -140,6 +140,35 @@ fn tiny_hash_only_tes4_index() -> Vec<u8> {
     bytes
 }
 
+fn tiny_embedded_name_tes4_index() -> Vec<u8> {
+    let embedded_name = b"data\\file.txt";
+    let payload = b"payload";
+    let folder_record_offset = HEADER_SIZE + 16;
+    let data_offset = folder_record_offset + 16;
+    let stored_size = 1 + embedded_name.len() + payload.len();
+    let mut bytes = Vec::new();
+    push_u32(&mut bytes, MAGIC);
+    push_u32(&mut bytes, 104);
+    push_u32(&mut bytes, HEADER_SIZE);
+    push_u32(&mut bytes, 1 << 8);
+    push_u32(&mut bytes, 1);
+    push_u32(&mut bytes, 1);
+    push_u32(&mut bytes, 0);
+    push_u32(&mut bytes, 0);
+    push_u16(&mut bytes, 1 << 8);
+    push_u16(&mut bytes, 0);
+    push_u64(&mut bytes, hash_directory(b"data").0.numeric());
+    push_u32(&mut bytes, 1);
+    push_u32(&mut bytes, folder_record_offset);
+    push_u64(&mut bytes, hash_file(b"file.txt").0.numeric());
+    push_u32(&mut bytes, stored_size.try_into().unwrap());
+    push_u32(&mut bytes, data_offset);
+    bytes.push(embedded_name.len().try_into().unwrap());
+    bytes.extend_from_slice(embedded_name);
+    bytes.extend_from_slice(payload);
+    bytes
+}
+
 #[test]
 fn accepts_supported_tes4_versions() {
     for (raw, version) in [
@@ -246,6 +275,42 @@ fn hash_only_tes4_extract_to_reports_missing_paths() {
         Err(Error::ArchivePathsUnavailable)
     ));
     assert!(!out.exists());
+}
+
+#[test]
+fn recovers_tes4_paths_from_embedded_file_names() {
+    let archive = Archive::read(&tiny_embedded_name_tes4_index()).unwrap();
+    let entry = &archive.entries()[0];
+
+    assert_eq!(entry.path().unwrap(), "data\\file.txt");
+    assert_eq!(entry.folder().unwrap(), "data");
+    assert_eq!(entry.name().unwrap(), "file.txt");
+    assert_eq!(archive.read_entry(entry).unwrap(), b"payload");
+    assert_eq!(
+        archive.read_file("data/file.txt").unwrap().unwrap(),
+        b"payload"
+    );
+}
+
+#[test]
+fn extracts_hash_only_tes4_archive_with_path_dictionary() {
+    let archive = Archive::read(&tiny_hash_only_tes4_index()).unwrap();
+    let out = output_dir("tes4-hash-dictionary");
+
+    assert_eq!(
+        archive
+            .extract_to_with_paths(
+                &out,
+                [b"missing.txt".as_slice(), b"data/file.txt".as_slice()]
+            )
+            .unwrap(),
+        7
+    );
+    assert_eq!(
+        std::fs::read(out.join("data").join("file.txt")).unwrap(),
+        b"payload"
+    );
+    std::fs::remove_dir_all(out).unwrap();
 }
 
 #[test]

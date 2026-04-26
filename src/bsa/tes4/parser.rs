@@ -133,11 +133,14 @@ fn read_entries(bytes: &[u8], info: ArchiveInfo) -> Result<Vec<Entry>> {
     let entries = entries
         .into_iter()
         .map(|(folder, folder_hash, record)| {
+            let embedded_name = read_embedded_name(bytes, info, record.record)?;
+            let folder = folder.or_else(|| embedded_name.as_ref().map(|name| name.0.clone()));
             let name = if info.archive_flags.contains(ArchiveFlags::FILE_STRINGS) {
                 Some(read_zstring(&mut names)?)
             } else {
                 None
-            };
+            }
+            .or_else(|| embedded_name.map(|name| name.1));
             Ok(Entry::new(
                 folder,
                 name,
@@ -196,6 +199,44 @@ fn read_hash(cursor: &mut Cursor<'_>) -> Result<HashFields> {
         first: cursor.u8()?,
         crc: cursor.u32()?,
     })
+}
+
+fn read_embedded_name(
+    bytes: &[u8],
+    info: ArchiveInfo,
+    record: FileRecord,
+) -> Result<Option<(BString, BString)>> {
+    if !matches!(info.version, ArchiveVersion::v104 | ArchiveVersion::v105)
+        || !info
+            .archive_flags
+            .contains(ArchiveFlags::EMBEDDED_FILE_NAMES)
+    {
+        return Ok(None);
+    }
+
+    let start: usize = record.data_offset.try_into()?;
+    let stored_size: usize = record.stored_size.try_into()?;
+    let stored = bytes
+        .get(start..start.checked_add(stored_size).ok_or(Error::OutOfBounds)?)
+        .ok_or(Error::OutOfBounds)?;
+    let embedded_name_len = usize::from(stored.first().copied().ok_or(Error::OutOfBounds)?);
+    let end = 1usize
+        .checked_add(embedded_name_len)
+        .ok_or(Error::OutOfBounds)?;
+    let embedded_name = stored.get(1..end).ok_or(Error::OutOfBounds)?;
+    let Some(name_start) = embedded_name
+        .iter()
+        .rposition(|byte| matches!(*byte, b'/' | b'\\'))
+    else {
+        return Ok(Some((
+            BString::new(Vec::new()),
+            BString::from(embedded_name),
+        )));
+    };
+    Ok(Some((
+        BString::from(&embedded_name[..name_start]),
+        BString::from(&embedded_name[name_start + 1..]),
+    )))
 }
 
 fn validate_file_extent(

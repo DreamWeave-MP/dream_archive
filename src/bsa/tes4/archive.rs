@@ -10,7 +10,7 @@ use flate2::read::ZlibDecoder;
 use lz4_flex::frame::FrameDecoder;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufWriter;
 use std::io::Read as _;
@@ -230,10 +230,7 @@ impl Archive {
     /// Get an entry by case-insensitive path with slash normalization.
     #[must_use]
     pub fn get(&self, path: impl AsRef<[u8]>) -> Option<&Entry> {
-        let normalized = normalize_lookup_path(path.as_ref());
-        self.lookup
-            .get(normalized.as_slice())
-            .or_else(|| self.hash_lookup.get(&path_hash(path.as_ref())))
+        self.index_for_path(path.as_ref())
             .map(|&index| &self.entries[index])
     }
 
@@ -326,6 +323,48 @@ impl Archive {
         self.get(path)
             .map(|entry| self.extract_entry(entry, out))
             .transpose()
+    }
+
+    /// Extract entries whose names are supplied by an external path dictionary.
+    ///
+    /// This is intended for hash-only TES4 archives. The archive cannot provide
+    /// paths it did not store, so the caller supplies candidate paths from a
+    /// manifest, plugin records, loose-file tree, or similar oracle. Paths not
+    /// present in the archive are ignored.
+    ///
+    /// Returns the number of payload bytes written after decompression.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a matched dictionary path is not a safe output path,
+    /// directory or file creation fails, or entry extraction fails.
+    pub fn extract_to_with_paths<P>(
+        &self,
+        target_dir: impl AsRef<Path>,
+        paths: impl IntoIterator<Item = P>,
+    ) -> Result<u64>
+    where
+        P: AsRef<[u8]>,
+    {
+        let target_dir = target_dir.as_ref();
+        let mut written = 0u64;
+        let mut output_path = PathBuf::new();
+        let mut last_parent = PathBuf::new();
+        let mut extracted = HashSet::new();
+        for path in paths {
+            let path = path.as_ref();
+            let Some(&index) = self.index_for_path(path) else {
+                continue;
+            };
+            if !extracted.insert(index) {
+                continue;
+            }
+            output_path_into(&mut output_path, target_dir, path)?;
+            ensure_parent_dir(&output_path, &mut last_parent)?;
+            let file = File::create(&output_path)?;
+            written += self.extract_entry(&self.entries[index], BufWriter::new(file))?;
+        }
+        Ok(written)
     }
 
     /// Extract every entry to `target_dir`, preserving archive paths.
@@ -434,6 +473,13 @@ impl Archive {
             len -= embedded_name_len;
         }
         self.slice(start, len)
+    }
+
+    fn index_for_path(&self, path: &[u8]) -> Option<&usize> {
+        let normalized = normalize_lookup_path(path);
+        self.lookup
+            .get(normalized.as_slice())
+            .or_else(|| self.hash_lookup.get(&path_hash(path)))
     }
 
     fn slice(&self, start: usize, len: usize) -> Result<&[u8]> {
