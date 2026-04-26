@@ -43,7 +43,7 @@ fn output_dir(name: &str) -> PathBuf {
 
 #[test]
 fn extracts_synthetic_tes3_file() {
-    let archive = Archive::read(&tiny_tes3_archive(b"Meshes/Foo.NIF", b"hello")).unwrap();
+    let archive = Archive::from_slice(&tiny_tes3_archive(b"Meshes/Foo.NIF", b"hello")).unwrap();
 
     assert_eq!(archive.info().file_count, 1);
     assert_eq!(archive.len(), 1);
@@ -70,8 +70,8 @@ fn writes_tes3_archive_from_bytes() {
     builder.add_bytes("Meshes/Foo.NIF", b"mesh").unwrap();
     builder.add_bytes("textures/bar.dds", b"texture").unwrap();
 
-    let bytes = builder.into_vec().unwrap();
-    let archive = Archive::read(&bytes).unwrap();
+    let bytes = builder.to_vec().unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
 
     assert_eq!(archive.len(), 2);
     assert_eq!(
@@ -94,7 +94,7 @@ fn tes3_writer_encodes_legacy_text_paths() {
         .add_encoded_path("texts/María.txt", FilenameEncoding::Windows1252, b"hola")
         .unwrap();
 
-    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
 
     assert_eq!(
         archive.read_file(b"texts/mar\xeda.txt").unwrap().unwrap(),
@@ -114,7 +114,7 @@ fn tes3_writer_add_dir_follows_file_symlinks_at_relative_path() {
 
     let mut builder = Builder::new();
     builder.add_dir(&root).unwrap();
-    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
 
     assert_eq!(
         archive.read_file("something.dds").unwrap().unwrap(),
@@ -126,7 +126,7 @@ fn tes3_writer_add_dir_follows_file_symlinks_at_relative_path() {
 
 #[test]
 fn tes3_lookup_uses_openmw_style_path_normalization() {
-    let archive = Archive::read(&tiny_tes3_archive(b"\\Meshes//Foo.NIF", b"hello")).unwrap();
+    let archive = Archive::from_slice(&tiny_tes3_archive(b"\\Meshes//Foo.NIF", b"hello")).unwrap();
 
     assert_eq!(archive.entries()[0].path(), "\\Meshes//Foo.NIF");
     assert!(archive.contains("meshes/foo.nif"));
@@ -162,7 +162,7 @@ fn tes3_writer_output_is_deterministic() {
     second.add_bytes("a.txt", b"a").unwrap();
     second.add_bytes("b.txt", b"b").unwrap();
 
-    assert_eq!(first.into_vec().unwrap(), second.into_vec().unwrap());
+    assert_eq!(first.to_vec().unwrap(), second.to_vec().unwrap());
 }
 
 #[test]
@@ -189,7 +189,7 @@ fn tes3_writer_rejects_unsafe_paths() {
 
 #[test]
 fn extracts_tes3_archive_to_directory() {
-    let archive = Archive::read(&tiny_tes3_archive(b"Meshes/Foo.NIF", b"hello")).unwrap();
+    let archive = Archive::from_slice(&tiny_tes3_archive(b"Meshes/Foo.NIF", b"hello")).unwrap();
     let out = output_dir("tes3");
 
     assert_eq!(archive.extract_to(&out).unwrap(), 5);
@@ -202,7 +202,7 @@ fn extracts_tes3_archive_to_directory() {
 
 #[test]
 fn extracts_tes3_archive_to_decoded_filesystem_paths() {
-    let archive = Archive::read(&tiny_tes3_archive(b"data/Mar\xeda.txt", b"hello")).unwrap();
+    let archive = Archive::from_slice(&tiny_tes3_archive(b"data/Mar\xeda.txt", b"hello")).unwrap();
     let out = output_dir("tes3-encoding");
 
     assert_eq!(
@@ -220,7 +220,7 @@ fn extracts_tes3_archive_to_decoded_filesystem_paths() {
 
 #[test]
 fn tes3_extract_to_rejects_parent_directory_paths() {
-    let archive = Archive::read(&tiny_tes3_archive(b"../evil.txt", b"hello")).unwrap();
+    let archive = Archive::from_slice(&tiny_tes3_archive(b"../evil.txt", b"hello")).unwrap();
     let out = output_dir("tes3-traversal");
 
     assert!(
@@ -231,7 +231,8 @@ fn tes3_extract_to_rejects_parent_directory_paths() {
 
 #[test]
 fn tes3_extract_to_rejects_colon_paths() {
-    let archive = Archive::read(&tiny_tes3_archive(b"Meshes/bad:name.nif", b"hello")).unwrap();
+    let archive =
+        Archive::from_slice(&tiny_tes3_archive(b"Meshes/bad:name.nif", b"hello")).unwrap();
     let out = output_dir("tes3-colon");
 
     assert!(
@@ -242,7 +243,7 @@ fn tes3_extract_to_rejects_colon_paths() {
 
 #[test]
 fn tes3_extract_to_rejects_empty_paths() {
-    let archive = Archive::read(&tiny_tes3_archive(b"", b"hello")).unwrap();
+    let archive = Archive::from_slice(&tiny_tes3_archive(b"", b"hello")).unwrap();
     let out = output_dir("tes3-empty");
 
     assert!(
@@ -255,7 +256,7 @@ fn rejects_invalid_tes3_version() {
     let mut bytes = tiny_tes3_archive(b"file.txt", b"hello");
     bytes[0..4].copy_from_slice(&42_u32.to_le_bytes());
     assert!(matches!(
-        Archive::read(&bytes),
+        Archive::from_slice(&bytes),
         Err(Error::InvalidVersion(42))
     ));
 }
@@ -263,7 +264,7 @@ fn rejects_invalid_tes3_version() {
 #[test]
 fn rejects_truncated_tes3_header() {
     assert!(
-        matches!(Archive::read(b""), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof)
+        matches!(Archive::from_slice(b""), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof)
     );
 }
 
@@ -271,14 +272,20 @@ fn rejects_truncated_tes3_header() {
 fn rejects_tes3_hash_table_outside_archive() {
     let mut bytes = tiny_tes3_archive(b"file.txt", b"hello");
     bytes[4..8].copy_from_slice(&10_000_u32.to_le_bytes());
-    assert!(matches!(Archive::read(&bytes), Err(Error::OutOfBounds)));
+    assert!(matches!(
+        Archive::from_slice(&bytes),
+        Err(Error::OutOfBounds)
+    ));
 }
 
 #[test]
 fn rejects_tes3_name_offset_outside_name_blob() {
     let mut bytes = tiny_tes3_archive(b"file.txt", b"hello");
     bytes[20..24].copy_from_slice(&99_u32.to_le_bytes());
-    assert!(matches!(Archive::read(&bytes), Err(Error::OutOfBounds)));
+    assert!(matches!(
+        Archive::from_slice(&bytes),
+        Err(Error::OutOfBounds)
+    ));
 }
 
 #[test]
@@ -286,7 +293,7 @@ fn rejects_tes3_name_without_nul_before_hashes() {
     let mut bytes = tiny_tes3_archive(b"file.txt", b"hello");
     bytes[32] = b'X';
     assert!(
-        matches!(Archive::read(&bytes), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof)
+        matches!(Archive::from_slice(&bytes), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof)
     );
 }
 
@@ -294,12 +301,15 @@ fn rejects_tes3_name_without_nul_before_hashes() {
 fn rejects_tes3_file_data_outside_archive() {
     let mut bytes = tiny_tes3_archive(b"file.txt", b"hello");
     bytes[12..16].copy_from_slice(&99_u32.to_le_bytes());
-    assert!(matches!(Archive::read(&bytes), Err(Error::OutOfBounds)));
+    assert!(matches!(
+        Archive::from_slice(&bytes),
+        Err(Error::OutOfBounds)
+    ));
 }
 
 #[test]
 fn tes3_read_entry_into_appends_to_existing_output() {
-    let archive = Archive::read(&tiny_tes3_archive(b"file.txt", b"hello")).unwrap();
+    let archive = Archive::from_slice(&tiny_tes3_archive(b"file.txt", b"hello")).unwrap();
     let mut out = b"prefix".to_vec();
     archive
         .read_entry_into(&archive.entries()[0], &mut out)

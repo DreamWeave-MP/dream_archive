@@ -280,7 +280,7 @@ impl Builder {
     ///
     /// Returns an error if archive integer fields overflow their TES4 on-disk
     /// sizes or output allocation fails.
-    pub fn into_vec(&self) -> Result<Vec<u8>> {
+    pub fn to_vec(&self) -> Result<Vec<u8>> {
         let mut out = Vec::new();
         self.write_to(&mut out)?;
         Ok(out)
@@ -396,6 +396,10 @@ impl Builder {
 
 impl PreparedEntry<'_> {
     fn file_size(&self, default_compressed: bool) -> Result<u32> {
+        const RESERVED_FILE_SIZE_BITS: usize = (1 << 30) | (1 << 31);
+        if self.stored.len() & RESERVED_FILE_SIZE_BITS != 0 {
+            return Err(Error::OutOfBounds);
+        }
         let mut size: u32 = self.stored.len().try_into()?;
         if self.entry.is_compressed(default_compressed) != default_compressed {
             size |= 1 << 30;

@@ -229,7 +229,7 @@ impl Builder {
     ///
     /// Returns an error if archive integer fields overflow their BA2 on-disk
     /// sizes or output allocation fails.
-    pub fn into_vec(&self) -> Result<Vec<u8>> {
+    pub fn to_vec(&self) -> Result<Vec<u8>> {
         let mut out = Vec::new();
         self.write_to(&mut out)?;
         Ok(out)

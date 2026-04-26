@@ -1,8 +1,9 @@
-//! Small, pure-Rust reader for Bethesda archive formats.
+//! Small, pure-Rust library for Bethesda archive formats.
 //!
-//! The implementation is intentionally read-oriented. It targets the runtime
-//! operations `OpenMW` needs: detect, list, lookup, extract files, and
-//! reconstruct DDS streams from BA2 DX10 texture archives.
+//! The implementation targets the runtime operations `OpenMW` needs: detect,
+//! list, lookup, extract files, and reconstruct DDS streams from BA2 DX10
+//! texture archives. It also provides deterministic builders for the archive
+//! families whose writer semantics are implemented.
 //!
 //! Archive paths are byte strings. Bethesda archive formats do not reliably
 //! declare filename encodings, and older tools commonly wrote paths using the

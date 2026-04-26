@@ -114,8 +114,8 @@ fn writes_ba2_gnrl_archive_from_bytes() {
     builder.add_bytes("Meshes/Foo.NIF", b"mesh").unwrap();
     builder.add_bytes("textures/bar.dds", b"texture").unwrap();
 
-    let bytes = builder.into_vec().unwrap();
-    let archive = Archive::read(&bytes).unwrap();
+    let bytes = builder.to_vec().unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
 
     assert_eq!(archive.info().format, PayloadFormat::GNRL);
     assert_eq!(archive.info().version, ArchiveVersion::v1);
@@ -138,7 +138,7 @@ fn writes_ba2_v3_archive_from_bytes() {
     builder.set_version(ArchiveVersion::v3);
     builder.add_bytes("data/file.txt", b"payload").unwrap();
 
-    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
 
     assert_eq!(archive.info().version, ArchiveVersion::v3);
     assert_eq!(archive.info().compression_format, Ba2CompressionFormat::Zip);
@@ -156,7 +156,7 @@ fn writes_zlib_compressed_ba2_gnrl_archive() {
         .add_bytes("data/file.txt", b"payload payload payload")
         .unwrap();
 
-    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
 
     assert_eq!(archive.info().compression_format, Ba2CompressionFormat::Zip);
     let entry = &archive.entries()[0];
@@ -176,7 +176,7 @@ fn writes_lz4_compressed_ba2_v3_gnrl_archive() {
         .add_bytes("data/file.txt", b"payload payload payload")
         .unwrap();
 
-    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
 
     assert_eq!(archive.info().version, ArchiveVersion::v3);
     assert_eq!(archive.info().compression_format, Ba2CompressionFormat::LZ4);
@@ -203,7 +203,7 @@ fn ba2_writer_can_leave_one_file_uncompressed() {
         .add_bytes_with_compression("plain.txt", b"plain payload", CompressionOverride::Store)
         .unwrap();
 
-    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
 
     assert!(archive.get("compressed.txt").unwrap().file().chunks()[0].is_compressed());
     assert!(!archive.get("plain.txt").unwrap().file().chunks()[0].is_compressed());
@@ -225,7 +225,7 @@ fn ba2_writer_add_dir_follows_file_symlinks_at_relative_path() {
 
     let mut builder = Builder::new();
     builder.add_dir(&root).unwrap();
-    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
 
     assert_eq!(
         archive.read_file("something.dds").unwrap().unwrap(),
@@ -242,7 +242,7 @@ fn ba2_lz4_writer_requires_v3_header() {
     builder.add_bytes("data/file.txt", b"payload").unwrap();
 
     assert!(matches!(
-        builder.into_vec(),
+        builder.to_vec(),
         Err(Error::NotImplemented("BA2 LZ4 writer requires version 3"))
     ));
 }
@@ -257,7 +257,7 @@ fn ba2_writer_output_is_deterministic() {
     second.add_bytes("a.txt", b"a").unwrap();
     second.add_bytes("b.txt", b"b").unwrap();
 
-    assert_eq!(first.into_vec().unwrap(), second.into_vec().unwrap());
+    assert_eq!(first.to_vec().unwrap(), second.to_vec().unwrap());
 }
 
 #[test]
@@ -354,7 +354,7 @@ fn rejects_invalid_magic() {
     let mut bytes = tiny_archive(TinyArchiveOptions::default());
     bytes[0..4].copy_from_slice(&u32::to_le_bytes(0x1234_5678));
     assert!(matches!(
-        Archive::read(&bytes),
+        Archive::from_slice(&bytes),
         Err(Error::InvalidMagic(0x1234_5678))
     ));
 }
@@ -366,7 +366,7 @@ fn rejects_invalid_format() {
         ..TinyArchiveOptions::default()
     });
     assert!(matches!(
-        Archive::read(&bytes),
+        Archive::from_slice(&bytes),
         Err(Error::InvalidFormat(_))
     ));
 }
@@ -378,7 +378,7 @@ fn rejects_invalid_version() {
         ..TinyArchiveOptions::default()
     });
     assert!(matches!(
-        Archive::read(&bytes),
+        Archive::from_slice(&bytes),
         Err(Error::InvalidVersion(0x101))
     ));
 }
@@ -390,7 +390,7 @@ fn rejects_invalid_chunk_sentinel() {
         ..TinyArchiveOptions::default()
     });
     assert!(matches!(
-        Archive::read(&bytes),
+        Archive::from_slice(&bytes),
         Err(Error::InvalidChunkSentinel(0xDEAD_BEEF))
     ));
 }
@@ -399,7 +399,7 @@ fn rejects_invalid_chunk_sentinel() {
 fn rejects_truncated_headers_as_unexpected_eof() {
     for bytes in [&b""[..], &b"BTDX"[..], &b"BTDX\x01\0"[..]] {
         assert!(
-            matches!(Archive::read(bytes), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof)
+            matches!(Archive::from_slice(bytes), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof)
         );
     }
 }
@@ -410,7 +410,10 @@ fn rejects_chunk_offsets_outside_archive() {
         chunk_offset: 10_000,
         ..TinyArchiveOptions::default()
     });
-    assert!(matches!(Archive::read(&bytes), Err(Error::OutOfBounds)));
+    assert!(matches!(
+        Archive::from_slice(&bytes),
+        Err(Error::OutOfBounds)
+    ));
 }
 
 #[test]
@@ -420,7 +423,7 @@ fn rejects_chunk_size_overflow() {
         ..TinyArchiveOptions::default()
     });
     assert!(matches!(
-        Archive::read(&bytes),
+        Archive::from_slice(&bytes),
         Err(Error::IntegralTruncation | Error::OutOfBounds)
     ));
 }
@@ -433,14 +436,17 @@ fn rejects_string_table_offset_outside_archive() {
         chunk_offset: 60,
         ..TinyArchiveOptions::default()
     });
-    assert!(matches!(Archive::read(&bytes), Err(Error::OutOfBounds)));
+    assert!(matches!(
+        Archive::from_slice(&bytes),
+        Err(Error::OutOfBounds)
+    ));
 }
 
 #[test]
 fn rejects_truncated_string_table_entry() {
     let mut bytes = tiny_archive(TinyArchiveOptions::default());
     bytes.truncate(62 + 3);
-    assert!(matches!(Archive::read(&bytes), Err(Error::Io(_))));
+    assert!(matches!(Archive::from_slice(&bytes), Err(Error::Io(_))));
 }
 
 #[test]
@@ -451,7 +457,7 @@ fn accepts_v2_extra_header_field() {
         chunk_offset: 68,
         ..TinyArchiveOptions::default()
     });
-    let archive = Archive::read(&bytes).unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
     assert_eq!(archive.info().version, ArchiveVersion::v2);
     assert_eq!(archive.info().compression_format, Ba2CompressionFormat::Zip);
 }
@@ -459,7 +465,7 @@ fn accepts_v2_extra_header_field() {
 #[test]
 fn synthetic_texture_archive_reconstructs_dx10_dds_header() {
     let bytes = tiny_texture_archive(TinyTextureOptions::default());
-    let archive = Archive::read(&bytes).unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
     assert_eq!(archive.info().format, PayloadFormat::DX10);
     let data = archive.read_file("tiny.dds").unwrap().unwrap();
 
@@ -480,7 +486,7 @@ fn synthetic_cubemap_sets_dds_cube_metadata() {
         flags: 1,
         ..TinyTextureOptions::default()
     });
-    let archive = Archive::read(&bytes).unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
     let data = archive.read_file("tiny.dds").unwrap().unwrap();
 
     assert_eq!(
@@ -497,7 +503,7 @@ fn rejects_zero_sized_texture_during_extraction() {
         width: 0,
         ..TinyTextureOptions::default()
     });
-    let archive = Archive::read(&bytes).unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
     assert!(matches!(
         archive.read_file("tiny.dds"),
         Err(Error::Dds("zero-sized texture"))
@@ -510,7 +516,7 @@ fn rejects_unsupported_dxgi_format_without_partial_output() {
         format: 255,
         ..TinyTextureOptions::default()
     });
-    let archive = Archive::read(&bytes).unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
     let mut out = b"prefix".to_vec();
     assert!(matches!(
         archive.read_entry_into(&archive.entries()[0], &mut out),
@@ -527,7 +533,7 @@ fn block_compressed_dds_size_uses_rounded_blocks() {
         format: 71,
         ..TinyTextureOptions::default()
     });
-    let archive = Archive::read(&bytes).unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
     let data = archive.read_file("tiny.dds").unwrap().unwrap();
     assert_eq!(u32::from_le_bytes(data[20..24].try_into().unwrap()), 32);
 }
@@ -541,7 +547,7 @@ fn v3_unknown_compression_code_means_zip() {
         chunk_offset: 72,
         ..TinyArchiveOptions::default()
     });
-    let archive = Archive::read(&bytes).unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
     assert_eq!(archive.info().version, ArchiveVersion::v3);
     assert_eq!(archive.info().compression_format, Ba2CompressionFormat::Zip);
 }
@@ -555,7 +561,7 @@ fn v3_compression_code_three_means_lz4() {
         chunk_offset: 72,
         ..TinyArchiveOptions::default()
     });
-    let archive = Archive::read(&bytes).unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
     assert_eq!(archive.info().compression_format, Ba2CompressionFormat::LZ4);
 }
 
@@ -571,7 +577,7 @@ fn extracts_synthetic_zlib_chunk() {
         payload: &payload,
         ..TinyArchiveOptions::default()
     });
-    let archive = Archive::read(&bytes).unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
     assert_eq!(
         archive.read_entry(&archive.entries()[0]).unwrap(),
         b"compressed hello"
@@ -588,7 +594,7 @@ fn extracts_synthetic_zlib_chunk() {
 
 #[test]
 fn extracts_ba2_archive_to_directory() {
-    let archive = Archive::read(&tiny_archive(TinyArchiveOptions {
+    let archive = Archive::from_slice(&tiny_archive(TinyArchiveOptions {
         name: Some(b"textures/hello.txt"),
         chunk_offset: 60 + 2 + u64::try_from(b"textures/hello.txt".len()).unwrap(),
         ..TinyArchiveOptions::default()
@@ -606,7 +612,7 @@ fn extracts_ba2_archive_to_directory() {
 
 #[test]
 fn ba2_extract_to_rejects_parent_directory_paths() {
-    let archive = Archive::read(&tiny_archive(TinyArchiveOptions {
+    let archive = Archive::from_slice(&tiny_archive(TinyArchiveOptions {
         name: Some(b"../evil.txt"),
         chunk_offset: 60 + 2 + u64::try_from(b"../evil.txt".len()).unwrap(),
         ..TinyArchiveOptions::default()
@@ -622,7 +628,7 @@ fn ba2_extract_to_rejects_parent_directory_paths() {
 
 #[test]
 fn ba2_extract_to_rejects_colon_paths() {
-    let archive = Archive::read(&tiny_archive(TinyArchiveOptions {
+    let archive = Archive::from_slice(&tiny_archive(TinyArchiveOptions {
         name: Some(b"textures/bad:name.txt"),
         chunk_offset: 60 + 2 + u64::try_from(b"textures/bad:name.txt".len()).unwrap(),
         ..TinyArchiveOptions::default()
@@ -638,7 +644,7 @@ fn ba2_extract_to_rejects_colon_paths() {
 
 #[test]
 fn ba2_extract_to_rejects_unnamed_entries() {
-    let archive = Archive::read(&tiny_archive(TinyArchiveOptions {
+    let archive = Archive::from_slice(&tiny_archive(TinyArchiveOptions {
         name: None,
         string_table_offset: 0,
         ..TinyArchiveOptions::default()
@@ -663,7 +669,7 @@ fn detects_zlib_decompression_size_mismatch() {
         payload: &payload,
         ..TinyArchiveOptions::default()
     });
-    let archive = Archive::read(&bytes).unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
     assert!(matches!(
         archive.read_entry(&archive.entries()[0]),
         Err(Error::DecompressionSizeMismatch {
@@ -685,7 +691,7 @@ fn failed_zlib_decompression_does_not_leave_partial_output() {
         payload: &payload,
         ..TinyArchiveOptions::default()
     });
-    let archive = Archive::read(&bytes).unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
     let mut out = b"prefix".to_vec();
     assert!(
         archive
@@ -708,7 +714,7 @@ fn rejects_synthetic_zlib_trailing_data() {
         payload: &payload,
         ..TinyArchiveOptions::default()
     });
-    let archive = Archive::read(&bytes).unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
     assert!(matches!(
         archive.read_entry(&archive.entries()[0]),
         Err(Error::TrailingCompressedData)
@@ -729,7 +735,7 @@ fn extracts_synthetic_lz4_chunk() {
         payload: &payload,
         ..TinyArchiveOptions::default()
     });
-    let archive = Archive::read(&bytes).unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
     assert_eq!(
         archive.read_entry(&archive.entries()[0]).unwrap(),
         b"lz4 says hello"
@@ -758,7 +764,7 @@ fn detects_lz4_decompression_size_mismatch() {
         payload: &payload,
         ..TinyArchiveOptions::default()
     });
-    let archive = Archive::read(&bytes).unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
     assert!(matches!(
         archive.read_entry(&archive.entries()[0]),
         Err(Error::DecompressionSizeMismatch {

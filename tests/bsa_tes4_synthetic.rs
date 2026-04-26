@@ -182,7 +182,7 @@ fn accepts_supported_tes4_versions() {
         (104, ArchiveVersion::v104),
         (105, ArchiveVersion::v105),
     ] {
-        let archive = Archive::read(&tiny_tes4_header(raw)).unwrap();
+        let archive = Archive::from_slice(&tiny_tes4_header(raw)).unwrap();
         assert_eq!(archive.info().version, version);
     }
 }
@@ -191,7 +191,7 @@ fn accepts_supported_tes4_versions() {
 fn rejects_truncated_tes4_headers_as_unexpected_eof() {
     for bytes in [&b""[..], &b"BSA\0"[..], &tiny_tes4_header(104)[..20]] {
         assert!(
-            matches!(Archive::read(bytes), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof)
+            matches!(Archive::from_slice(bytes), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof)
         );
     }
 }
@@ -199,7 +199,7 @@ fn rejects_truncated_tes4_headers_as_unexpected_eof() {
 #[test]
 fn rejects_unsupported_tes4_version() {
     assert!(matches!(
-        Archive::read(&tiny_tes4_header(42)),
+        Archive::from_slice(&tiny_tes4_header(42)),
         Err(Error::InvalidVersion(42))
     ));
 }
@@ -209,7 +209,7 @@ fn rejects_bad_tes4_header_size() {
     let mut bytes = tiny_tes4_header(104);
     bytes[8..12].copy_from_slice(&204_u32.to_le_bytes());
     assert!(matches!(
-        Archive::read(&bytes),
+        Archive::from_slice(&bytes),
         Err(Error::InvalidHeaderSize(204))
     ));
 }
@@ -220,7 +220,7 @@ fn rejects_tes4_xbox_archive_flag_at_parse_time() {
     write_u32(&mut bytes, 12, 3 | (1 << 6));
 
     assert!(matches!(
-        Archive::read(&bytes),
+        Archive::from_slice(&bytes),
         Err(Error::NotImplemented("TES4 Xbox archive layout"))
     ));
 }
@@ -231,14 +231,14 @@ fn rejects_tes4_xmem_compression_flag_at_parse_time() {
     write_u32(&mut bytes, 12, 3 | (1 << 2) | (1 << 9));
 
     assert!(matches!(
-        Archive::read(&bytes),
+        Archive::from_slice(&bytes),
         Err(Error::NotImplemented("TES4 XMem compression"))
     ));
 }
 
 #[test]
 fn parses_synthetic_tes4_index() {
-    let archive = Archive::read(&tiny_tes4_index()).unwrap();
+    let archive = Archive::from_slice(&tiny_tes4_index()).unwrap();
     let entry = &archive.entries()[0];
     assert_eq!(entry.path().unwrap(), "data\\file.txt");
     assert_eq!(entry.folder().unwrap(), "data");
@@ -251,7 +251,7 @@ fn parses_synthetic_tes4_index() {
 
 #[test]
 fn parses_hash_only_tes4_index_for_hash_lookup() {
-    let archive = Archive::read(&tiny_hash_only_tes4_index()).unwrap();
+    let archive = Archive::from_slice(&tiny_hash_only_tes4_index()).unwrap();
     let entry = &archive.entries()[0];
 
     assert_eq!(entry.path(), None);
@@ -273,7 +273,7 @@ fn parses_hash_only_tes4_index_for_hash_lookup() {
 
 #[test]
 fn hash_only_tes4_extract_to_reports_missing_paths() {
-    let archive = Archive::read(&tiny_hash_only_tes4_index()).unwrap();
+    let archive = Archive::from_slice(&tiny_hash_only_tes4_index()).unwrap();
     let out = output_dir("tes4-hash-only");
 
     assert!(matches!(
@@ -285,7 +285,7 @@ fn hash_only_tes4_extract_to_reports_missing_paths() {
 
 #[test]
 fn recovers_tes4_paths_from_embedded_file_names() {
-    let archive = Archive::read(&tiny_embedded_name_tes4_index()).unwrap();
+    let archive = Archive::from_slice(&tiny_embedded_name_tes4_index()).unwrap();
     let entry = &archive.entries()[0];
 
     assert_eq!(entry.path().unwrap(), "data\\file.txt");
@@ -300,7 +300,7 @@ fn recovers_tes4_paths_from_embedded_file_names() {
 
 #[test]
 fn extracts_hash_only_tes4_archive_with_path_dictionary() {
-    let archive = Archive::read(&tiny_hash_only_tes4_index()).unwrap();
+    let archive = Archive::from_slice(&tiny_hash_only_tes4_index()).unwrap();
     let out = output_dir("tes4-hash-dictionary");
 
     assert_eq!(
@@ -321,7 +321,7 @@ fn extracts_hash_only_tes4_archive_with_path_dictionary() {
 
 #[test]
 fn tes4_lookup_uses_openmw_style_path_normalization() {
-    let archive = Archive::read(&tiny_tes4_index_with_version_names_and_payload(
+    let archive = Archive::from_slice(&tiny_tes4_index_with_version_names_and_payload(
         104,
         0,
         b"\\Data//Meshes",
@@ -348,7 +348,7 @@ fn file_data_offset_ignores_secondary_archive_flag() {
     let offset = u32::from_le_bytes(bytes[70..74].try_into().unwrap());
     write_u32(&mut bytes, 70, offset | (1 << 31));
 
-    let archive = Archive::read(&bytes).unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
 
     assert_eq!(archive.entries()[0].file().data_offset, offset);
     assert_eq!(
@@ -362,12 +362,15 @@ fn rejects_v105_folder_record_offset_outside_archive() {
     let mut bytes = tiny_tes4_index_with_version_and_payload(105, 0, b"payload");
     write_u32(&mut bytes, 56, 1);
 
-    assert!(matches!(Archive::read(&bytes), Err(Error::OutOfBounds)));
+    assert!(matches!(
+        Archive::from_slice(&bytes),
+        Err(Error::OutOfBounds)
+    ));
 }
 
 #[test]
 fn extracts_tes4_archive_to_directory() {
-    let archive = Archive::read(&tiny_tes4_index()).unwrap();
+    let archive = Archive::from_slice(&tiny_tes4_index()).unwrap();
     let out = output_dir("tes4");
 
     assert_eq!(archive.extract_to(&out).unwrap(), 7);
@@ -380,7 +383,7 @@ fn extracts_tes4_archive_to_directory() {
 
 #[test]
 fn extracts_tes4_archive_to_decoded_filesystem_paths() {
-    let archive = Archive::read(&tiny_tes4_index_with_version_names_and_payload(
+    let archive = Archive::from_slice(&tiny_tes4_index_with_version_names_and_payload(
         104,
         0,
         b"data",
@@ -409,8 +412,8 @@ fn writes_tes4_archive_from_bytes() {
     builder.add_bytes("Meshes/Foo.NIF", b"mesh").unwrap();
     builder.add_bytes("textures/bar.dds", b"texture").unwrap();
 
-    let bytes = builder.into_vec().unwrap();
-    let archive = Archive::read(&bytes).unwrap();
+    let bytes = builder.to_vec().unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
 
     assert_eq!(archive.info().version, ArchiveVersion::v104);
     assert_eq!(archive.len(), 2);
@@ -442,7 +445,7 @@ fn writes_tes4_v103_archive_from_bytes() {
     builder.set_version(ArchiveVersion::v103);
     builder.add_bytes("data/file.txt", b"payload").unwrap();
 
-    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
 
     assert_eq!(archive.info().version, ArchiveVersion::v103);
     assert_eq!(
@@ -457,7 +460,7 @@ fn writes_tes4_v105_archive_from_bytes() {
     builder.set_version(ArchiveVersion::v105);
     builder.add_bytes("data/file.txt", b"payload").unwrap();
 
-    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
 
     assert_eq!(archive.info().version, ArchiveVersion::v105);
     assert_eq!(
@@ -480,7 +483,7 @@ fn writes_compressed_tes4_v104_archive_from_bytes() {
         .add_bytes("data/file.txt", b"payload payload payload")
         .unwrap();
 
-    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
 
     assert!(
         archive
@@ -503,7 +506,7 @@ fn writes_compressed_tes4_v105_archive_from_bytes() {
         .add_bytes("data/file.txt", b"payload payload payload")
         .unwrap();
 
-    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
 
     assert_eq!(archive.info().version, ArchiveVersion::v105);
     assert!(
@@ -533,7 +536,7 @@ fn tes4_writer_can_toggle_per_file_compression() {
         .add_bytes_with_compression("plain.txt", b"plain payload", CompressionOverride::Store)
         .unwrap();
 
-    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
 
     let compressed = archive.get("compressed.txt").unwrap().file();
     let plain = archive.get("plain.txt").unwrap().file();
@@ -561,7 +564,7 @@ fn tes4_writer_add_dir_follows_file_symlinks_at_relative_path() {
 
     let mut builder = Builder::new();
     builder.add_dir(&root).unwrap();
-    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
 
     assert_eq!(
         archive.read_file("something.dds").unwrap().unwrap(),
@@ -578,7 +581,7 @@ fn tes4_writer_encodes_legacy_text_paths() {
         .add_encoded_path("texts/María.txt", FilenameEncoding::Windows1252, b"hola")
         .unwrap();
 
-    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
 
     assert_eq!(
         archive.read_file(b"texts/mar\xeda.txt").unwrap().unwrap(),
@@ -591,7 +594,7 @@ fn writes_tes4_root_folder_archive() {
     let mut builder = Builder::new();
     builder.add_bytes("file.txt", b"hello").unwrap();
 
-    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
 
     assert_eq!(archive.entries()[0].folder().unwrap(), "");
     assert_eq!(archive.entries()[0].name().unwrap(), "file.txt");
@@ -608,7 +611,7 @@ fn tes4_writer_output_is_deterministic() {
     second.add_bytes("a.txt", b"a").unwrap();
     second.add_bytes("b.txt", b"b").unwrap();
 
-    assert_eq!(first.into_vec().unwrap(), second.into_vec().unwrap());
+    assert_eq!(first.to_vec().unwrap(), second.to_vec().unwrap());
 }
 
 #[test]
@@ -635,7 +638,7 @@ fn tes4_writer_rejects_unsafe_paths() {
 
 #[test]
 fn tes4_extract_to_rejects_parent_directory_paths() {
-    let archive = Archive::read(&tiny_tes4_index_with_version_names_and_payload(
+    let archive = Archive::from_slice(&tiny_tes4_index_with_version_names_and_payload(
         104,
         0,
         b"data",
@@ -653,7 +656,7 @@ fn tes4_extract_to_rejects_parent_directory_paths() {
 
 #[test]
 fn tes4_extract_to_rejects_colon_paths() {
-    let archive = Archive::read(&tiny_tes4_index_with_version_names_and_payload(
+    let archive = Archive::from_slice(&tiny_tes4_index_with_version_names_and_payload(
         104,
         0,
         b"data",
@@ -674,7 +677,7 @@ fn rejects_truncated_tes4_folder_record() {
     let mut bytes = tiny_tes4_index();
     bytes.truncate(40);
     assert!(
-        matches!(Archive::read(&bytes), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof)
+        matches!(Archive::from_slice(&bytes), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof)
     );
 }
 
@@ -683,7 +686,7 @@ fn rejects_truncated_tes4_file_name_block() {
     let mut bytes = tiny_tes4_index();
     bytes.truncate(64);
     assert!(matches!(
-        Archive::read(&bytes),
+        Archive::from_slice(&bytes),
         Err(Error::OutOfBounds | Error::Io(_))
     ));
 }
@@ -693,7 +696,7 @@ fn rejects_file_name_table_that_bleeds_into_payload() {
     let mut bytes = tiny_tes4_index();
     bytes[82] = b'X';
     assert!(
-        matches!(Archive::read(&bytes), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof)
+        matches!(Archive::from_slice(&bytes), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof)
     );
 }
 
@@ -701,7 +704,10 @@ fn rejects_file_name_table_that_bleeds_into_payload() {
 fn rejects_folder_file_count_that_disagrees_with_header() {
     let mut bytes = tiny_tes4_index();
     write_u32(&mut bytes, 20, 2);
-    assert!(matches!(Archive::read(&bytes), Err(Error::OutOfBounds)));
+    assert!(matches!(
+        Archive::from_slice(&bytes),
+        Err(Error::OutOfBounds)
+    ));
 }
 
 #[test]
@@ -709,7 +715,7 @@ fn rejects_folder_name_without_trailing_nul() {
     let mut bytes = tiny_tes4_index();
     bytes[57] = b'X';
     assert!(
-        matches!(Archive::read(&bytes), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof)
+        matches!(Archive::from_slice(&bytes), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof)
     );
 }
 
@@ -717,21 +723,27 @@ fn rejects_folder_name_without_trailing_nul() {
 fn rejects_folder_record_offset_before_folder_block() {
     let mut bytes = tiny_tes4_index();
     write_u32(&mut bytes, 48, 40);
-    assert!(matches!(Archive::read(&bytes), Err(Error::OutOfBounds)));
+    assert!(matches!(
+        Archive::from_slice(&bytes),
+        Err(Error::OutOfBounds)
+    ));
 }
 
 #[test]
 fn rejects_file_payload_that_overlaps_index() {
     let mut bytes = tiny_tes4_index();
     write_u32(&mut bytes, 70, 36);
-    assert!(matches!(Archive::read(&bytes), Err(Error::OutOfBounds)));
+    assert!(matches!(
+        Archive::from_slice(&bytes),
+        Err(Error::OutOfBounds)
+    ));
 }
 
 #[test]
 fn file_size_checked_flag_is_not_part_of_stored_size() {
     let mut bytes = tiny_tes4_index();
     write_u32(&mut bytes, 66, 7 | (1 << 31));
-    let archive = Archive::read(&bytes).unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
     let record = archive.entries()[0].file();
     assert_eq!(record.stored_size, 7);
     assert!(record.checked);
@@ -742,7 +754,7 @@ fn entry_path_preserves_archive_spelling_while_lookup_normalizes() {
     let mut bytes = tiny_tes4_index();
     bytes[53..58].copy_from_slice(b"Data\0");
     bytes[74..83].copy_from_slice(b"File.TXT\0");
-    let archive = Archive::read(&bytes).unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
     assert_eq!(archive.entries()[0].path().unwrap(), "Data\\File.TXT");
     assert!(archive.get("data/file.txt").is_some());
 }
@@ -753,14 +765,14 @@ fn rejects_xmem_compressed_files_at_parse_time() {
     write_u32(&mut bytes, 12, 3 | (1 << 2) | (1 << 9));
 
     assert!(matches!(
-        Archive::read(&bytes),
+        Archive::from_slice(&bytes),
         Err(Error::NotImplemented("TES4 XMem compression"))
     ));
 }
 
 #[test]
 fn embedded_name_skip_requires_compressed_size_prefix_after_name() {
-    let archive = Archive::read(&tiny_tes4_index_with_payload(
+    let archive = Archive::from_slice(&tiny_tes4_index_with_payload(
         (1 << 2) | (1 << 8),
         b"\x04name",
     ))
@@ -775,14 +787,17 @@ fn embedded_name_skip_requires_compressed_size_prefix_after_name() {
 fn rejects_file_data_offset_outside_archive() {
     let mut bytes = tiny_tes4_index();
     write_u32(&mut bytes, 70, 0x0000_ffff);
-    assert!(matches!(Archive::read(&bytes), Err(Error::OutOfBounds)));
+    assert!(matches!(
+        Archive::from_slice(&bytes),
+        Err(Error::OutOfBounds)
+    ));
 }
 
 #[test]
 fn compression_toggle_disables_archive_default_compression() {
     let mut bytes = tiny_tes4_index_with_payload(1 << 2, b"payload");
     write_u32(&mut bytes, 66, 7 | (1 << 30));
-    let archive = Archive::read(&bytes).unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
     assert_eq!(
         archive.read_file("data/file.txt").unwrap().unwrap(),
         b"payload"
@@ -801,7 +816,7 @@ fn compression_toggle_enables_file_compression() {
         66,
         u32::try_from(payload.len()).unwrap() | (1 << 30),
     );
-    let archive = Archive::read(&bytes).unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
     assert_eq!(
         archive.read_file("data/file.txt").unwrap().unwrap(),
         b"compressed payload"
@@ -814,7 +829,7 @@ fn extracts_synthetic_zlib_tes4_file() {
     let mut payload = Vec::new();
     push_u32(&mut payload, 18);
     payload.extend_from_slice(&compressed);
-    let archive = Archive::read(&tiny_tes4_index_with_payload(1 << 2, &payload)).unwrap();
+    let archive = Archive::from_slice(&tiny_tes4_index_with_payload(1 << 2, &payload)).unwrap();
     assert_eq!(
         archive.read_file("data/file.txt").unwrap().unwrap(),
         b"compressed payload"
@@ -833,7 +848,7 @@ fn detects_synthetic_zlib_size_mismatch() {
     let mut payload = Vec::new();
     push_u32(&mut payload, 99);
     payload.extend_from_slice(&compressed);
-    let archive = Archive::read(&tiny_tes4_index_with_payload(1 << 2, &payload)).unwrap();
+    let archive = Archive::from_slice(&tiny_tes4_index_with_payload(1 << 2, &payload)).unwrap();
     assert!(matches!(
         archive.read_file("data/file.txt"),
         Err(Error::DecompressionSizeMismatch {
@@ -850,7 +865,7 @@ fn rejects_synthetic_zlib_trailing_data() {
     push_u32(&mut payload, 18);
     payload.extend_from_slice(&compressed);
     payload.push(0);
-    let archive = Archive::read(&tiny_tes4_index_with_payload(1 << 2, &payload)).unwrap();
+    let archive = Archive::from_slice(&tiny_tes4_index_with_payload(1 << 2, &payload)).unwrap();
     assert!(matches!(
         archive.read_file("data/file.txt"),
         Err(Error::TrailingCompressedData)
@@ -863,7 +878,7 @@ fn failed_decompression_does_not_leave_partial_output() {
     let mut payload = Vec::new();
     push_u32(&mut payload, 99);
     payload.extend_from_slice(&compressed);
-    let archive = Archive::read(&tiny_tes4_index_with_payload(1 << 2, &payload)).unwrap();
+    let archive = Archive::from_slice(&tiny_tes4_index_with_payload(1 << 2, &payload)).unwrap();
     let mut out = b"prefix".to_vec();
     assert!(
         archive
@@ -879,7 +894,7 @@ fn extracts_synthetic_lz4_frame_tes4_file() {
     let mut payload = Vec::new();
     push_u32(&mut payload, 18);
     payload.extend_from_slice(&compressed);
-    let archive = Archive::read(&tiny_tes4_index_with_version_and_payload(
+    let archive = Archive::from_slice(&tiny_tes4_index_with_version_and_payload(
         105,
         1 << 2,
         &payload,
@@ -903,7 +918,7 @@ fn rejects_synthetic_lz4_block_when_frame_is_required() {
     let mut payload = Vec::new();
     push_u32(&mut payload, 18);
     payload.extend_from_slice(&compressed);
-    let archive = Archive::read(&tiny_tes4_index_with_version_and_payload(
+    let archive = Archive::from_slice(&tiny_tes4_index_with_version_and_payload(
         105,
         1 << 2,
         &payload,
@@ -921,7 +936,7 @@ fn detects_synthetic_lz4_frame_size_mismatch() {
     let mut payload = Vec::new();
     push_u32(&mut payload, 99);
     payload.extend_from_slice(&compressed);
-    let archive = Archive::read(&tiny_tes4_index_with_version_and_payload(
+    let archive = Archive::from_slice(&tiny_tes4_index_with_version_and_payload(
         105,
         1 << 2,
         &payload,
@@ -943,7 +958,7 @@ fn rejects_synthetic_lz4_frame_trailing_data() {
     push_u32(&mut payload, 18);
     payload.extend_from_slice(&compressed);
     payload.push(0);
-    let archive = Archive::read(&tiny_tes4_index_with_version_and_payload(
+    let archive = Archive::from_slice(&tiny_tes4_index_with_version_and_payload(
         105,
         1 << 2,
         &payload,

@@ -139,7 +139,7 @@ impl Archive {
     /// # Errors
     ///
     /// Returns an error when the slice is not a valid supported BA2 archive.
-    pub fn read(bytes: &[u8]) -> Result<Self> {
+    pub fn from_slice(bytes: &[u8]) -> Result<Self> {
         Self::from_vec(bytes.to_vec())
     }
 
@@ -367,7 +367,7 @@ impl Archive {
     }
 
     pub(super) fn from_parts(storage: Storage, info: ArchiveInfo, entries: Vec<Entry>) -> Self {
-        let mut lookup = HashMap::new();
+        let mut lookup = HashMap::with_capacity(entries.len());
         for (index, entry) in entries.iter().enumerate() {
             lookup.entry(entry.hash).or_insert(index);
         }
@@ -417,6 +417,6 @@ impl ArchiveFile {
 impl TryFrom<Copied<'_>> for Archive {
     type Error = Error;
     fn try_from(value: Copied<'_>) -> Result<Self> {
-        Self::read(value.0)
+        Self::from_slice(value.0)
     }
 }

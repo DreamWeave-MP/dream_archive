@@ -146,7 +146,7 @@ impl Builder {
     ///
     /// Returns an error if archive integer fields overflow their TES3 on-disk
     /// sizes or output allocation fails.
-    pub fn into_vec(&self) -> Result<Vec<u8>> {
+    pub fn to_vec(&self) -> Result<Vec<u8>> {
         let mut out = Vec::new();
         out.try_reserve_exact(self.archive_size_hint()?)?;
         self.write_to(&mut out)?;
