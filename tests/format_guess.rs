@@ -1,5 +1,15 @@
 use dream_archive::FileFormat;
 
+#[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
+fn output_dir(name: &str) -> std::path::PathBuf {
+    let path = std::env::temp_dir().join(format!(
+        "dream-archive-format-guess-{name}-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&path);
+    path
+}
+
 #[test]
 fn ba2_guess_respects_feature_gate() {
     let mut bytes = &b"BTDXpayload"[..];
@@ -57,9 +67,29 @@ fn top_level_archive_reads_ba2_from_vec() {
     assert_eq!(archive.len(), 1);
     assert_eq!(archive.entries().len(), 1);
     assert_eq!(
+        archive.entries().next().unwrap().path().unwrap(),
+        "data\\file.txt"
+    );
+    assert_eq!(
         archive.read_file_required("DATA/FILE.TXT").unwrap(),
         b"payload"
     );
+    let mut out = Vec::new();
+    assert_eq!(
+        archive
+            .extract_file_required("data/file.txt", &mut out)
+            .unwrap(),
+        7
+    );
+    assert_eq!(out, b"payload");
+
+    let dir = output_dir("ba2");
+    assert_eq!(archive.extract_to(&dir).unwrap(), 7);
+    assert_eq!(
+        std::fs::read(dir.join("data/file.txt")).unwrap(),
+        b"payload"
+    );
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[cfg(feature = "bsa-tes3")]
@@ -76,9 +106,29 @@ fn top_level_archive_reads_tes3_bsa_from_vec() {
     );
     assert_eq!(archive.len(), 1);
     assert_eq!(
+        archive.entries().next().unwrap().path().unwrap(),
+        "data\\file.txt"
+    );
+    assert_eq!(
         archive.read_file_required("DATA/FILE.TXT").unwrap(),
         b"payload"
     );
+    let mut out = Vec::new();
+    assert_eq!(
+        archive
+            .extract_file_required("data/file.txt", &mut out)
+            .unwrap(),
+        7
+    );
+    assert_eq!(out, b"payload");
+
+    let dir = output_dir("tes3");
+    assert_eq!(archive.extract_to(&dir).unwrap(), 7);
+    assert_eq!(
+        std::fs::read(dir.join("data/file.txt")).unwrap(),
+        b"payload"
+    );
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[cfg(feature = "bsa-tes4")]
@@ -95,7 +145,43 @@ fn top_level_archive_reads_tes4_bsa_from_vec() {
     );
     assert_eq!(archive.len(), 1);
     assert_eq!(
+        archive.entries().next().unwrap().path().unwrap(),
+        "data\\file.txt"
+    );
+    assert_eq!(
         archive.read_file_required("DATA/FILE.TXT").unwrap(),
+        b"payload"
+    );
+    let mut out = Vec::new();
+    assert_eq!(
+        archive
+            .extract_file_required("data/file.txt", &mut out)
+            .unwrap(),
+        7
+    );
+    assert_eq!(out, b"payload");
+
+    let dir = output_dir("tes4");
+    assert_eq!(archive.extract_to(&dir).unwrap(), 7);
+    assert_eq!(
+        std::fs::read(dir.join("data/file.txt")).unwrap(),
+        b"payload"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[cfg(feature = "bsa-tes4")]
+#[test]
+fn top_level_hash_only_tes4_entry_has_no_path() {
+    let mut builder = dream_archive::Tes4BsaBuilder::new();
+    builder.set_name_mode(dream_archive::bsa::tes4::NameMode::HashOnly);
+    builder.add_bytes("data/file.txt", b"payload").unwrap();
+
+    let archive = dream_archive::Archive::from_vec(builder.to_vec().unwrap()).unwrap();
+
+    assert_eq!(archive.entries().next().unwrap().path(), None);
+    assert_eq!(
+        archive.read_file_required("data/file.txt").unwrap(),
         b"payload"
     );
 }

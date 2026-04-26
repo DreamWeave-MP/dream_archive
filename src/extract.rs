@@ -182,6 +182,52 @@ pub(crate) fn ensure_parent_dirs(paths: &[PathBuf]) -> io::Result<()> {
 
 #[cfg(feature = "parallel")]
 pub(crate) fn has_duplicate_paths(paths: &[PathBuf]) -> bool {
-    let mut seen = HashSet::new();
-    paths.iter().any(|path| !seen.insert(path.as_path()))
+    let mut exact_paths = HashSet::new();
+    let mut collision_keys = HashSet::new();
+    paths.iter().any(|path| {
+        !exact_paths.insert(path.as_path())
+            || !collision_keys.insert(extraction_collision_key(path))
+    })
+}
+
+#[cfg(feature = "parallel")]
+fn extraction_collision_key(path: &Path) -> Vec<u8> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt as _;
+        path.as_os_str()
+            .as_bytes()
+            .iter()
+            .map(u8::to_ascii_lowercase)
+            .collect()
+    }
+    #[cfg(not(unix))]
+    {
+        path.to_string_lossy()
+            .bytes()
+            .map(|byte| byte.to_ascii_lowercase())
+            .collect()
+    }
+}
+
+#[cfg(all(test, feature = "parallel"))]
+mod tests {
+    use super::has_duplicate_paths;
+    use std::path::PathBuf;
+
+    #[test]
+    fn duplicate_detection_catches_exact_paths() {
+        assert!(has_duplicate_paths(&[
+            PathBuf::from("out/Data/Foo.txt"),
+            PathBuf::from("out/Data/Foo.txt"),
+        ]));
+    }
+
+    #[test]
+    fn duplicate_detection_catches_ascii_case_conflicts() {
+        assert!(has_duplicate_paths(&[
+            PathBuf::from("out/Data/Foo.txt"),
+            PathBuf::from("out/data/foo.txt"),
+        ]));
+    }
 }

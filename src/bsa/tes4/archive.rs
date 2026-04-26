@@ -304,6 +304,12 @@ impl Archive {
 
     /// Extract an entry into a writer.
     ///
+    /// Compressed entries are decompressed into a temporary buffer before they
+    /// are written so that malformed compressed data does not leave partial
+    /// bytes in arbitrary caller-owned writers. Use
+    /// [`Self::extract_entry_to_path`] for streaming filesystem extraction with
+    /// temporary-file rollback.
+    ///
     /// # Errors
     ///
     /// Returns an error if the entry points outside the archive, uses an
@@ -575,9 +581,11 @@ impl Archive {
 
     fn index_for_path(&self, path: &[u8]) -> Option<&usize> {
         let normalized = normalize_lookup_path(path);
-        self.lookup
-            .get(normalized.as_slice())
-            .or_else(|| self.hash_lookup.get(&path_hash(path)))
+        if self.lookup.is_empty() {
+            self.hash_lookup.get(&path_hash(path))
+        } else {
+            self.lookup.get(normalized.as_slice())
+        }
     }
 
     fn index_for_path_with_scratch<'a>(
@@ -586,9 +594,11 @@ impl Archive {
         normalized: &mut Vec<u8>,
     ) -> Option<&'a usize> {
         normalize_lookup_path_into(normalized, path);
-        self.lookup
-            .get(normalized.as_slice())
-            .or_else(|| self.hash_lookup.get(&path_hash(path)))
+        if self.lookup.is_empty() {
+            self.hash_lookup.get(&path_hash(path))
+        } else {
+            self.lookup.get(normalized.as_slice())
+        }
     }
 
     fn slice(&self, start: usize, len: usize) -> Result<&[u8]> {
