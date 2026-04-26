@@ -40,14 +40,18 @@ fn extracts_uncompressed_tes4_file() {
 }
 
 #[test]
-fn compressed_tes4_extraction_is_explicitly_unsupported() {
+fn extracts_lz4_frame_compressed_tes4_files() {
     let archive =
         Archive::open_path(fixture("tests/fixtures/bsa/tes4/valid/test_105.bsa")).unwrap();
 
-    assert!(matches!(
-        archive.read_entry(&archive.entries()[0]),
-        Err(Error::NotImplemented("TES4 LZ4 compressed files"))
-    ));
+    assert_eq!(
+        archive.read_file("preview.png").unwrap().unwrap(),
+        std::fs::read(fixture("tests/fixtures/bsa/tes4/valid/Preview.png")).unwrap()
+    );
+    assert_eq!(
+        archive.read_file("license.txt").unwrap().unwrap(),
+        std::fs::read(fixture("tests/fixtures/bsa/tes4/valid/License.txt")).unwrap()
+    );
 }
 
 #[test]

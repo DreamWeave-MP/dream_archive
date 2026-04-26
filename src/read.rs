@@ -35,6 +35,10 @@ impl<'a> Cursor<'a> {
         Ok(())
     }
 
+    pub(crate) fn position(&self) -> usize {
+        self.pos
+    }
+
     pub(crate) fn bytes(&mut self, len: usize) -> Result<&'a [u8]> {
         let end = self.pos.checked_add(len).ok_or(Error::OutOfBounds)?;
         let bytes = self.bytes.get(self.pos..end).ok_or(Error::UnexpectedEof)?;

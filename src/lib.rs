@@ -1,8 +1,8 @@
-//! Small, pure-Rust reader for Bethesda BA2 archives.
+//! Small, pure-Rust reader for Bethesda archive formats.
 //!
-//! The implementation is intentionally read-oriented. It targets the same BA2
-//! runtime operations `OpenMW` needs: detect, list, hash lookup, extract GNRL
-//! files, and reconstruct DDS streams from DX10 texture archives.
+//! The implementation is intentionally read-oriented. It targets the runtime
+//! operations `OpenMW` needs: detect, list, lookup, extract files, and
+//! reconstruct DDS streams from BA2 DX10 texture archives.
 //!
 //! # Example
 //!

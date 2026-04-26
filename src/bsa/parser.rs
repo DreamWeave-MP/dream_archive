@@ -34,12 +34,22 @@ fn read_header(bytes: &[u8]) -> Result<ArchiveInfo> {
         return Err(Error::InvalidHeaderSize(folder_record_offset));
     }
 
-    let archive_flags = ArchiveFlags::from_bits_truncate(cursor.u32()?);
+    let archive_flags = ArchiveFlags::from_bits_retain(cursor.u32()?);
+    if !archive_flags.contains(ArchiveFlags::DIRECTORY_STRINGS) {
+        return Err(Error::NotImplemented(
+            "TES4 archives without directory name strings",
+        ));
+    }
+    if !archive_flags.contains(ArchiveFlags::FILE_STRINGS) {
+        return Err(Error::NotImplemented(
+            "TES4 archives without file name strings",
+        ));
+    }
     let folder_count = cursor.u32()?;
     let file_count = cursor.u32()?;
     let folder_names_len = cursor.u32()?;
     let file_names_len = cursor.u32()?;
-    let archive_types = ArchiveTypes::from_bits_truncate(cursor.u16()?);
+    let archive_types = ArchiveTypes::from_bits_retain(cursor.u16()?);
     let _padding = cursor.u16()?;
 
     Ok(ArchiveInfo {
@@ -57,24 +67,36 @@ fn read_header(bytes: &[u8]) -> Result<ArchiveInfo> {
 #[derive(Clone, Copy)]
 struct FolderRecord {
     file_count: u32,
+    file_records_offset: u32,
 }
 
 fn read_entries(bytes: &[u8], info: ArchiveInfo) -> Result<Vec<Entry>> {
     let mut cursor = Cursor::new(bytes);
     cursor.seek(info.folder_record_offset.try_into()?)?;
-    let mut folders = Vec::with_capacity(info.folder_count.try_into()?);
+    let folder_count = info.folder_count.try_into()?;
+    let mut folders = Vec::new();
+    folders.try_reserve_exact(folder_count)?;
+    let mut parsed_file_count = 0u32;
     for _ in 0..info.folder_count {
-        folders.push(read_folder_record(&mut cursor, info.version)?);
+        let folder = read_folder_record(&mut cursor, info.version)?;
+        parsed_file_count = parsed_file_count
+            .checked_add(folder.file_count)
+            .ok_or(Error::OutOfBounds)?;
+        folders.push(folder);
+    }
+    if parsed_file_count != info.file_count {
+        return Err(Error::OutOfBounds);
     }
 
-    let mut entries = Vec::with_capacity(info.file_count.try_into()?);
+    let mut entries = Vec::new();
+    entries.try_reserve_exact(info.file_count.try_into()?)?;
     for folder in folders {
-        let folder_name = if info.archive_flags.contains(ArchiveFlags::DIRECTORY_STRINGS) {
-            normalize_folder_name(read_bzstring(&mut cursor)?)
-        } else {
-            BString::new(Vec::new())
-        };
-        let mut records = Vec::with_capacity(folder.file_count.try_into()?);
+        if usize::try_from(folder.file_records_offset)? < cursor.position() {
+            return Err(Error::OutOfBounds);
+        }
+        let folder_name = normalize_folder_name(read_bzstring(&mut cursor)?);
+        let mut records = Vec::new();
+        records.try_reserve_exact(folder.file_count.try_into()?)?;
         for _ in 0..folder.file_count {
             records.push(read_file_record(&mut cursor)?);
         }
@@ -86,22 +108,43 @@ fn read_entries(bytes: &[u8], info: ArchiveInfo) -> Result<Vec<Entry>> {
     }
 
     let file_names_offset = compute_file_names_offset(bytes, info)?;
-    let mut names = Cursor::new(bytes);
-    names.seek(file_names_offset)?;
-    entries
+    if cursor.position() != file_names_offset {
+        return Err(Error::OutOfBounds);
+    }
+    let file_names_len: usize = info.file_names_len.try_into()?;
+    let file_names_end = file_names_offset
+        .checked_add(file_names_len)
+        .ok_or(Error::OutOfBounds)?;
+    let mut names = Cursor::new(
+        bytes
+            .get(file_names_offset..file_names_end)
+            .ok_or(Error::OutOfBounds)?,
+    );
+    let entries = entries
         .into_iter()
         .map(|(folder, record)| Ok(Entry::new(folder, read_zstring(&mut names)?, record)))
-        .collect::<Result<Vec<_>>>()
+        .collect::<Result<Vec<_>>>()?;
+    if names.position() != file_names_len {
+        return Err(Error::OutOfBounds);
+    }
+    for entry in &entries {
+        validate_file_extent(entry.file(), file_names_end, bytes.len())?;
+    }
+    Ok(entries)
 }
 
 fn read_folder_record(cursor: &mut Cursor<'_>, version: ArchiveVersion) -> Result<FolderRecord> {
     let _hash = cursor.bytes(8)?;
     let file_count = cursor.u32()?;
-    let _offset_or_padding = cursor.u32()?;
+    let mut file_records_offset = cursor.u32()?;
     if matches!(version, ArchiveVersion::v105) {
-        let _ = cursor.u64()?;
+        file_records_offset = cursor.u32()?;
+        let _padding = cursor.u32()?;
     }
-    Ok(FolderRecord { file_count })
+    Ok(FolderRecord {
+        file_count,
+        file_records_offset,
+    })
 }
 
 fn read_file_record(cursor: &mut Cursor<'_>) -> Result<FileRecord> {
@@ -110,9 +153,23 @@ fn read_file_record(cursor: &mut Cursor<'_>) -> Result<FileRecord> {
     let offset = cursor.u32()?;
     Ok(FileRecord {
         stored_size: size & !(1 << 30 | 1 << 31),
-        data_offset: offset & !(1 << 31),
+        data_offset: offset,
         compression_toggled: size & (1 << 30) != 0,
+        checked: size & (1 << 31) != 0,
     })
+}
+
+fn validate_file_extent(
+    record: FileRecord,
+    payload_start: usize,
+    archive_size: usize,
+) -> Result<()> {
+    let start: usize = record.data_offset.try_into()?;
+    let len: usize = record.stored_size.try_into()?;
+    if start < payload_start || start.checked_add(len).ok_or(Error::OutOfBounds)? > archive_size {
+        return Err(Error::OutOfBounds);
+    }
+    Ok(())
 }
 
 fn compute_file_names_offset(bytes: &[u8], info: ArchiveInfo) -> Result<usize> {
@@ -153,6 +210,9 @@ fn compute_file_names_offset(bytes: &[u8], info: ArchiveInfo) -> Result<usize> {
 fn read_bzstring(cursor: &mut Cursor<'_>) -> Result<BString> {
     let len = cursor.u8()? as usize;
     let bytes = cursor.bytes(len)?;
+    if !bytes.ends_with(&[0]) {
+        return Err(crate::read::Error::UnexpectedEof.into());
+    }
     Ok(BString::from(strip_nul(bytes)))
 }
 

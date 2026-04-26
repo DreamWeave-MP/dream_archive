@@ -2,8 +2,12 @@ use super::{Error, Result, parser};
 use crate::{Copied, storage::Storage};
 use bstr::{BStr, BString};
 use flate2::read::ZlibDecoder;
+use lz4_flex::frame::FrameDecoder;
+use std::collections::HashMap;
 use std::io::Read as _;
 use std::path::Path;
+
+const LZ4_FRAME_MAGIC: [u8; 4] = [0x04, 0x22, 0x4d, 0x18];
 
 /// Metadata read from a TES4-family BSA archive header.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -19,11 +23,15 @@ pub struct ArchiveInfo {
 }
 
 /// One file entry in a TES4-family BSA archive index.
+///
+/// Paths preserve the archive's spelling. Lookup through [`Archive::get`] and
+/// [`Archive::read_file`] is case-insensitive for ASCII and treats `/` as `\`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Entry {
     path: BString,
     folder: BString,
     name: BString,
+    lookup_path: BString,
     record: FileRecord,
 }
 
@@ -55,6 +63,7 @@ pub struct FileRecord {
     pub stored_size: u32,
     pub data_offset: u32,
     pub compression_toggled: bool,
+    pub checked: bool,
 }
 
 impl FileRecord {
@@ -87,7 +96,8 @@ impl ArchiveFlags {
     pub const XBOX_COMPRESSED: Self = Self(1 << 9);
 
     #[must_use]
-    pub const fn from_bits_truncate(bits: u32) -> Self {
+    /// Preserve all bits, including flags this crate does not currently name.
+    pub const fn from_bits_retain(bits: u32) -> Self {
         Self(bits)
     }
 
@@ -118,7 +128,8 @@ impl ArchiveTypes {
     pub const MISC: Self = Self(1 << 8);
 
     #[must_use]
-    pub const fn from_bits_truncate(bits: u16) -> Self {
+    /// Preserve all bits, including content-type flags this crate does not currently name.
+    pub const fn from_bits_retain(bits: u16) -> Self {
         Self(bits)
     }
 
@@ -139,6 +150,7 @@ pub struct Archive {
     storage: Storage,
     info: ArchiveInfo,
     entries: Vec<Entry>,
+    lookup: HashMap<BString, usize>,
 }
 
 impl Archive {
@@ -197,9 +209,9 @@ impl Archive {
     #[must_use]
     pub fn get(&self, path: impl AsRef<[u8]>) -> Option<&Entry> {
         let normalized = normalize_path(path.as_ref());
-        self.entries
-            .iter()
-            .find(|entry| entry.path.as_slice() == normalized.as_slice())
+        self.lookup
+            .get(normalized.as_slice())
+            .map(|&index| &self.entries[index])
     }
 
     /// Size in bytes of the mapped or owned archive data.
@@ -220,6 +232,7 @@ impl Archive {
         if entry.record.is_compressed(self.info.archive_flags) {
             self.decompress_entry(payload, out)
         } else {
+            out.try_reserve_exact(payload.len())?;
             out.extend_from_slice(payload);
             Ok(())
         }
@@ -248,10 +261,15 @@ impl Archive {
     }
 
     pub(super) fn from_parts(storage: Storage, info: ArchiveInfo, entries: Vec<Entry>) -> Self {
+        let mut lookup = HashMap::new();
+        for (index, entry) in entries.iter().enumerate() {
+            lookup.entry(entry.lookup_path.clone()).or_insert(index);
+        }
         Self {
             storage,
             info,
             entries,
+            lookup,
         }
     }
 
@@ -295,7 +313,7 @@ impl Archive {
             return Err(Error::NotImplemented("TES4 XMem compression"));
         }
         if self.info.version == ArchiveVersion::v105 {
-            return Err(Error::NotImplemented("TES4 LZ4 compressed files"));
+            return decompress_lz4_frame_payload(payload, out);
         }
         let Some((expected_bytes, compressed)) = payload.split_first_chunk::<4>() else {
             return Err(Error::OutOfBounds);
@@ -303,25 +321,70 @@ impl Archive {
         let expected = u32::from_le_bytes(*expected_bytes).try_into()?;
         let before = out.len();
         let mut decoder = ZlibDecoder::new(compressed);
-        decoder
-            .read_to_end(out)
-            .map_err(|error| Error::Zlib(error.to_string()))?;
-        let actual = out.len() - before;
-        if actual == expected {
+        read_decompressed(&mut decoder, expected, out, |error| {
+            Error::Zlib(error.to_string())
+        })?;
+        if decoder.total_in() == u64::try_from(compressed.len())? {
             Ok(())
         } else {
-            Err(Error::DecompressionSizeMismatch { expected, actual })
+            out.truncate(before);
+            Err(Error::TrailingCompressedData)
         }
+    }
+}
+
+fn decompress_lz4_frame_payload(payload: &[u8], out: &mut Vec<u8>) -> Result<()> {
+    let Some((expected_bytes, compressed)) = payload.split_first_chunk::<4>() else {
+        return Err(Error::OutOfBounds);
+    };
+    if !compressed.starts_with(&LZ4_FRAME_MAGIC) {
+        return Err(Error::InvalidLz4Frame);
+    }
+    let expected = u32::from_le_bytes(*expected_bytes).try_into()?;
+    let before = out.len();
+    let mut decoder = FrameDecoder::new(compressed);
+    read_decompressed(&mut decoder, expected, out, |error| {
+        Error::Lz4Frame(error.to_string())
+    })?;
+    if decoder.get_ref().is_empty() {
+        Ok(())
+    } else {
+        out.truncate(before);
+        Err(Error::TrailingCompressedData)
+    }
+}
+
+fn read_decompressed(
+    decoder: &mut impl std::io::Read,
+    expected: usize,
+    out: &mut Vec<u8>,
+    map_error: impl FnOnce(std::io::Error) -> Error,
+) -> Result<()> {
+    let before = out.len();
+    out.try_reserve_exact(expected)?;
+    let mut limited = decoder.take(expected as u64 + 1);
+    if let Err(error) = limited.read_to_end(out) {
+        out.truncate(before);
+        return Err(map_error(error));
+    }
+    let actual = out.len() - before;
+    if actual == expected {
+        Ok(())
+    } else {
+        out.truncate(before);
+        Err(Error::DecompressionSizeMismatch { expected, actual })
     }
 }
 
 impl Entry {
     pub(super) fn new(folder: BString, name: BString, record: FileRecord) -> Self {
         let path = join_path(&folder, &name);
+        let lookup_path = BString::from(normalize_path(&path));
         Self {
             path,
             folder,
             name,
+            lookup_path,
             record,
         }
     }
@@ -334,7 +397,7 @@ fn join_path(folder: &[u8], name: &[u8]) -> BString {
         path.push(b'\\');
     }
     path.extend_from_slice(name);
-    BString::from(normalize_path(&path))
+    BString::from(path)
 }
 
 fn normalize_path(path: &[u8]) -> Vec<u8> {
