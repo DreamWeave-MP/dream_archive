@@ -20,7 +20,7 @@ default = ["ba2", "bsa"]
 ba2 = ["dep:flate2", "dep:lz4_flex", "dep:memmap2"]
 bsa = ["bsa-tes3", "bsa-tes4"]
 bsa-tes3 = []
-bsa-tes4 = ["dep:flate2"]
+bsa-tes4 = ["dep:flate2", "dep:memmap2"]
 
 [[example]]
 name = "list_ba2"
@@ -41,3 +41,11 @@ required-features = ["ba2"]
 [[test]]
 name = "ba2_synthetic"
 required-features = ["ba2"]
+
+[[test]]
+name = "bsa_tes4_fixtures"
+required-features = ["bsa-tes4"]
+
+[[test]]
+name = "bsa_tes4_synthetic"
+required-features = ["bsa-tes4"]
