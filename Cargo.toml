@@ -98,3 +98,8 @@ required-features = ["ba2", "bsa-tes3", "bsa-tes4"]
 name = "synthetic_extract"
 harness = false
 required-features = ["ba2", "bsa-tes3", "bsa-tes4"]
+
+[[bench]]
+name = "allocations"
+harness = false
+required-features = ["ba2", "bsa-tes3", "bsa-tes4"]

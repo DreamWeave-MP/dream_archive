@@ -1,5 +1,5 @@
 use super::{Error, Result, parser};
-use crate::bsa::{FilenameEncoding, decode_filename_lossy, normalize_lookup_path};
+use crate::bsa::{FilenameEncoding, NormalizedPath, decode_filename_lossy, normalize_lookup_path};
 use crate::{
     Copied,
     extract::{ensure_parent_dir, output_path_decoded_into, output_path_into},
@@ -119,6 +119,14 @@ impl Archive {
             .map(|&index| &self.entries[index])
     }
 
+    /// Get an entry by a path that was normalized once for repeated lookup.
+    #[must_use]
+    pub fn get_normalized(&self, path: &NormalizedPath) -> Option<&Entry> {
+        self.lookup
+            .get(path.as_bytes())
+            .map(|&index| &self.entries[index])
+    }
+
     /// Get an entry by path, returning an error when it is absent.
     ///
     /// # Errors
@@ -133,6 +141,11 @@ impl Archive {
     #[must_use]
     pub fn contains(&self, path: impl AsRef<[u8]>) -> bool {
         self.get(path).is_some()
+    }
+
+    #[must_use]
+    pub fn contains_normalized(&self, path: &NormalizedPath) -> bool {
+        self.get_normalized(path).is_some()
     }
 
     #[must_use]

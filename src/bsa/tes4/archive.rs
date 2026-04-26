@@ -1,6 +1,7 @@
 use super::{Error, HashFields, Result, hash_directory, hash_file, parser};
 use crate::bsa::{
-    FilenameEncoding, decode_filename_lossy, normalize_lookup_path, normalize_lookup_path_into,
+    FilenameEncoding, NormalizedPath, decode_filename_lossy, normalize_lookup_path,
+    normalize_lookup_path_into,
 };
 use crate::{
     Copied,
@@ -236,6 +237,17 @@ impl Archive {
             .map(|&index| &self.entries[index])
     }
 
+    /// Get an entry by a path that was normalized once for repeated string lookup.
+    ///
+    /// Unlike [`Self::get`], this does not perform TES4 hash fallback for
+    /// hash-only archives. Use [`Self::get_by_hash`] for explicit hash lookup.
+    #[must_use]
+    pub fn get_normalized(&self, path: &NormalizedPath) -> Option<&Entry> {
+        self.lookup
+            .get(path.as_bytes())
+            .map(|&index| &self.entries[index])
+    }
+
     /// Get an entry by path, returning an error when it is absent.
     ///
     /// # Errors
@@ -259,6 +271,11 @@ impl Archive {
     #[must_use]
     pub fn contains(&self, path: impl AsRef<[u8]>) -> bool {
         self.get(path).is_some()
+    }
+
+    #[must_use]
+    pub fn contains_normalized(&self, path: &NormalizedPath) -> bool {
+        self.get_normalized(path).is_some()
     }
 
     /// Size in bytes of the mapped or owned archive data.
