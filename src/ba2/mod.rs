@@ -74,7 +74,7 @@ impl fmt::Display for Error {
                 write!(f, "invalid chunk sentinel: {value:#010x}")
             }
             Self::InvalidChunkSize(value) => {
-                write!(f, "invalid chunk size read from file header: {value}")
+                write!(f, "invalid BA2 file header size: {value}")
             }
             Self::InvalidArchivePath => f.write_str("invalid archive path"),
             Self::DuplicatePath => f.write_str("duplicate archive path"),

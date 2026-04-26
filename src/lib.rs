@@ -549,13 +549,18 @@ impl Archive {
             .ok_or_else(|| Error::FileNotFound(BString::from(path)))
     }
 
-    /// Extract every named archive member into a directory.
+    /// Extract every named and extractable archive member into a directory.
+    ///
+    /// Extraction is atomic per output file, not transactional for the whole
+    /// archive: files successfully written before a later error remain in place.
+    /// Hash-only TES4 archives, BA2 archives without string tables, and
+    /// metadata-only payload families such as BA2 GNMF require format-specific
+    /// handling instead.
     ///
     /// # Errors
     ///
     /// Returns a format-specific extraction error, path-safety error, or I/O
-    /// error. Hash-only TES4 archives without recoverable paths can not use this
-    /// method.
+    /// error.
     pub fn extract_to(&self, target_dir: impl AsRef<std::path::Path>) -> Result<u64> {
         match self {
             #[cfg(feature = "ba2")]

@@ -8,7 +8,11 @@ fn main() -> dream_archive::ba2::Result<()> {
 
     let archive = Archive::open_path(path)?;
     for entry in archive.entries() {
-        println!("{}", entry.name());
+        if entry.name().is_empty() {
+            println!("<stringless> {:?}", entry.hash());
+        } else {
+            println!("{}", entry.name());
+        }
     }
     Ok(())
 }

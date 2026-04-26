@@ -82,6 +82,11 @@ pub struct Entry {
 }
 
 impl Entry {
+    /// Stored string-table name for this entry.
+    ///
+    /// This is empty when the archive did not store a string table. Use
+    /// [`Archive::get_by_hash`] or the entry hash in that case; an empty string
+    /// here is missing path text, not a real empty filename.
     #[must_use]
     pub fn name(&self) -> &BStr {
         self.name.as_bstr()

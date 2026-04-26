@@ -20,7 +20,9 @@ fn main() -> dream_archive::Result<()> {
         std::process::exit(2);
     };
 
-    eprintln!("note: this demo treats <member-path> as exact UTF-8 archive bytes");
+    eprintln!(
+        "note: this example only supports UTF-8 member names; legacy BSA paths need explicit encoding"
+    );
     let member_path = archive_path_bytes(member_path);
     let archive = Archive::open_path(archive_path)?;
     let output = std::fs::File::create(output_path)?;

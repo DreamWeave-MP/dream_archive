@@ -15,7 +15,7 @@ an explicit encoding helper instead of a hopeful guess.
 | Format | Read | Extract | Write | Notes |
 | --- | --- | --- | --- | --- |
 | BA2 GNRL | yes | yes | yes | General-file BA2 archives. |
-| BA2 DX10 | yes | yes | yes | DDS headers are reconstructed from BA2 texture metadata. Writer accepts supported DDS files or explicit texture metadata plus raw payload bytes. |
+| BA2 DX10 | yes | yes | yes | Extraction emits DDS files by reconstructing standard DDS headers from BA2 texture metadata. Private/vendor DDS header fields are not preserved. Writer accepts supported DDS files or explicit texture metadata plus raw payload bytes. |
 | BA2 GNMF | metadata | no | no | Sony GNM (`.gnf`) texture archives. Explicitly out of scope for now; metadata is parsed only so callers can identify them instead of getting mystery meat. |
 | TES3 BSA | yes | yes | yes | Morrowind-era archives. |
 | TES4 BSA | yes | yes | yes | Oblivion/Fallout/Skyrim PC archives, including hash-only and embedded-name layouts. |
@@ -25,6 +25,10 @@ an explicit encoding helper instead of a hopeful guess.
 “Write support” above means the writer semantics for that specific row are
 implemented. It does **not** mean “every BA2 payload type is writable.” Words
 mean things. Annoying, but useful.
+
+BA2 parsing recognizes the supported PC BA2 versions used across Fallout
+4/Fallout 76/Starfield-era archives, including ZIP and supported LZ4 layouts.
+GNMF remains metadata-only.
 
 GNMF is not a missing general-file feature. It is Sony GNM texture data with
 console-style swizzle/unswizzle requirements. This crate does not currently
@@ -180,7 +184,8 @@ volume textures are rejected.
 Archive paths are virtual filesystem names stored inside the archive. They are
 byte strings, not necessarily Unicode OS paths.
 
-- Normal ASCII mod paths can be passed as `&str`.
+- Normal ASCII mod paths can be passed as `&str`; this is fine only when the
+  archive path bytes are actually UTF-8/ASCII.
 - Legacy localized BSA paths should be encoded explicitly.
 - The crate does not guess encodings, because guessing corrupts mods and then
   everyone has a bad afternoon.
