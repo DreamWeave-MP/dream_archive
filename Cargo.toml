@@ -88,3 +88,8 @@ required-features = ["bsa-tes3"]
 name = "morrowind_extract"
 harness = false
 required-features = ["bsa-tes3"]
+
+[[bench]]
+name = "lookup"
+harness = false
+required-features = ["ba2", "bsa-tes3", "bsa-tes4"]

@@ -4,6 +4,7 @@ use bstr::{BString, ByteSlice as _};
 use flate2::{Compression, write::ZlibEncoder};
 use std::{
     borrow::Cow,
+    collections::HashSet,
     fs::{self, File},
     io::{BufWriter, Write},
     path::Path,
@@ -27,6 +28,7 @@ pub struct Builder {
     compression: Option<super::Ba2CompressionFormat>,
     zlib_level: Compression,
     entries: Vec<BuilderEntry>,
+    names: HashSet<BString>,
 }
 
 #[derive(Clone, Debug)]
@@ -49,6 +51,7 @@ impl Default for Builder {
             compression: None,
             zlib_level: Compression::default(),
             entries: Vec::new(),
+            names: HashSet::new(),
         }
     }
 }
@@ -127,13 +130,16 @@ impl Builder {
         let name = normalize_stored_path(path.as_ref())?;
         let (hash, normalized) = hash_file(name.as_bstr());
         debug_assert_eq!(name, normalized);
-        if self.entries.iter().any(|entry| entry.name == name) {
+        if self.names.contains(name.as_bstr()) {
             return Err(Error::DuplicatePath);
         }
 
         let mut owned = Vec::new();
         owned.try_reserve_exact(bytes.as_ref().len())?;
         owned.extend_from_slice(bytes.as_ref());
+        self.entries.try_reserve(1)?;
+        self.names.try_reserve(1)?;
+        self.names.insert(name.clone());
         self.entries.push(BuilderEntry {
             name,
             hash,

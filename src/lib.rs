@@ -202,6 +202,51 @@ pub enum Entry<'a> {
     Tes4Bsa(&'a bsa::tes4::Entry),
 }
 
+/// Non-allocating iterator over entries in a top-level [`Archive`].
+#[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
+#[derive(Clone, Debug)]
+pub enum Entries<'a> {
+    #[cfg(feature = "ba2")]
+    BA2(std::slice::Iter<'a, ba2::Entry>),
+    #[cfg(feature = "bsa-tes3")]
+    Tes3Bsa(std::slice::Iter<'a, bsa::tes3::Entry>),
+    #[cfg(feature = "bsa-tes4")]
+    Tes4Bsa(std::slice::Iter<'a, bsa::tes4::Entry>),
+}
+
+#[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
+impl<'a> Iterator for Entries<'a> {
+    type Item = Entry<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            #[cfg(feature = "ba2")]
+            Self::BA2(entries) => entries.next().map(Entry::BA2),
+            #[cfg(feature = "bsa-tes3")]
+            Self::Tes3Bsa(entries) => entries.next().map(Entry::Tes3Bsa),
+            #[cfg(feature = "bsa-tes4")]
+            Self::Tes4Bsa(entries) => entries.next().map(Entry::Tes4Bsa),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            #[cfg(feature = "ba2")]
+            Self::BA2(entries) => entries.size_hint(),
+            #[cfg(feature = "bsa-tes3")]
+            Self::Tes3Bsa(entries) => entries.size_hint(),
+            #[cfg(feature = "bsa-tes4")]
+            Self::Tes4Bsa(entries) => entries.size_hint(),
+        }
+    }
+}
+
+#[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
+impl ExactSizeIterator for Entries<'_> {}
+
+#[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
+impl std::iter::FusedIterator for Entries<'_> {}
+
 #[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
 impl<'a> Entry<'a> {
     #[must_use]
@@ -327,14 +372,14 @@ impl Archive {
     }
 
     #[must_use]
-    pub fn entries(&self) -> Vec<Entry<'_>> {
+    pub fn entries(&self) -> Entries<'_> {
         match self {
             #[cfg(feature = "ba2")]
-            Self::BA2(archive) => archive.entries().iter().map(Entry::BA2).collect(),
+            Self::BA2(archive) => Entries::BA2(archive.entries().iter()),
             #[cfg(feature = "bsa-tes3")]
-            Self::Tes3Bsa(archive) => archive.entries().iter().map(Entry::Tes3Bsa).collect(),
+            Self::Tes3Bsa(archive) => Entries::Tes3Bsa(archive.entries().iter()),
             #[cfg(feature = "bsa-tes4")]
-            Self::Tes4Bsa(archive) => archive.entries().iter().map(Entry::Tes4Bsa).collect(),
+            Self::Tes4Bsa(archive) => Entries::Tes4Bsa(archive.entries().iter()),
         }
     }
 

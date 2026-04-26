@@ -11,6 +11,7 @@ use bstr::BString;
 use flate2::{Compression, write::ZlibEncoder};
 use std::{
     borrow::Cow,
+    collections::HashSet,
     fs::{self, File},
     io::{BufWriter, Write},
     path::Path,
@@ -34,6 +35,7 @@ pub struct Builder {
     compressed: bool,
     zlib_level: Compression,
     entries: Vec<BuilderEntry>,
+    paths: HashSet<(BString, BString)>,
 }
 
 #[derive(Clone, Debug)]
@@ -67,6 +69,7 @@ impl Default for Builder {
             compressed: false,
             zlib_level: Compression::default(),
             entries: Vec::new(),
+            paths: HashSet::new(),
         }
     }
 }
@@ -153,11 +156,8 @@ impl Builder {
         compression: CompressionOverride,
     ) -> Result<()> {
         let (folder, name) = normalize_stored_path(path.as_ref())?;
-        if self
-            .entries
-            .iter()
-            .any(|entry| entry.folder == folder && entry.name == name)
-        {
+        let path_key = (folder.clone(), name.clone());
+        if self.paths.contains(&path_key) {
             return Err(Error::DuplicatePath);
         }
         let mut owned = Vec::new();
@@ -165,6 +165,9 @@ impl Builder {
         owned.extend_from_slice(bytes.as_ref());
         let folder_hash = hash_directory(&folder).0;
         let file_hash = hash_file(&name).0;
+        self.entries.try_reserve(1)?;
+        self.paths.try_reserve(1)?;
+        self.paths.insert(path_key);
         self.entries.push(BuilderEntry {
             folder,
             name,

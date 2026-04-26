@@ -46,6 +46,7 @@ fn top_level_archive_reads_ba2_from_vec() {
 
     assert_eq!(archive.format(), FileFormat::BA2);
     assert_eq!(archive.len(), 1);
+    assert_eq!(archive.entries().len(), 1);
     assert_eq!(
         archive.read_file_required("DATA/FILE.TXT").unwrap(),
         b"payload"

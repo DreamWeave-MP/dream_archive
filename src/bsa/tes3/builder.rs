@@ -5,6 +5,7 @@ use crate::{
 };
 use bstr::{BString, ByteSlice as _};
 use std::{
+    collections::HashSet,
     fs::{self, File},
     io::{BufWriter, Write},
     path::Path,
@@ -24,6 +25,7 @@ const NAME_OFFSET_SIZE: usize = 4;
 #[derive(Clone, Debug, Default)]
 pub struct Builder {
     entries: Vec<BuilderEntry>,
+    paths: HashSet<BString>,
 }
 
 #[derive(Clone, Debug)]
@@ -57,13 +59,16 @@ impl Builder {
     /// duplicate after TES3 normalization, or allocation fails.
     pub fn add_bytes(&mut self, path: impl AsRef<[u8]>, bytes: impl AsRef<[u8]>) -> Result<()> {
         let path = normalize_stored_path(path.as_ref())?;
-        if self.entries.iter().any(|entry| entry.path == path) {
+        if self.paths.contains(path.as_bstr()) {
             return Err(Error::DuplicatePath);
         }
         let mut owned = Vec::new();
         owned.try_reserve_exact(bytes.as_ref().len())?;
         owned.extend_from_slice(bytes.as_ref());
         let hash = hash_normalized_file(path.as_bstr());
+        self.entries.try_reserve(1)?;
+        self.paths.try_reserve(1)?;
+        self.paths.insert(path.clone());
         self.entries.push(BuilderEntry {
             path,
             hash,
