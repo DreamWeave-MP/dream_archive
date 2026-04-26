@@ -4,7 +4,10 @@ use dream_archive::{
     CompressionOverride,
     bsa::{
         FilenameEncoding,
-        tes4::{Archive, ArchiveFlags, ArchiveVersion, Builder, Error, hash_directory, hash_file},
+        tes4::{
+            Archive, ArchiveFlags, ArchiveVersion, Builder, Error, GameProfile, NameMode,
+            hash_directory, hash_file,
+        },
     },
 };
 use flate2::{Compression, write::ZlibEncoder};
@@ -466,6 +469,138 @@ fn writes_tes4_archive_from_bytes() {
 }
 
 #[test]
+fn writes_hash_only_tes4_archive_from_paths() {
+    let mut builder = Builder::new();
+    builder.set_name_mode(NameMode::HashOnly);
+    builder.add_bytes("meshes/foo/bar.nif", b"mesh").unwrap();
+
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
+    let info = archive.info();
+
+    assert!(!info.archive_flags.contains(ArchiveFlags::DIRECTORY_STRINGS));
+    assert!(!info.archive_flags.contains(ArchiveFlags::FILE_STRINGS));
+    assert_eq!(info.folder_names_len, 0);
+    assert_eq!(info.file_names_len, 0);
+    assert_eq!(archive.entries()[0].path(), None);
+    assert_eq!(
+        archive.read_file("meshes/foo/bar.nif").unwrap().unwrap(),
+        b"mesh"
+    );
+    assert!(
+        archive
+            .get_by_hash(hash_directory(b"meshes\\foo").0, hash_file(b"bar.nif").0)
+            .is_some()
+    );
+}
+
+#[test]
+fn extracts_hash_only_tes4_writer_output_with_path_dictionary() {
+    let mut builder = Builder::new();
+    builder.set_name_mode(NameMode::HashOnly);
+    builder.add_bytes("meshes/foo/bar.nif", b"mesh").unwrap();
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
+    let out = output_dir("tes4-writer-hash-only");
+
+    assert!(matches!(
+        archive.extract_to(&out),
+        Err(Error::ArchivePathsUnavailable)
+    ));
+    assert_eq!(
+        archive
+            .extract_to_with_paths(&out, [b"meshes/foo/bar.nif".as_slice()])
+            .unwrap(),
+        4
+    );
+    assert_eq!(
+        std::fs::read(out.join("meshes").join("foo").join("bar.nif")).unwrap(),
+        b"mesh"
+    );
+    std::fs::remove_dir_all(out).unwrap();
+}
+
+#[test]
+fn writes_embedded_name_tes4_archive_without_string_tables() {
+    let mut builder = Builder::new();
+    builder.set_name_mode(NameMode::Embedded);
+    builder.add_bytes("meshes/foo/bar.nif", b"mesh").unwrap();
+
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
+    let info = archive.info();
+
+    assert!(!info.archive_flags.contains(ArchiveFlags::DIRECTORY_STRINGS));
+    assert!(!info.archive_flags.contains(ArchiveFlags::FILE_STRINGS));
+    assert!(
+        info.archive_flags
+            .contains(ArchiveFlags::EMBEDDED_FILE_NAMES)
+    );
+    assert_eq!(archive.entries()[0].path().unwrap(), "meshes\\foo\\bar.nif");
+    assert_eq!(
+        archive.read_file("meshes/foo/bar.nif").unwrap().unwrap(),
+        b"mesh"
+    );
+}
+
+#[test]
+fn writes_embedded_name_tes4_archive_with_string_tables() {
+    let mut builder = Builder::new();
+    builder.set_name_mode(NameMode::StringsAndEmbedded);
+    builder.add_bytes("meshes/foo/bar.nif", b"mesh").unwrap();
+
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
+    let info = archive.info();
+
+    assert!(info.archive_flags.contains(ArchiveFlags::DIRECTORY_STRINGS));
+    assert!(info.archive_flags.contains(ArchiveFlags::FILE_STRINGS));
+    assert!(
+        info.archive_flags
+            .contains(ArchiveFlags::EMBEDDED_FILE_NAMES)
+    );
+    assert_eq!(archive.entries()[0].path().unwrap(), "meshes\\foo\\bar.nif");
+    assert_eq!(
+        archive.read_file("meshes/foo/bar.nif").unwrap().unwrap(),
+        b"mesh"
+    );
+}
+
+#[test]
+fn writes_compressed_embedded_name_tes4_archive() {
+    let mut builder = Builder::new();
+    builder.set_compressed(true);
+    builder.set_name_mode(NameMode::Embedded);
+    builder
+        .add_bytes("meshes/foo/bar.nif", b"mesh mesh mesh mesh")
+        .unwrap();
+
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
+
+    assert!(
+        archive
+            .info()
+            .archive_flags
+            .contains(ArchiveFlags::EMBEDDED_FILE_NAMES)
+    );
+    assert_eq!(
+        archive.read_file("meshes/foo/bar.nif").unwrap().unwrap(),
+        b"mesh mesh mesh mesh"
+    );
+}
+
+#[test]
+fn rejects_embedded_name_writer_for_v103() {
+    let mut builder = Builder::new();
+    builder.set_version(ArchiveVersion::v103);
+    builder.set_name_mode(NameMode::Embedded);
+    builder.add_bytes("data/file.txt", b"payload").unwrap();
+
+    assert!(matches!(
+        builder.to_vec(),
+        Err(Error::NotImplemented(
+            "TES4 embedded file names require version 104 or 105"
+        ))
+    ));
+}
+
+#[test]
 fn writes_tes4_v103_archive_from_bytes() {
     let mut builder = Builder::new();
     builder.set_version(ArchiveVersion::v103);
@@ -499,6 +634,108 @@ fn writes_tes4_v105_archive_from_bytes() {
             .archive_flags
             .contains(ArchiveFlags::COMPRESSED)
     );
+}
+
+#[test]
+fn tes4_game_profiles_select_pc_archive_versions() {
+    for (profile, constructor, version) in [
+        (
+            GameProfile::Oblivion,
+            Builder::oblivion as fn() -> Builder,
+            ArchiveVersion::v103,
+        ),
+        (
+            GameProfile::Fallout3,
+            Builder::fallout3 as fn() -> Builder,
+            ArchiveVersion::v104,
+        ),
+        (
+            GameProfile::FalloutNewVegas,
+            Builder::fallout_new_vegas as fn() -> Builder,
+            ArchiveVersion::v104,
+        ),
+        (
+            GameProfile::SkyrimLe,
+            Builder::skyrim_le as fn() -> Builder,
+            ArchiveVersion::v104,
+        ),
+        (
+            GameProfile::SkyrimSe,
+            Builder::skyrim_se as fn() -> Builder,
+            ArchiveVersion::v105,
+        ),
+    ] {
+        let mut from_profile = Builder::with_profile(profile);
+        let mut from_constructor = constructor();
+        from_profile.add_bytes("data/file.txt", b"payload").unwrap();
+        from_constructor
+            .add_bytes("data/file.txt", b"payload")
+            .unwrap();
+
+        let profile_archive = Archive::from_slice(&from_profile.to_vec().unwrap()).unwrap();
+        let constructor_archive = Archive::from_slice(&from_constructor.to_vec().unwrap()).unwrap();
+
+        assert_eq!(from_profile.version(), version);
+        assert_eq!(from_constructor.version(), version);
+        assert_eq!(profile_archive.info().version, version);
+        assert_eq!(constructor_archive.info().version, version);
+        assert!(
+            !profile_archive
+                .info()
+                .archive_flags
+                .contains(ArchiveFlags::COMPRESSED)
+        );
+        assert!(
+            profile_archive
+                .info()
+                .archive_flags
+                .contains(ArchiveFlags::DIRECTORY_STRINGS)
+        );
+        assert!(
+            profile_archive
+                .info()
+                .archive_flags
+                .contains(ArchiveFlags::FILE_STRINGS)
+        );
+    }
+}
+
+#[test]
+fn tes4_game_profile_keeps_policy_overrides_explicit() {
+    let mut builder = Builder::with_profile(GameProfile::SkyrimSe);
+    builder.set_compressed(true);
+    builder.set_name_mode(NameMode::Embedded);
+    builder
+        .add_bytes("data/file.txt", b"payload payload")
+        .unwrap();
+
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
+    let info = archive.info();
+
+    assert_eq!(info.version, ArchiveVersion::v105);
+    assert!(info.archive_flags.contains(ArchiveFlags::COMPRESSED));
+    assert!(
+        info.archive_flags
+            .contains(ArchiveFlags::EMBEDDED_FILE_NAMES)
+    );
+    assert!(!info.archive_flags.contains(ArchiveFlags::DIRECTORY_STRINGS));
+    assert!(!info.archive_flags.contains(ArchiveFlags::FILE_STRINGS));
+    assert_eq!(
+        archive.read_file("data/file.txt").unwrap().unwrap(),
+        b"payload payload"
+    );
+}
+
+#[test]
+fn tes4_set_profile_only_changes_version() {
+    let mut builder = Builder::new();
+    builder.set_compressed(true);
+    builder.set_name_mode(NameMode::HashOnly);
+    builder.set_profile(GameProfile::Oblivion);
+
+    assert_eq!(builder.version(), ArchiveVersion::v103);
+    assert!(builder.compressed());
+    assert_eq!(builder.name_mode(), NameMode::HashOnly);
 }
 
 #[test]

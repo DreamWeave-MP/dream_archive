@@ -7,5 +7,5 @@ pub use super::{Error, Result};
 pub use archive::{
     Archive, ArchiveFlags, ArchiveInfo, ArchiveTypes, ArchiveVersion, Entry, FileRecord,
 };
-pub use builder::Builder;
+pub use builder::{Builder, GameProfile, NameMode};
 pub use hash::{HashFields, hash_directory, hash_file};

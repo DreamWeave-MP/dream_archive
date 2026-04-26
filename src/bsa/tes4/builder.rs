@@ -33,9 +33,67 @@ pub struct Builder {
     version: ArchiveVersion,
     archive_types: ArchiveTypes,
     compressed: bool,
+    name_mode: NameMode,
     zlib_level: Compression,
     entries: Vec<BuilderEntry>,
     paths: HashSet<(BString, BString)>,
+}
+
+/// How the TES4 writer stores recoverable path names.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum NameMode {
+    /// Write folder and file string tables.
+    #[default]
+    Strings,
+    /// Omit string tables and rely on folder/file hashes for lookup.
+    HashOnly,
+    /// Write full virtual paths next to file payloads, without string tables.
+    Embedded,
+    /// Write both string tables and embedded full virtual paths.
+    StringsAndEmbedded,
+}
+
+/// PC game-oriented TES4-family writer preset.
+///
+/// Profiles intentionally set only the layout generation that is intrinsic to a
+/// game family. Compression, archive type bits, and name storage mode remain
+/// explicit policy choices because real tools produce different combinations.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GameProfile {
+    /// The Elder Scrolls IV: Oblivion PC BSA archives.
+    Oblivion,
+    /// Fallout 3 PC BSA archives, excluding `XMem` output.
+    Fallout3,
+    /// Fallout: New Vegas PC BSA archives, excluding `XMem` output.
+    FalloutNewVegas,
+    /// The Elder Scrolls V: Skyrim Legendary Edition PC BSA archives.
+    SkyrimLe,
+    /// Skyrim Special/Anniversary Edition PC BSA archives.
+    SkyrimSe,
+}
+
+impl GameProfile {
+    const fn version(self) -> ArchiveVersion {
+        match self {
+            Self::Oblivion => ArchiveVersion::v103,
+            Self::Fallout3 | Self::FalloutNewVegas | Self::SkyrimLe => ArchiveVersion::v104,
+            Self::SkyrimSe => ArchiveVersion::v105,
+        }
+    }
+}
+
+impl NameMode {
+    const fn directory_strings(self) -> bool {
+        matches!(self, Self::Strings | Self::StringsAndEmbedded)
+    }
+
+    const fn file_strings(self) -> bool {
+        matches!(self, Self::Strings | Self::StringsAndEmbedded)
+    }
+
+    const fn embedded_file_names(self) -> bool {
+        matches!(self, Self::Embedded | Self::StringsAndEmbedded)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -67,6 +125,7 @@ impl Default for Builder {
             version: ArchiveVersion::v104,
             archive_types: ArchiveTypes::MISC,
             compressed: false,
+            name_mode: NameMode::Strings,
             zlib_level: Compression::default(),
             entries: Vec::new(),
             paths: HashSet::new(),
@@ -78,6 +137,49 @@ impl Builder {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create a builder configured for a PC game archive family.
+    ///
+    /// The preset selects the archive version. It deliberately leaves
+    /// compression disabled, archive type as [`ArchiveTypes::MISC`], and name
+    /// storage as [`NameMode::Strings`]. Those are archive policy decisions, not
+    /// inherent consequences of the game name.
+    #[must_use]
+    pub fn with_profile(profile: GameProfile) -> Self {
+        let mut builder = Self::new();
+        builder.set_profile(profile);
+        builder
+    }
+
+    #[must_use]
+    pub fn oblivion() -> Self {
+        Self::with_profile(GameProfile::Oblivion)
+    }
+
+    #[must_use]
+    pub fn fallout3() -> Self {
+        Self::with_profile(GameProfile::Fallout3)
+    }
+
+    #[must_use]
+    pub fn fallout_new_vegas() -> Self {
+        Self::with_profile(GameProfile::FalloutNewVegas)
+    }
+
+    #[must_use]
+    pub fn skyrim_le() -> Self {
+        Self::with_profile(GameProfile::SkyrimLe)
+    }
+
+    #[must_use]
+    pub fn skyrim_se() -> Self {
+        Self::with_profile(GameProfile::SkyrimSe)
+    }
+
+    pub fn set_profile(&mut self, profile: GameProfile) -> &mut Self {
+        self.version = profile.version();
+        self
     }
 
     #[must_use]
@@ -107,6 +209,16 @@ impl Builder {
 
     pub fn set_compressed(&mut self, compressed: bool) -> &mut Self {
         self.compressed = compressed;
+        self
+    }
+
+    #[must_use]
+    pub fn name_mode(&self) -> NameMode {
+        self.name_mode
+    }
+
+    pub fn set_name_mode(&mut self, name_mode: NameMode) -> &mut Self {
+        self.name_mode = name_mode;
         self
     }
 
@@ -296,17 +408,31 @@ impl Builder {
     /// Returns an error if writing fails or archive integer fields overflow
     /// their TES4 on-disk sizes.
     pub fn write_to(&self, mut out: impl Write) -> Result<()> {
+        if self.name_mode.embedded_file_names() && self.version == ArchiveVersion::v103 {
+            return Err(Error::NotImplemented(
+                "TES4 embedded file names require version 104 or 105",
+            ));
+        }
         let entries = self.sorted_entries();
         let prepared = self.prepare_entries(&entries)?;
         let folders = sorted_folders(&entries);
-        let folder_names_len = folder_names_len(&folders)?;
-        let file_names_len = file_names_len(&entries)?;
+        let folder_names_len = if self.name_mode.directory_strings() {
+            folder_names_len(&folders)?
+        } else {
+            0
+        };
+        let file_names_len = if self.name_mode.file_strings() {
+            file_names_len(&entries)?
+        } else {
+            0
+        };
         let data_offset = data_offset(
             entries.len(),
             folders.len(),
             folder_names_len,
             file_names_len,
             self.version,
+            self.name_mode,
         )?;
 
         write_u32(&mut out, MAGIC)?;
@@ -314,13 +440,23 @@ impl Builder {
         write_u32(&mut out, HEADER_SIZE)?;
         write_u32(
             &mut out,
-            ArchiveFlags::DIRECTORY_STRINGS.bits()
-                | ArchiveFlags::FILE_STRINGS.bits()
-                | if self.compressed {
-                    ArchiveFlags::COMPRESSED.bits()
-                } else {
-                    0
-                },
+            if self.name_mode.directory_strings() {
+                ArchiveFlags::DIRECTORY_STRINGS.bits()
+            } else {
+                0
+            } | if self.name_mode.file_strings() {
+                ArchiveFlags::FILE_STRINGS.bits()
+            } else {
+                0
+            } | if self.name_mode.embedded_file_names() {
+                ArchiveFlags::EMBEDDED_FILE_NAMES.bits()
+            } else {
+                0
+            } | if self.compressed {
+                ArchiveFlags::COMPRESSED.bits()
+            } else {
+                0
+            },
         )?;
         write_u32(&mut out, folders.len().try_into()?)?;
         write_u32(&mut out, entries.len().try_into()?)?;
@@ -335,7 +471,11 @@ impl Builder {
         for folder in &folders {
             write_folder_record(&mut out, self.version, folder, folder_block_offset)?;
             folder_block_offset = folder_block_offset
-                .checked_add(1 + folder.name.len() + 1)
+                .checked_add(if self.name_mode.directory_strings() {
+                    1 + folder.name.len() + 1
+                } else {
+                    0
+                })
                 .and_then(|offset| {
                     offset.checked_add(FILE_RECORD_SIZE * (folder.files_end - folder.files_start))
                 })
@@ -344,22 +484,30 @@ impl Builder {
 
         let mut payload_offset: u32 = data_offset.try_into()?;
         for folder in &folders {
-            write_bzstring(&mut out, folder.name)?;
+            if self.name_mode.directory_strings() {
+                write_bzstring(&mut out, folder.name)?;
+            }
             for entry in &prepared[folder.files_start..folder.files_end] {
                 write_hash(&mut out, entry.entry.file_hash)?;
-                write_u32(&mut out, entry.file_size(self.compressed)?)?;
+                let file_size = entry.file_size(self.compressed, self.name_mode)?;
+                write_u32(&mut out, file_size)?;
                 write_u32(&mut out, payload_offset)?;
                 payload_offset = payload_offset
-                    .checked_add(entry.stored.len().try_into()?)
+                    .checked_add(file_size & !(1 << 30 | 1 << 31))
                     .ok_or(Error::OutOfBounds)?;
             }
         }
 
-        for entry in &entries {
-            out.write_all(&entry.name)?;
-            out.write_all(&[0])?;
+        if self.name_mode.file_strings() {
+            for entry in &entries {
+                out.write_all(&entry.name)?;
+                out.write_all(&[0])?;
+            }
         }
         for entry in &prepared {
+            if self.name_mode.embedded_file_names() {
+                write_bstring(&mut out, &entry.entry.embedded_name()?)?;
+            }
             out.write_all(&entry.stored)?;
         }
         Ok(())
@@ -398,12 +546,22 @@ impl Builder {
 }
 
 impl PreparedEntry<'_> {
-    fn file_size(&self, default_compressed: bool) -> Result<u32> {
+    fn file_size(&self, default_compressed: bool, name_mode: NameMode) -> Result<u32> {
         const RESERVED_FILE_SIZE_BITS: usize = (1 << 30) | (1 << 31);
-        if self.stored.len() & RESERVED_FILE_SIZE_BITS != 0 {
+        let embedded_len = if name_mode.embedded_file_names() {
+            self.entry.embedded_name()?.len() + 1
+        } else {
+            0
+        };
+        let stored_len = self
+            .stored
+            .len()
+            .checked_add(embedded_len)
+            .ok_or(Error::OutOfBounds)?;
+        if stored_len & RESERVED_FILE_SIZE_BITS != 0 {
             return Err(Error::OutOfBounds);
         }
-        let mut size: u32 = self.stored.len().try_into()?;
+        let mut size: u32 = stored_len.try_into()?;
         if self.entry.is_compressed(default_compressed) != default_compressed {
             size |= 1 << 30;
         }
@@ -418,6 +576,18 @@ impl BuilderEntry {
             CompressionOverride::Store => false,
             CompressionOverride::Compress => true,
         }
+    }
+
+    fn embedded_name(&self) -> Result<BString> {
+        if self.folder.is_empty() {
+            return Ok(self.name.clone());
+        }
+        let mut out = Vec::new();
+        out.try_reserve_exact(self.folder.len() + 1 + self.name.len())?;
+        out.extend_from_slice(&self.folder);
+        out.push(b'\\');
+        out.extend_from_slice(&self.name);
+        Ok(BString::from(out))
     }
 }
 
@@ -462,12 +632,25 @@ fn data_offset(
     folder_names_len: usize,
     file_names_len: usize,
     version: ArchiveVersion,
+    name_mode: NameMode,
 ) -> Result<usize> {
     usize::try_from(HEADER_SIZE)?
         .checked_add(folder_record_size(version) * folder_count)
-        .and_then(|offset| offset.checked_add(folder_count + folder_names_len))
+        .and_then(|offset| {
+            offset.checked_add(if name_mode.directory_strings() {
+                folder_count + folder_names_len
+            } else {
+                0
+            })
+        })
         .and_then(|offset| offset.checked_add(FILE_RECORD_SIZE * file_count))
-        .and_then(|offset| offset.checked_add(file_names_len))
+        .and_then(|offset| {
+            offset.checked_add(if name_mode.file_strings() {
+                file_names_len
+            } else {
+                0
+            })
+        })
         .ok_or(Error::OutOfBounds)
 }
 
@@ -571,6 +754,12 @@ fn write_bzstring(out: &mut impl Write, bytes: &[u8]) -> Result<()> {
     out.write_all(&[len.try_into()?])?;
     out.write_all(bytes)?;
     out.write_all(&[0])?;
+    Ok(())
+}
+
+fn write_bstring(out: &mut impl Write, bytes: &[u8]) -> Result<()> {
+    out.write_all(&[bytes.len().try_into()?])?;
+    out.write_all(bytes)?;
     Ok(())
 }
 
