@@ -1,6 +1,9 @@
 #![cfg(feature = "bsa-tes3")]
 
-use dream_archive::bsa::tes3::{Archive, Builder, Error};
+use dream_archive::bsa::{
+    FilenameEncoding,
+    tes3::{Archive, Builder, Error},
+};
 use std::path::PathBuf;
 
 const VERSION: u32 = 0x0000_0100;
@@ -155,6 +158,24 @@ fn extracts_tes3_archive_to_directory() {
     assert_eq!(archive.extract_to(&out).unwrap(), 5);
     assert_eq!(
         std::fs::read(out.join("Meshes").join("Foo.NIF")).unwrap(),
+        b"hello"
+    );
+    std::fs::remove_dir_all(out).unwrap();
+}
+
+#[test]
+fn extracts_tes3_archive_to_decoded_filesystem_paths() {
+    let archive = Archive::read(&tiny_tes3_archive(b"data/Mar\xeda.txt", b"hello")).unwrap();
+    let out = output_dir("tes3-encoding");
+
+    assert_eq!(
+        archive
+            .extract_to_with_encoding(&out, FilenameEncoding::Windows1252)
+            .unwrap(),
+        5
+    );
+    assert_eq!(
+        std::fs::read(out.join("data").join("María.txt")).unwrap(),
         b"hello"
     );
     std::fs::remove_dir_all(out).unwrap();

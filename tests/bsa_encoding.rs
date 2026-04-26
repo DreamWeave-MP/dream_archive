@@ -89,6 +89,16 @@ fn encodes_cp437_losslessly() {
 }
 
 #[test]
+fn cp437_extended_bytes_roundtrip() {
+    for byte in 0x80..=0xff {
+        let bytes = [byte];
+        let decoded = decode_filename_lossy(&bytes, FilenameEncoding::Cp437);
+        let encoded = encode_filename(&decoded, FilenameEncoding::Cp437).unwrap();
+        assert_eq!(encoded.as_ref(), &[byte]);
+    }
+}
+
+#[test]
 fn rejects_unrepresentable_text_without_replacement() {
     let error = encode_filename("你好", FilenameEncoding::Windows1251).unwrap_err();
     assert_eq!(error.encoding(), FilenameEncoding::Windows1251);

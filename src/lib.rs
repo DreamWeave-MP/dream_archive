@@ -4,6 +4,13 @@
 //! operations `OpenMW` needs: detect, list, lookup, extract files, and
 //! reconstruct DDS streams from BA2 DX10 texture archives.
 //!
+//! Archive paths are byte strings. Bethesda archive formats do not reliably
+//! declare filename encodings, and older tools commonly wrote paths using the
+//! system code page of the machine that produced the archive. Keep archive
+//! lookup byte-first when possible. If accepting user-facing Unicode text, use
+//! the BSA filename helpers to encode that text explicitly before lookup rather
+//! than guessing a code page.
+//!
 //! # Example
 //!
 //! ```ignore

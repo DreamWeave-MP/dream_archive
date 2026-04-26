@@ -1,3 +1,45 @@
+//! BSA support shared by TES3/Morrowind and TES4-family archives.
+//!
+//! # Filename bytes and localization
+//!
+//! BSA paths are stored as bytes. The archive does not tell us whether those
+//! bytes are UTF-8, Windows-1251, CP437, or whatever a modding tool inherited
+//! from the user's locale in 2006. Consequently, lookup APIs take byte-like
+//! paths (`impl AsRef<[u8]>`) and apply only archive/VFS byte normalization:
+//! separator folding and ASCII case handling. They do not perform Unicode
+//! case-folding, Unicode normalization, or code page detection.
+//!
+//! For display, decode explicitly:
+//!
+//! ```
+//! # use dream_archive::bsa::{FilenameEncoding, decode_filename_lossy};
+//! let shown = decode_filename_lossy(b"Mar\xeda.txt", FilenameEncoding::Windows1252);
+//! assert_eq!(shown, "María.txt");
+//! ```
+//!
+//! For lookup from UI text, encode explicitly and then pass the resulting bytes
+//! to the archive API:
+//!
+//! ```
+//! # use dream_archive::bsa::{FilenameEncoding, encode_filename};
+//! # fn example() -> Result<(), dream_archive::bsa::FilenameEncodeError> {
+//! let path = encode_filename("María.txt", FilenameEncoding::Windows1252)?;
+//! // archive.read_file(path.as_ref())?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! Encoding is lossless. If a character can not be represented in the selected
+//! legacy encoding, [`encode_filename`] returns [`FilenameEncodeError`] instead
+//! of replacing it with `?`. Silent filename corruption is still corruption,
+//! even if it smiles at you.
+//!
+//! For extraction, `extract_to` preserves raw archive bytes where the platform
+//! can represent them. On platforms whose filesystem paths are Unicode-first,
+//! or when you want localized byte paths decoded to human-readable names, use
+//! `extract_to_with_encoding` on the TES3/TES4 archive types and choose the code
+//! page yourself. There is intentionally no auto-detection.
+
 #[cfg(feature = "bsa-tes3")]
 pub mod tes3;
 #[cfg(feature = "bsa-tes4")]

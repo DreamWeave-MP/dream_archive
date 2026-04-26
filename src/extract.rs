@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 #[cfg(feature = "parallel")]
 use std::collections::HashSet;
 use std::{
@@ -45,6 +46,39 @@ pub(crate) fn output_path_into(
                 .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
             out.push(component);
         }
+        pushed = true;
+    }
+    if !pushed {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "archive entry has no file name",
+        ));
+    }
+    Ok(())
+}
+
+/// Convert an archive-internal path to a filesystem path by first decoding each
+/// archive component through an explicit filename encoding.
+pub(crate) fn output_path_decoded_into<'a>(
+    out: &mut PathBuf,
+    root: &Path,
+    archive_path: &'a [u8],
+    mut decode_component: impl FnMut(&'a [u8]) -> Cow<'a, str>,
+) -> io::Result<()> {
+    out.clear();
+    out.push(root);
+    let mut pushed = false;
+    for component in archive_path.split(|byte| matches!(*byte, b'/' | b'\\')) {
+        if component.is_empty() || component == b"." {
+            continue;
+        }
+        if component == b".." || component.contains(&0) || component.contains(&b':') {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "archive path can not be extracted safely",
+            ));
+        }
+        out.push(decode_component(component).as_ref());
         pushed = true;
     }
     if !pushed {

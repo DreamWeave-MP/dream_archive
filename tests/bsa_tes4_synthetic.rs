@@ -1,6 +1,9 @@
 #![cfg(feature = "bsa-tes4")]
 
-use dream_archive::bsa::tes4::{Archive, ArchiveVersion, Error, hash_directory, hash_file};
+use dream_archive::bsa::{
+    FilenameEncoding,
+    tes4::{Archive, ArchiveVersion, Error, hash_directory, hash_file},
+};
 use flate2::{Compression, write::ZlibEncoder};
 use lz4_flex::frame::FrameEncoder;
 use std::path::PathBuf;
@@ -367,6 +370,31 @@ fn extracts_tes4_archive_to_directory() {
     assert_eq!(archive.extract_to(&out).unwrap(), 7);
     assert_eq!(
         std::fs::read(out.join("data").join("file.txt")).unwrap(),
+        b"payload"
+    );
+    std::fs::remove_dir_all(out).unwrap();
+}
+
+#[test]
+fn extracts_tes4_archive_to_decoded_filesystem_paths() {
+    let archive = Archive::read(&tiny_tes4_index_with_version_names_and_payload(
+        104,
+        0,
+        b"data",
+        b"Mar\xeda.txt",
+        b"payload",
+    ))
+    .unwrap();
+    let out = output_dir("tes4-encoding");
+
+    assert_eq!(
+        archive
+            .extract_to_with_encoding(&out, FilenameEncoding::Windows1252)
+            .unwrap(),
+        7
+    );
+    assert_eq!(
+        std::fs::read(out.join("data").join("María.txt")).unwrap(),
         b"payload"
     );
     std::fs::remove_dir_all(out).unwrap();

@@ -1,8 +1,8 @@
 use super::{Error, HashFields, Result, hash_directory, hash_file, parser};
-use crate::bsa::normalize_lookup_path;
+use crate::bsa::{FilenameEncoding, decode_filename_lossy, normalize_lookup_path};
 use crate::{
     Copied,
-    extract::{ensure_parent_dir, output_path_into},
+    extract::{ensure_parent_dir, output_path_decoded_into, output_path_into},
     storage::Storage,
 };
 use bstr::{BStr, BString};
@@ -385,6 +385,38 @@ impl Archive {
         {
             self.extract_to_sequential(target_dir)
         }
+    }
+
+    /// Extract every named entry to `target_dir`, decoding archive path bytes
+    /// with an explicit filename encoding before creating filesystem paths.
+    ///
+    /// Hash-only entries without recovered names still can not be extracted by
+    /// this API; use [`Self::extract_to_with_paths`] with a byte-path dictionary
+    /// for those.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an archive entry has no path, has no safe output
+    /// path, directory or file creation fails, or entry extraction fails.
+    pub fn extract_to_with_encoding(
+        &self,
+        target_dir: impl AsRef<Path>,
+        encoding: FilenameEncoding,
+    ) -> Result<u64> {
+        let target_dir = target_dir.as_ref();
+        let mut written = 0u64;
+        let mut path = PathBuf::new();
+        let mut last_parent = PathBuf::new();
+        for entry in &self.entries {
+            let path_bytes = entry.path().ok_or(Error::ArchivePathsUnavailable)?;
+            output_path_decoded_into(&mut path, target_dir, path_bytes, |component| {
+                decode_filename_lossy(component, encoding)
+            })?;
+            ensure_parent_dir(&path, &mut last_parent)?;
+            let file = File::create(&path)?;
+            written += self.extract_entry(entry, BufWriter::new(file))?;
+        }
+        Ok(written)
     }
 
     fn extract_to_sequential(&self, target_dir: &Path) -> Result<u64> {

@@ -1,8 +1,8 @@
 use super::{Error, Result, parser};
-use crate::bsa::normalize_lookup_path;
+use crate::bsa::{FilenameEncoding, decode_filename_lossy, normalize_lookup_path};
 use crate::{
     Copied,
-    extract::{ensure_parent_dir, output_path_into},
+    extract::{ensure_parent_dir, output_path_decoded_into, output_path_into},
     storage::Storage,
 };
 use bstr::{BStr, BString};
@@ -208,6 +208,35 @@ impl Archive {
         {
             self.extract_to_sequential(target_dir)
         }
+    }
+
+    /// Extract every entry to `target_dir`, decoding archive path bytes with an
+    /// explicit filename encoding before creating filesystem paths.
+    ///
+    /// This is intended for localized archives whose filenames are stored in a
+    /// legacy code page rather than UTF-8.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an archive entry has no safe output path, directory
+    /// or file creation fails, or entry extraction fails.
+    pub fn extract_to_with_encoding(
+        &self,
+        target_dir: impl AsRef<Path>,
+        encoding: FilenameEncoding,
+    ) -> Result<u64> {
+        let target_dir = target_dir.as_ref();
+        let mut written = 0u64;
+        let mut path = PathBuf::new();
+        let mut last_parent = PathBuf::new();
+        for entry in &self.entries {
+            output_path_decoded_into(&mut path, target_dir, entry.path(), |component| {
+                decode_filename_lossy(component, encoding)
+            })?;
+            ensure_parent_dir(&path, &mut last_parent)?;
+            written += self.extract_entry(entry, File::create(&path)?)?;
+        }
+        Ok(written)
     }
 
     fn extract_to_sequential(&self, target_dir: &Path) -> Result<u64> {
