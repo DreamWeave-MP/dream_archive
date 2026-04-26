@@ -178,7 +178,7 @@ fn rejects_archives_without_file_name_strings() {
     assert!(matches!(
         Archive::read(&bytes),
         Err(Error::NotImplemented(
-            "TES4 archives without file name strings"
+            "TES4 hash-only archives without file name strings"
         ))
     ));
 }
@@ -190,7 +190,7 @@ fn rejects_archives_without_directory_name_strings() {
     assert!(matches!(
         Archive::read(&bytes),
         Err(Error::NotImplemented(
-            "TES4 archives without directory name strings"
+            "TES4 hash-only archives without directory name strings"
         ))
     ));
 }

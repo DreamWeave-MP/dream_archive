@@ -37,12 +37,12 @@ fn read_header(bytes: &[u8]) -> Result<ArchiveInfo> {
     let archive_flags = ArchiveFlags::from_bits_retain(cursor.u32()?);
     if !archive_flags.contains(ArchiveFlags::DIRECTORY_STRINGS) {
         return Err(Error::NotImplemented(
-            "TES4 archives without directory name strings",
+            "TES4 hash-only archives without directory name strings",
         ));
     }
     if !archive_flags.contains(ArchiveFlags::FILE_STRINGS) {
         return Err(Error::NotImplemented(
-            "TES4 archives without file name strings",
+            "TES4 hash-only archives without file name strings",
         ));
     }
     let folder_count = cursor.u32()?;
