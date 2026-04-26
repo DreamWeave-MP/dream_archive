@@ -1,3 +1,5 @@
+#[cfg(feature = "bsa-tes3")]
+pub mod tes3;
 #[cfg(feature = "bsa-tes4")]
 pub mod tes4;
 

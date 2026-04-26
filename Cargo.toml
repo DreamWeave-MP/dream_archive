@@ -48,3 +48,7 @@ required-features = ["bsa-tes4"]
 [[test]]
 name = "bsa_tes4_synthetic"
 required-features = ["bsa-tes4"]
+
+[[test]]
+name = "bsa_tes3_synthetic"
+required-features = ["bsa-tes3"]
