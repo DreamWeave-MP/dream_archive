@@ -71,7 +71,7 @@ pub(crate) fn normalize_lookup_path(path: &[u8]) -> Vec<u8> {
 /// Result type for BSA operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Errors produced by the BSA reader.
+/// Errors produced by BSA operations.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
@@ -112,7 +112,7 @@ impl fmt::Display for Error {
             Self::ArchivePathsUnavailable => {
                 f.write_str("archive does not contain filenames required for path-based extraction")
             }
-            Self::DuplicatePath => f.write_str("archive contains duplicate normalized paths"),
+            Self::DuplicatePath => f.write_str("duplicate normalized archive path"),
             Self::InvalidFileRecordFlags(value) => {
                 write!(f, "invalid or unsupported file record flags: {value:#010x}")
             }
@@ -134,7 +134,7 @@ impl fmt::Display for Error {
             Self::FilenameEncoding(error) => error.fmt(f),
             Self::Zlib(error) => write!(f, "zlib decompression failed: {error}"),
             Self::InvalidLz4Frame => f.write_str("expected TES4 v105 LZ4 frame data"),
-            Self::Lz4Frame(error) => write!(f, "LZ4 frame decompression failed: {error}"),
+            Self::Lz4Frame(error) => write!(f, "LZ4 frame operation failed: {error}"),
         }
     }
 }

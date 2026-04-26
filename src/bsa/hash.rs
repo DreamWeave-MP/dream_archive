@@ -22,6 +22,7 @@ pub(crate) fn normalize_hash_path(path: &[u8]) -> BString {
     normalized
 }
 
+#[cfg(feature = "bsa-tes4")]
 pub(crate) fn crc32(bytes: &[u8]) -> u32 {
     let mut crc = 0u32;
     for byte in bytes {

@@ -1,3 +1,4 @@
+#[cfg(any(feature = "bsa-tes3", feature = "bsa-tes4"))]
 use std::borrow::Cow;
 #[cfg(feature = "parallel")]
 use std::collections::HashSet;
@@ -59,6 +60,7 @@ pub(crate) fn output_path_into(
 
 /// Convert an archive-internal path to a filesystem path by first decoding each
 /// archive component through an explicit filename encoding.
+#[cfg(any(feature = "bsa-tes3", feature = "bsa-tes4"))]
 pub(crate) fn output_path_decoded_into<'a>(
     out: &mut PathBuf,
     root: &Path,

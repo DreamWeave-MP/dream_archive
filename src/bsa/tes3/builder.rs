@@ -1,10 +1,13 @@
 use super::{Error, Result, hash::FileHash, hash::hash_normalized_file};
-use crate::bsa::{FilenameEncoding, encode_filename};
+use crate::{
+    bsa::{FilenameEncoding, encode_filename},
+    builder_fs,
+};
 use bstr::{BString, ByteSlice as _};
 use std::{
     fs::{self, File},
     io::{BufWriter, Write},
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 const VERSION: u32 = 0x0000_0100;
@@ -106,18 +109,21 @@ impl Builder {
     /// Recursively add all files below `root` using paths relative to `root`.
     ///
     /// File symlinks are followed for payload bytes, but stored at the relative
-    /// path where the symlink was found.
+    /// path where the symlink was found. Directory symlinks are ignored. Paths
+    /// are taken from the platform filesystem bytes where available; use
+    /// [`Self::add_encoded_path`] when a legacy BSA filename encoding is required.
     ///
     /// # Errors
     ///
     /// Returns an error if directory traversal, file reading, or adding an entry fails.
     pub fn add_dir(&mut self, root: impl AsRef<Path>) -> Result<()> {
         let root = root.as_ref();
-        for path in collect_files(root)? {
+        for path in builder_fs::collect_files(root)? {
             let relative = path
                 .strip_prefix(root)
                 .map_err(|_| Error::InvalidArchivePath)?;
-            let archive_path = path_to_archive_bytes(relative)?;
+            let archive_path =
+                builder_fs::path_to_archive_bytes(relative).ok_or(Error::InvalidArchivePath)?;
             self.add_file(archive_path, &path)?;
         }
         Ok(())
@@ -265,52 +271,4 @@ fn normalize_stored_path(path: &[u8]) -> Result<BString> {
 fn write_u32(out: &mut impl Write, value: u32) -> Result<()> {
     out.write_all(&value.to_le_bytes())?;
     Ok(())
-}
-
-fn collect_files(root: &Path) -> Result<Vec<PathBuf>> {
-    let mut pending = vec![root.to_path_buf()];
-    let mut files = Vec::new();
-    while let Some(dir) = pending.pop() {
-        let mut entries = Vec::new();
-        for entry in fs::read_dir(&dir)? {
-            entries.push(entry?.path());
-        }
-        entries.sort();
-        for path in entries {
-            let symlink_metadata = fs::symlink_metadata(&path)?;
-            if symlink_metadata.file_type().is_symlink() {
-                if fs::metadata(&path)?.is_file() {
-                    files.push(path);
-                }
-            } else if symlink_metadata.is_dir() {
-                pending.push(path);
-            } else if symlink_metadata.is_file() {
-                files.push(path);
-            }
-        }
-    }
-    files.sort();
-    Ok(files)
-}
-
-fn path_to_archive_bytes(path: &Path) -> Result<Vec<u8>> {
-    let mut out = Vec::new();
-    for component in path.components() {
-        if !out.is_empty() {
-            out.push(b'/');
-        }
-        let std::path::Component::Normal(part) = component else {
-            return Err(Error::InvalidArchivePath);
-        };
-        #[cfg(unix)]
-        {
-            use std::os::unix::ffi::OsStrExt as _;
-            out.extend_from_slice(part.as_bytes());
-        }
-        #[cfg(not(unix))]
-        {
-            out.extend_from_slice(part.to_str().ok_or(Error::InvalidArchivePath)?.as_bytes());
-        }
-    }
-    Ok(out)
 }

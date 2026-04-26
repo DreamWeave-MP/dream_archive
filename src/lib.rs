@@ -29,11 +29,13 @@
 
 #[cfg(feature = "ba2")]
 pub mod ba2;
-#[cfg(feature = "bsa-tes4")]
+#[cfg(any(feature = "bsa-tes3", feature = "bsa-tes4"))]
 pub mod bsa;
 #[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
+mod builder_fs;
+#[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
 mod extract;
-#[cfg(any(feature = "ba2", feature = "bsa-tes4"))]
+#[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
 mod read;
 #[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
 mod storage;
@@ -82,3 +84,15 @@ pub fn guess_format(input: &mut impl Read) -> io::Result<Option<FileFormat>> {
 }
 
 pub use bstr::{BStr, BString, ByteSlice, ByteVec};
+
+/// Per-file compression policy for archive builders.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum CompressionOverride {
+    /// Use the builder's default compression policy.
+    #[default]
+    Inherit,
+    /// Store this file uncompressed.
+    Store,
+    /// Compress this file using the builder's configured compression method.
+    Compress,
+}

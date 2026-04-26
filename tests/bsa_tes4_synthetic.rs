@@ -1,8 +1,11 @@
 #![cfg(feature = "bsa-tes4")]
 
-use dream_archive::bsa::{
-    FilenameEncoding,
-    tes4::{Archive, ArchiveFlags, ArchiveVersion, Builder, Error, hash_directory, hash_file},
+use dream_archive::{
+    CompressionOverride,
+    bsa::{
+        FilenameEncoding,
+        tes4::{Archive, ArchiveFlags, ArchiveVersion, Builder, Error, hash_directory, hash_file},
+    },
 };
 use flate2::{Compression, write::ZlibEncoder};
 use lz4_flex::frame::FrameEncoder;
@@ -520,10 +523,14 @@ fn tes4_writer_can_toggle_per_file_compression() {
     let mut builder = Builder::new();
     builder.set_compressed(true);
     builder
-        .add_bytes_with_compression("compressed.txt", b"compressed payload", None)
+        .add_bytes_with_compression(
+            "compressed.txt",
+            b"compressed payload",
+            CompressionOverride::Inherit,
+        )
         .unwrap();
     builder
-        .add_bytes_with_compression("plain.txt", b"plain payload", Some(false))
+        .add_bytes_with_compression("plain.txt", b"plain payload", CompressionOverride::Store)
         .unwrap();
 
     let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();

@@ -1,6 +1,7 @@
 use bstr::ByteSlice as _;
-use dream_archive::ba2::{
-    Archive, ArchiveVersion, Ba2CompressionFormat, Builder, Error, PayloadFormat,
+use dream_archive::{
+    CompressionOverride,
+    ba2::{Archive, ArchiveVersion, Ba2CompressionFormat, Builder, Error, PayloadFormat},
 };
 use flate2::{Compression, write::ZlibEncoder};
 use std::path::PathBuf;
@@ -192,10 +193,14 @@ fn ba2_writer_can_leave_one_file_uncompressed() {
     let mut builder = Builder::new();
     builder.set_compression(Some(Ba2CompressionFormat::Zip));
     builder
-        .add_bytes_with_compression("compressed.txt", b"compressed payload", None)
+        .add_bytes_with_compression(
+            "compressed.txt",
+            b"compressed payload",
+            CompressionOverride::Inherit,
+        )
         .unwrap();
     builder
-        .add_bytes_with_compression("plain.txt", b"plain payload", Some(false))
+        .add_bytes_with_compression("plain.txt", b"plain payload", CompressionOverride::Store)
         .unwrap();
 
     let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
@@ -236,7 +241,10 @@ fn ba2_lz4_writer_requires_v3_header() {
     builder.set_compression(Some(Ba2CompressionFormat::LZ4));
     builder.add_bytes("data/file.txt", b"payload").unwrap();
 
-    assert!(matches!(builder.into_vec(), Err(Error::NotImplemented)));
+    assert!(matches!(
+        builder.into_vec(),
+        Err(Error::NotImplemented("BA2 LZ4 writer requires version 3"))
+    ));
 }
 
 #[test]

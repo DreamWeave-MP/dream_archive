@@ -32,7 +32,7 @@ pub enum Error {
     OutOfBounds,
     IntegralTruncation,
     Capacity,
-    NotImplemented,
+    NotImplemented(&'static str),
     Io(io::Error),
     Zlib(String),
     Lz4(String),
@@ -71,7 +71,9 @@ impl fmt::Display for Error {
             Self::Capacity => {
                 f.write_str("archive table or payload requests more memory than can be allocated")
             }
-            Self::NotImplemented => f.write_str("support for this feature is not implemented"),
+            Self::NotImplemented(feature) => {
+                write!(f, "support for this feature is not implemented: {feature}")
+            }
             Self::Io(error) => error.fmt(f),
             Self::Zlib(error) => write!(f, "zlib decompression failed: {error}"),
             Self::Lz4(error) => write!(f, "lz4 decompression failed: {error}"),

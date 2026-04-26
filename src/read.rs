@@ -35,6 +35,7 @@ impl<'a> Cursor<'a> {
         Ok(())
     }
 
+    #[cfg(feature = "bsa-tes4")]
     pub(crate) fn position(&self) -> usize {
         self.pos
     }
@@ -50,6 +51,7 @@ impl<'a> Cursor<'a> {
         Ok(self.bytes(1)?[0])
     }
 
+    #[cfg(any(feature = "ba2", feature = "bsa-tes4"))]
     pub(crate) fn u16(&mut self) -> Result<u16> {
         Ok(u16::from_le_bytes(self.bytes(2)?.try_into().unwrap()))
     }

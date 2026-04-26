@@ -212,7 +212,7 @@ impl Archive {
             FileHeader::GNRL => self.extract_chunks(&entry.file, out),
             FileHeader::DX10(texture) => dds::write_dds_header(out, texture.dds_header())
                 .and_then(|()| self.extract_chunks(&entry.file, out)),
-            FileHeader::GNMF(_) => Err(Error::NotImplemented),
+            FileHeader::GNMF(_) => Err(Error::NotImplemented("BA2 GNMF extraction")),
         };
         if result.is_err() {
             out.truncate(before);
@@ -237,7 +237,7 @@ impl Archive {
                 Ok(u64::try_from(header.len())?
                     + self.extract_chunks_to_writer(&entry.file, &mut out)?)
             }
-            FileHeader::GNMF(_) => Err(Error::NotImplemented),
+            FileHeader::GNMF(_) => Err(Error::NotImplemented("BA2 GNMF extraction")),
         }
     }
 
