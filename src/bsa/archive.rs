@@ -1,5 +1,6 @@
 use super::{Result, parser};
 use crate::{Copied, storage::Storage};
+use bstr::{BStr, BString};
 use std::path::Path;
 
 /// Metadata read from a TES4-family BSA archive header.
@@ -13,6 +14,52 @@ pub struct ArchiveInfo {
     pub folder_names_len: u32,
     pub file_names_len: u32,
     pub archive_types: ArchiveTypes,
+}
+
+/// One file entry in a TES4-family BSA archive index.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Entry {
+    path: BString,
+    folder: BString,
+    name: BString,
+    record: FileRecord,
+}
+
+impl Entry {
+    #[must_use]
+    pub fn path(&self) -> &BStr {
+        self.path.as_ref()
+    }
+
+    #[must_use]
+    pub fn folder(&self) -> &BStr {
+        self.folder.as_ref()
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &BStr {
+        self.name.as_ref()
+    }
+
+    #[must_use]
+    pub fn file(&self) -> FileRecord {
+        self.record
+    }
+}
+
+/// Raw file location metadata from a TES4-family BSA file record.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FileRecord {
+    pub stored_size: u32,
+    pub data_offset: u32,
+    pub compression_toggled: bool,
+}
+
+impl FileRecord {
+    #[must_use]
+    pub fn is_compressed(self, archive_flags: ArchiveFlags) -> bool {
+        archive_flags.contains(ArchiveFlags::COMPRESSED) ^ self.compression_toggled
+    }
 }
 
 /// TES4-family BSA archive version.
@@ -89,6 +136,7 @@ impl ArchiveTypes {
 pub struct Archive {
     storage: Storage,
     info: ArchiveInfo,
+    entries: Vec<Entry>,
 }
 
 impl Archive {
@@ -129,12 +177,27 @@ impl Archive {
     /// Number of files declared by the archive header.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.info.file_count as usize
+        self.entries.len()
     }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.info.file_count == 0
+        self.entries.is_empty()
+    }
+
+    /// All entries, in archive table order.
+    #[must_use]
+    pub fn entries(&self) -> &[Entry] {
+        &self.entries
+    }
+
+    /// Get an entry by case-insensitive path with slash normalization.
+    #[must_use]
+    pub fn get(&self, path: impl AsRef<[u8]>) -> Option<&Entry> {
+        let normalized = normalize_path(path.as_ref());
+        self.entries
+            .iter()
+            .find(|entry| entry.path.as_slice() == normalized.as_slice())
     }
 
     /// Size in bytes of the mapped or owned archive data.
@@ -143,9 +206,46 @@ impl Archive {
         self.storage.as_bytes().len()
     }
 
-    pub(super) fn from_parts(storage: Storage, info: ArchiveInfo) -> Self {
-        Self { storage, info }
+    pub(super) fn from_parts(storage: Storage, info: ArchiveInfo, entries: Vec<Entry>) -> Self {
+        Self {
+            storage,
+            info,
+            entries,
+        }
     }
+}
+
+impl Entry {
+    pub(super) fn new(folder: BString, name: BString, record: FileRecord) -> Self {
+        let path = join_path(&folder, &name);
+        Self {
+            path,
+            folder,
+            name,
+            record,
+        }
+    }
+}
+
+fn join_path(folder: &[u8], name: &[u8]) -> BString {
+    let mut path = Vec::with_capacity(folder.len() + usize::from(!folder.is_empty()) + name.len());
+    path.extend_from_slice(folder);
+    if !folder.is_empty() && !name.is_empty() {
+        path.push(b'\\');
+    }
+    path.extend_from_slice(name);
+    BString::from(normalize_path(&path))
+}
+
+fn normalize_path(path: &[u8]) -> Vec<u8> {
+    path.iter()
+        .copied()
+        .map(|byte| match byte {
+            b'/' => b'\\',
+            b'A'..=b'Z' => byte + 32,
+            _ => byte,
+        })
+        .collect()
 }
 
 impl TryFrom<Copied<'_>> for Archive {

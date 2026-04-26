@@ -27,7 +27,6 @@ impl<'a> Cursor<'a> {
         Self { bytes, pos: 0 }
     }
 
-    #[cfg(feature = "ba2")]
     pub(crate) fn seek(&mut self, pos: usize) -> Result<()> {
         if pos > self.bytes.len() {
             return Err(Error::OutOfBounds);
@@ -43,7 +42,6 @@ impl<'a> Cursor<'a> {
         Ok(bytes)
     }
 
-    #[cfg(feature = "ba2")]
     pub(crate) fn u8(&mut self) -> Result<u8> {
         Ok(self.bytes(1)?[0])
     }
@@ -56,7 +54,6 @@ impl<'a> Cursor<'a> {
         Ok(u32::from_le_bytes(self.bytes(4)?.try_into().unwrap()))
     }
 
-    #[cfg(feature = "ba2")]
     pub(crate) fn u64(&mut self) -> Result<u64> {
         Ok(u64::from_le_bytes(self.bytes(8)?.try_into().unwrap()))
     }

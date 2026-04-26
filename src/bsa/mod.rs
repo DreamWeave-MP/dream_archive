@@ -1,7 +1,9 @@
 mod archive;
 mod parser;
 
-pub use archive::{Archive, ArchiveFlags, ArchiveInfo, ArchiveTypes, ArchiveVersion};
+pub use archive::{
+    Archive, ArchiveFlags, ArchiveInfo, ArchiveTypes, ArchiveVersion, Entry, FileRecord,
+};
 
 use std::{io, num::TryFromIntError};
 

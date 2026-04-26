@@ -19,12 +19,37 @@ fn tiny_tes4_header(version: u32) -> Vec<u8> {
     push_u32(&mut bytes, version);
     push_u32(&mut bytes, HEADER_SIZE);
     push_u32(&mut bytes, 3);
-    push_u32(&mut bytes, 1);
-    push_u32(&mut bytes, 2);
-    push_u32(&mut bytes, 4);
-    push_u32(&mut bytes, 16);
+    push_u32(&mut bytes, 0);
+    push_u32(&mut bytes, 0);
+    push_u32(&mut bytes, 0);
+    push_u32(&mut bytes, 0);
     push_u16(&mut bytes, 1 << 8);
     push_u16(&mut bytes, 0);
+    bytes
+}
+
+fn tiny_tes4_index() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    push_u32(&mut bytes, MAGIC);
+    push_u32(&mut bytes, 104);
+    push_u32(&mut bytes, HEADER_SIZE);
+    push_u32(&mut bytes, 3);
+    push_u32(&mut bytes, 1);
+    push_u32(&mut bytes, 1);
+    push_u32(&mut bytes, 5);
+    push_u32(&mut bytes, 9);
+    push_u16(&mut bytes, 1 << 8);
+    push_u16(&mut bytes, 0);
+    bytes.extend_from_slice(&[0; 8]);
+    push_u32(&mut bytes, 1);
+    push_u32(&mut bytes, 52);
+    bytes.push(5);
+    bytes.extend_from_slice(b"data\0");
+    bytes.extend_from_slice(&[0; 8]);
+    push_u32(&mut bytes, 7);
+    push_u32(&mut bytes, 77);
+    bytes.extend_from_slice(b"file.txt\0");
+    bytes.extend_from_slice(b"payload");
     bytes
 }
 
@@ -64,5 +89,36 @@ fn rejects_bad_tes4_header_size() {
     assert!(matches!(
         Archive::read(&bytes),
         Err(Error::InvalidHeaderSize(204))
+    ));
+}
+
+#[test]
+fn parses_synthetic_tes4_index() {
+    let archive = Archive::read(&tiny_tes4_index()).unwrap();
+    let entry = &archive.entries()[0];
+    assert_eq!(entry.path(), "data\\file.txt");
+    assert_eq!(entry.folder(), "data");
+    assert_eq!(entry.name(), "file.txt");
+    assert_eq!(entry.file().stored_size, 7);
+    assert_eq!(entry.file().data_offset, 77);
+    assert!(archive.get("DATA/file.TXT").is_some());
+}
+
+#[test]
+fn rejects_truncated_tes4_folder_record() {
+    let mut bytes = tiny_tes4_index();
+    bytes.truncate(40);
+    assert!(
+        matches!(Archive::read(&bytes), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof)
+    );
+}
+
+#[test]
+fn rejects_truncated_tes4_file_name_block() {
+    let mut bytes = tiny_tes4_index();
+    bytes.truncate(64);
+    assert!(matches!(
+        Archive::read(&bytes),
+        Err(Error::OutOfBounds | Error::Io(_))
     ));
 }

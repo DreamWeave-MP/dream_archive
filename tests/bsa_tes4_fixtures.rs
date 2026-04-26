@@ -30,6 +30,18 @@ fn parses_tes4_header_metadata() {
     assert_eq!(archive.len(), 2);
     assert!(!archive.is_empty());
     assert_eq!(archive.archive_size(), 50_866);
+
+    let paths: Vec<_> = archive
+        .entries()
+        .iter()
+        .map(|entry| entry.path().to_string())
+        .collect();
+    assert_eq!(paths, ["preview.png", "license.txt"]);
+    let preview = archive.get("PREVIEW.PNG").unwrap();
+    assert_eq!(preview.name(), "preview.png");
+    assert_eq!(preview.folder(), "");
+    assert!(preview.file().is_compressed(info.archive_flags));
+    assert_eq!(preview.file().data_offset, 111);
 }
 
 #[test]
