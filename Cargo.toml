@@ -10,6 +10,7 @@ bstr = { version = "1.12", default-features = false, features = ["std"] }
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"], optional = true }
 lz4_flex = { version = "0.13", default-features = false, optional = true }
 memmap2 = { version = "0.9", optional = true }
+rayon = { version = "1.11", optional = true }
 
 [dev-dependencies]
 walkdir = "2.5"
@@ -20,6 +21,7 @@ ba2 = ["dep:flate2", "dep:lz4_flex", "dep:memmap2"]
 bsa = ["bsa-tes3", "bsa-tes4"]
 bsa-tes3 = []
 bsa-tes4 = ["dep:flate2", "dep:lz4_flex", "dep:memmap2", "lz4_flex/frame"]
+parallel = ["dep:rayon"]
 
 [[example]]
 name = "list_ba2"

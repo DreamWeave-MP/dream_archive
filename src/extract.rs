@@ -1,3 +1,5 @@
+#[cfg(feature = "parallel")]
+use std::collections::HashSet;
 use std::{
     fs, io,
     path::{Path, PathBuf},
@@ -63,4 +65,23 @@ pub(crate) fn ensure_parent_dir(path: &Path, last_parent: &mut PathBuf) -> io::R
         }
     }
     Ok(())
+}
+
+#[cfg(feature = "parallel")]
+pub(crate) fn ensure_parent_dirs(paths: &[PathBuf]) -> io::Result<()> {
+    let mut created_dirs = HashSet::new();
+    for path in paths {
+        if let Some(parent) = path.parent() {
+            if created_dirs.insert(parent) {
+                fs::create_dir_all(parent)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "parallel")]
+pub(crate) fn has_duplicate_paths(paths: &[PathBuf]) -> bool {
+    let mut seen = HashSet::new();
+    paths.iter().any(|path| !seen.insert(path.as_path()))
 }

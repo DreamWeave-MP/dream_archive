@@ -7,6 +7,8 @@ use crate::{
 use bstr::{BStr, BString};
 use flate2::read::ZlibDecoder;
 use lz4_flex::frame::FrameDecoder;
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufWriter;
@@ -313,6 +315,17 @@ impl Archive {
     /// or file creation fails, or entry extraction fails.
     pub fn extract_to(&self, target_dir: impl AsRef<Path>) -> Result<u64> {
         let target_dir = target_dir.as_ref();
+        #[cfg(feature = "parallel")]
+        {
+            self.extract_to_parallel(target_dir)
+        }
+        #[cfg(not(feature = "parallel"))]
+        {
+            self.extract_to_sequential(target_dir)
+        }
+    }
+
+    fn extract_to_sequential(&self, target_dir: &Path) -> Result<u64> {
         let mut written = 0u64;
         let mut path = PathBuf::new();
         let mut last_parent = PathBuf::new();
@@ -323,6 +336,35 @@ impl Archive {
             written += self.extract_entry(entry, BufWriter::new(file))?;
         }
         Ok(written)
+    }
+
+    #[cfg(feature = "parallel")]
+    fn extract_to_parallel(&self, target_dir: &Path) -> Result<u64> {
+        let paths = self.extract_output_paths(target_dir)?;
+        if crate::extract::has_duplicate_paths(&paths) {
+            return self.extract_to_sequential(target_dir);
+        }
+        crate::extract::ensure_parent_dirs(&paths)?;
+        self.entries
+            .par_iter()
+            .zip(paths.par_iter())
+            .map(|(entry, path)| {
+                let file = File::create(path)?;
+                self.extract_entry(entry, BufWriter::new(file))
+            })
+            .try_reduce(|| 0, |left, right| Ok(left + right))
+    }
+
+    #[cfg(feature = "parallel")]
+    fn extract_output_paths(&self, target_dir: &Path) -> Result<Vec<PathBuf>> {
+        let mut paths = Vec::new();
+        paths.try_reserve_exact(self.entries.len())?;
+        for entry in &self.entries {
+            let mut path = PathBuf::new();
+            output_path_into(&mut path, target_dir, entry.path())?;
+            paths.push(path);
+        }
+        Ok(paths)
     }
 
     pub(super) fn from_parts(storage: Storage, info: ArchiveInfo, entries: Vec<Entry>) -> Self {
