@@ -244,6 +244,11 @@ impl Archive {
 
     /// Extract an entry into a writer.
     ///
+    /// Compressed chunks are decompressed into a temporary buffer before they are
+    /// written so that malformed compressed data does not leave partial bytes in
+    /// arbitrary caller-owned writers. Use [`Self::extract_entry_to_path`] for
+    /// streaming filesystem extraction with temporary-file rollback.
+    ///
     /// # Errors
     ///
     /// Returns an error if chunk offsets are invalid, decompression fails, the

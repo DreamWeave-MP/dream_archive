@@ -1,4 +1,15 @@
+use bstr::ByteSlice as _;
 use dream_archive::ba2::Archive;
+use std::ffi::OsString;
+
+fn archive_path_bytes(path: OsString) -> Vec<u8> {
+    if let Ok(path) = path.into_string() {
+        path.into_bytes()
+    } else {
+        eprintln!("<member-path> must be valid UTF-8 in this example");
+        std::process::exit(2);
+    }
+}
 
 fn main() -> dream_archive::ba2::Result<()> {
     let mut args = std::env::args_os();
@@ -10,13 +21,11 @@ fn main() -> dream_archive::ba2::Result<()> {
         std::process::exit(2);
     };
 
-    eprintln!("note: this demo interprets <member-path> as UTF-8/ASCII archive bytes");
+    eprintln!("note: this demo treats <member-path> as exact UTF-8 archive bytes");
+    let member_path = archive_path_bytes(member_path);
     let archive = Archive::open_path(archive_path)?;
-    let Some(bytes) = archive.read_file(member_path.to_string_lossy().as_bytes())? else {
-        eprintln!(
-            "archive member not found: {}",
-            member_path.to_string_lossy()
-        );
+    let Some(bytes) = archive.read_file(&member_path)? else {
+        eprintln!("archive member not found: {}", member_path.as_bstr());
         std::process::exit(1);
     };
     std::fs::write(output_path, bytes)?;

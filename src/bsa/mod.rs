@@ -38,7 +38,9 @@
 //! can represent them. On platforms whose filesystem paths are Unicode-first,
 //! or when you want localized byte paths decoded to human-readable names, use
 //! `extract_to_with_encoding` on the TES3/TES4 archive types and choose the code
-//! page yourself. There is intentionally no auto-detection.
+//! page yourself. Invalid byte sequences are replaced for filesystem/display
+//! output; archive lookup remains byte-exact. There is intentionally no
+//! auto-detection.
 
 #[cfg(feature = "bsa-tes3")]
 pub mod tes3;
@@ -99,7 +101,9 @@ impl fmt::Display for Error {
             Self::OutOfBounds => f.write_str("archive offset or size is out of bounds"),
             Self::InvalidArchivePath => f.write_str("archive path can not be stored safely"),
             Self::ArchivePathsUnavailable => {
-                f.write_str("archive does not contain filenames required for path-based extraction")
+                f.write_str(
+                    "archive does not contain filenames required for path-based extraction; use TES4 extract_to_with_paths with a path dictionary when applicable",
+                )
             }
             Self::DuplicatePath => f.write_str("duplicate normalized archive path"),
             Self::FileNotFound(path) => write!(f, "archive member not found: {path}"),

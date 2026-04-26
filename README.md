@@ -74,8 +74,24 @@ archive.extract_to("out")?;
 # }
 ```
 
-Hash-only TES4 archives do not contain enough text to name every file. Use the
-TES4-specific `extract_to_with_paths` API with a path dictionary for those.
+Some archive layouts do not contain enough text to name every file. Hash-only
+TES4 archives need the TES4-specific `extract_to_with_paths` API with a path
+dictionary. BA2 archives without string tables still have hashes, but
+`Entry::path()` returns `None` through the top-level facade because no filename
+text exists to recover. No path does not mean empty filename.
+
+```rust,no_run
+use dream_archive::bsa::tes4::Archive;
+
+# fn main() -> dream_archive::bsa::Result<()> {
+let archive = Archive::open_path("HashOnly.bsa")?;
+archive.extract_to_with_paths("out", [
+    b"meshes/foo.nif".as_slice(),
+    b"textures/foo.dds".as_slice(),
+])?;
+# Ok(())
+# }
+```
 
 ## Building archives
 
@@ -132,17 +148,20 @@ use dream_archive::{Ba2Dx10Builder, ba2::Ba2CompressionFormat};
 # fn main() -> dream_archive::ba2::Result<()> {
 let mut builder = Ba2Dx10Builder::new();
 builder.set_compression(Some(Ba2CompressionFormat::Zip));
-builder.add_dds_file("textures/example.dds", "example.dds")?;
+builder.add_dds_file("textures/example.dds", "source/example.dds")?;
 builder.write_path("Textures.ba2")?;
 # Ok(())
 # }
 ```
 
+The first path is the archive path to store. The second path is the filesystem
+DDS source to read.
+
 The DDS path parses supported DDS headers, maps them to BA2 texture metadata,
 validates the payload size, strips the DDS header, and stores the raw texture
 payload. It does not transcode formats or generate mips. If you already have BA2
-texture metadata, `add_texture_bytes` still accepts the raw bytes after the DDS
-header directly.
+texture metadata, `add_texture_bytes` accepts raw texture payload bytes only —
+not a complete DDS file with its header still attached.
 
 DX10/DDS support here is archive plumbing, not a texture processing library. It
 does not decode pixels, preserve vendor/private DDS fields, handle texture
@@ -173,7 +192,24 @@ use dream_archive::bsa::{FilenameEncoding, encode_filename};
 
 # fn main() -> dream_archive::bsa::Result<()> {
 let encoded = encode_filename("textures/zażółć.dds", FilenameEncoding::Windows1250)?;
-# let _ = encoded;
+# let archive = dream_archive::Archive::open_path("Data/SomeArchive.bsa")?;
+let bytes = archive.read_file_required(encoded.as_ref())?;
+# let _ = bytes;
+# Ok(())
+# }
+```
+
+For GNMF BA2 archives, inspect metadata rather than attempting extraction:
+
+```rust,no_run
+# fn main() -> dream_archive::ba2::Result<()> {
+use dream_archive::ba2::{Archive, PayloadFormat};
+
+let archive = Archive::open_path("Textures.ba2")?;
+if archive.info().format == PayloadFormat::GNMF {
+    eprintln!("GNMF metadata is readable; extraction is unsupported");
+    return Ok(());
+}
 # Ok(())
 # }
 ```

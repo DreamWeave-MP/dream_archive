@@ -1,4 +1,14 @@
 use dream_archive::{Ba2Dx10Builder, ba2::Ba2CompressionFormat};
+use std::ffi::OsString;
+
+fn archive_path_bytes(path: OsString) -> Vec<u8> {
+    if let Ok(path) = path.into_string() {
+        path.into_bytes()
+    } else {
+        eprintln!("<archive-path.dds> must be valid UTF-8 in this example");
+        std::process::exit(2);
+    }
+}
 
 fn main() -> dream_archive::ba2::Result<()> {
     let mut args = std::env::args_os();
@@ -13,6 +23,7 @@ fn main() -> dream_archive::ba2::Result<()> {
 
     let mut builder = Ba2Dx10Builder::new();
     builder.set_compression(Some(Ba2CompressionFormat::Zip));
-    builder.add_dds_file(archive_path.to_string_lossy().as_bytes(), source_dds)?;
+    let archive_path = archive_path_bytes(archive_path);
+    builder.add_dds_file(&archive_path, source_dds)?;
     builder.write_path(output_ba2)
 }
