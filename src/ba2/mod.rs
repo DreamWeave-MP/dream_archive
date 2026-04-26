@@ -1,10 +1,12 @@
 mod archive;
+mod builder;
 mod chunk;
 mod dds;
 mod hash;
 mod parser;
 
 pub use archive::{Archive, ArchiveFile, ArchiveInfo, Entry, FileHeader, TextureHeader};
+pub use builder::Builder;
 pub use chunk::{Ba2CompressionFormat, Chunk};
 pub use hash::{FileHash, Hash, hash_file, hash_file_in_place};
 
@@ -25,6 +27,8 @@ pub enum Error {
     InvalidVersion(u32),
     InvalidChunkSentinel(u32),
     InvalidChunkSize(u16),
+    InvalidArchivePath,
+    DuplicatePath,
     OutOfBounds,
     IntegralTruncation,
     Capacity,
@@ -58,6 +62,8 @@ impl fmt::Display for Error {
             Self::InvalidChunkSize(value) => {
                 write!(f, "invalid chunk size read from file header: {value}")
             }
+            Self::InvalidArchivePath => f.write_str("invalid archive path"),
+            Self::DuplicatePath => f.write_str("duplicate archive path"),
             Self::OutOfBounds => f.write_str("archive offset or size is out of bounds"),
             Self::IntegralTruncation => {
                 f.write_str("archive integer field can not fit on this platform")

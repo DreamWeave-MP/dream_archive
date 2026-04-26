@@ -1,5 +1,7 @@
 use bstr::ByteSlice as _;
-use dream_archive::ba2::{Archive, ArchiveVersion, Ba2CompressionFormat, Error, PayloadFormat};
+use dream_archive::ba2::{
+    Archive, ArchiveVersion, Ba2CompressionFormat, Builder, Error, PayloadFormat,
+};
 use flate2::{Compression, write::ZlibEncoder};
 use std::path::PathBuf;
 
@@ -103,6 +105,81 @@ fn output_dir(name: &str) -> PathBuf {
     path.push(format!("{}-{}", name, std::process::id()));
     let _ = std::fs::remove_dir_all(&path);
     path
+}
+
+#[test]
+fn writes_ba2_gnrl_archive_from_bytes() {
+    let mut builder = Builder::new();
+    builder.add_bytes("Meshes/Foo.NIF", b"mesh").unwrap();
+    builder.add_bytes("textures/bar.dds", b"texture").unwrap();
+
+    let bytes = builder.into_vec().unwrap();
+    let archive = Archive::read(&bytes).unwrap();
+
+    assert_eq!(archive.info().format, PayloadFormat::GNRL);
+    assert_eq!(archive.info().version, ArchiveVersion::v1);
+    assert_eq!(archive.info().compression_format, Ba2CompressionFormat::Zip);
+    assert!(archive.info().strings);
+    assert_eq!(archive.len(), 2);
+    assert_eq!(
+        archive.read_file("meshes/foo.nif").unwrap().unwrap(),
+        b"mesh"
+    );
+    assert_eq!(
+        archive.read_file("textures/bar.dds").unwrap().unwrap(),
+        b"texture"
+    );
+}
+
+#[test]
+fn writes_ba2_v3_archive_from_bytes() {
+    let mut builder = Builder::new();
+    builder.set_version(ArchiveVersion::v3);
+    builder.add_bytes("data/file.txt", b"payload").unwrap();
+
+    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+
+    assert_eq!(archive.info().version, ArchiveVersion::v3);
+    assert_eq!(archive.info().compression_format, Ba2CompressionFormat::Zip);
+    assert_eq!(
+        archive.read_file("data/file.txt").unwrap().unwrap(),
+        b"payload"
+    );
+}
+
+#[test]
+fn ba2_writer_output_is_deterministic() {
+    let mut first = Builder::new();
+    first.add_bytes("b.txt", b"b").unwrap();
+    first.add_bytes("a.txt", b"a").unwrap();
+
+    let mut second = Builder::new();
+    second.add_bytes("a.txt", b"a").unwrap();
+    second.add_bytes("b.txt", b"b").unwrap();
+
+    assert_eq!(first.into_vec().unwrap(), second.into_vec().unwrap());
+}
+
+#[test]
+fn ba2_writer_rejects_duplicate_normalized_paths() {
+    let mut builder = Builder::new();
+    builder.add_bytes("Meshes/Foo.NIF", b"mesh").unwrap();
+
+    assert!(matches!(
+        builder.add_bytes("meshes\\foo.nif", b"other"),
+        Err(Error::DuplicatePath)
+    ));
+}
+
+#[test]
+fn ba2_writer_rejects_unsafe_paths() {
+    for path in ["", ".", "../evil.txt", "bad:name.txt", "bad\0name.txt"] {
+        let mut builder = Builder::new();
+        assert!(matches!(
+            builder.add_bytes(path.as_bytes(), b"payload"),
+            Err(Error::InvalidArchivePath)
+        ));
+    }
 }
 
 #[derive(Clone, Copy)]
