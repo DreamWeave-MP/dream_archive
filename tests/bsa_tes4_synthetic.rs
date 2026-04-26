@@ -151,6 +151,28 @@ fn rejects_bad_tes4_header_size() {
 }
 
 #[test]
+fn rejects_tes4_xbox_archive_flag_at_parse_time() {
+    let mut bytes = tiny_tes4_index();
+    write_u32(&mut bytes, 12, 3 | (1 << 6));
+
+    assert!(matches!(
+        Archive::read(&bytes),
+        Err(Error::NotImplemented("TES4 Xbox archive layout"))
+    ));
+}
+
+#[test]
+fn rejects_tes4_xmem_compression_flag_at_parse_time() {
+    let mut bytes = tiny_tes4_index();
+    write_u32(&mut bytes, 12, 3 | (1 << 2) | (1 << 9));
+
+    assert!(matches!(
+        Archive::read(&bytes),
+        Err(Error::NotImplemented("TES4 XMem compression"))
+    ));
+}
+
+#[test]
 fn parses_synthetic_tes4_index() {
     let archive = Archive::read(&tiny_tes4_index()).unwrap();
     let entry = &archive.entries()[0];
@@ -160,6 +182,29 @@ fn parses_synthetic_tes4_index() {
     assert_eq!(entry.file().stored_size, 7);
     assert_eq!(entry.file().data_offset, 83);
     assert!(archive.get("DATA/file.TXT").is_some());
+}
+
+#[test]
+fn file_data_offset_ignores_secondary_archive_flag() {
+    let mut bytes = tiny_tes4_index();
+    let offset = u32::from_le_bytes(bytes[70..74].try_into().unwrap());
+    write_u32(&mut bytes, 70, offset | (1 << 31));
+
+    let archive = Archive::read(&bytes).unwrap();
+
+    assert_eq!(archive.entries()[0].file().data_offset, offset);
+    assert_eq!(
+        archive.read_file("data/file.txt").unwrap().unwrap(),
+        b"payload"
+    );
+}
+
+#[test]
+fn rejects_v105_folder_record_offset_outside_archive() {
+    let mut bytes = tiny_tes4_index_with_version_and_payload(105, 0, b"payload");
+    write_u32(&mut bytes, 56, 1);
+
+    assert!(matches!(Archive::read(&bytes), Err(Error::OutOfBounds)));
 }
 
 #[test]
@@ -314,12 +359,12 @@ fn entry_path_preserves_archive_spelling_while_lookup_normalizes() {
 }
 
 #[test]
-fn rejects_xmem_compressed_files_at_extraction_time() {
+fn rejects_xmem_compressed_files_at_parse_time() {
     let mut bytes = tiny_tes4_index();
     write_u32(&mut bytes, 12, 3 | (1 << 2) | (1 << 9));
-    let archive = Archive::read(&bytes).unwrap();
+
     assert!(matches!(
-        archive.read_file("data/file.txt"),
+        Archive::read(&bytes),
         Err(Error::NotImplemented("TES4 XMem compression"))
     ));
 }
@@ -340,7 +385,7 @@ fn embedded_name_skip_requires_compressed_size_prefix_after_name() {
 #[test]
 fn rejects_file_data_offset_outside_archive() {
     let mut bytes = tiny_tes4_index();
-    write_u32(&mut bytes, 70, 0x8000_0053);
+    write_u32(&mut bytes, 70, 0x0000_ffff);
     assert!(matches!(Archive::read(&bytes), Err(Error::OutOfBounds)));
 }
 

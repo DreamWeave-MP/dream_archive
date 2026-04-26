@@ -35,6 +35,14 @@ fn read_header(bytes: &[u8]) -> Result<ArchiveInfo> {
     }
 
     let archive_flags = ArchiveFlags::from_bits_retain(cursor.u32()?);
+    if archive_flags.contains(ArchiveFlags::XBOX_ARCHIVE) {
+        return Err(Error::NotImplemented("TES4 Xbox archive layout"));
+    }
+    if archive_flags.contains(ArchiveFlags::COMPRESSED)
+        && archive_flags.contains(ArchiveFlags::XBOX_COMPRESSED)
+    {
+        return Err(Error::NotImplemented("TES4 XMem compression"));
+    }
     if !archive_flags.contains(ArchiveFlags::DIRECTORY_STRINGS) {
         return Err(Error::NotImplemented(
             "TES4 hash-only archives without directory name strings",
@@ -67,7 +75,7 @@ fn read_header(bytes: &[u8]) -> Result<ArchiveInfo> {
 #[derive(Clone, Copy)]
 struct FolderRecord {
     file_count: u32,
-    file_records_offset: u32,
+    file_records_offset: u64,
 }
 
 fn read_entries(bytes: &[u8], info: ArchiveInfo) -> Result<Vec<Entry>> {
@@ -91,7 +99,8 @@ fn read_entries(bytes: &[u8], info: ArchiveInfo) -> Result<Vec<Entry>> {
     let mut entries = Vec::new();
     entries.try_reserve_exact(info.file_count.try_into()?)?;
     for folder in folders {
-        if usize::try_from(folder.file_records_offset)? < cursor.position() {
+        let file_records_offset: usize = folder.file_records_offset.try_into()?;
+        if file_records_offset < cursor.position() || file_records_offset > bytes.len() {
             return Err(Error::OutOfBounds);
         }
         let folder_name = normalize_folder_name(read_bzstring(&mut cursor)?);
@@ -136,11 +145,13 @@ fn read_entries(bytes: &[u8], info: ArchiveInfo) -> Result<Vec<Entry>> {
 fn read_folder_record(cursor: &mut Cursor<'_>, version: ArchiveVersion) -> Result<FolderRecord> {
     let _hash = cursor.bytes(8)?;
     let file_count = cursor.u32()?;
-    let mut file_records_offset = cursor.u32()?;
-    if matches!(version, ArchiveVersion::v105) {
-        file_records_offset = cursor.u32()?;
-        let _padding = cursor.u32()?;
-    }
+    let file_records_offset = match version {
+        ArchiveVersion::v103 | ArchiveVersion::v104 => u64::from(cursor.u32()?),
+        ArchiveVersion::v105 => {
+            let _unknown = cursor.u32()?;
+            cursor.u64()?
+        }
+    };
     Ok(FolderRecord {
         file_count,
         file_records_offset,
@@ -153,7 +164,7 @@ fn read_file_record(cursor: &mut Cursor<'_>) -> Result<FileRecord> {
     let offset = cursor.u32()?;
     Ok(FileRecord {
         stored_size: size & !(1 << 30 | 1 << 31),
-        data_offset: offset,
+        data_offset: offset & !(1 << 31),
         compression_toggled: size & (1 << 30) != 0,
         checked: size & (1 << 31) != 0,
     })
