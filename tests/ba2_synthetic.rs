@@ -133,6 +133,65 @@ fn writes_ba2_gnrl_archive_from_bytes() {
 }
 
 #[test]
+fn ba2_writer_places_payloads_before_string_table() {
+    let mut builder = Builder::new();
+    builder.set_compression(Some(Ba2CompressionFormat::Zip));
+    builder
+        .add_bytes_with_compression(
+            "data/compressed.txt",
+            b"payload payload payload",
+            CompressionOverride::Inherit,
+        )
+        .unwrap();
+    builder
+        .add_bytes_with_compression("data/plain.txt", b"plain", CompressionOverride::Store)
+        .unwrap();
+    builder
+        .add_bytes_with_compression(
+            "data/forced.txt",
+            b"forced forced forced",
+            CompressionOverride::Compress,
+        )
+        .unwrap();
+
+    let bytes = builder.to_vec().unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
+    let string_table_offset = u64::from_le_bytes(bytes[16..24].try_into().unwrap());
+    let mut payload_end = 24 + 36 * archive.len();
+
+    for entry in archive.entries() {
+        let chunk = &entry.file().chunks()[0];
+        assert!(chunk.offset() < string_table_offset);
+        assert_eq!(chunk.offset(), u64::try_from(payload_end).unwrap());
+        payload_end += usize::try_from(chunk.stored_size()).unwrap();
+    }
+    assert_eq!(u64::try_from(payload_end).unwrap(), string_table_offset);
+
+    let mut cursor = usize::try_from(string_table_offset).unwrap();
+    for entry in archive.entries() {
+        let len = usize::from(u16::from_le_bytes(
+            bytes[cursor..cursor + 2].try_into().unwrap(),
+        ));
+        cursor += 2;
+        assert_eq!(bytes[cursor..cursor + len].as_bstr(), entry.name());
+        cursor += len;
+    }
+    assert_eq!(cursor, bytes.len());
+    assert_eq!(
+        archive.read_file("data/compressed.txt").unwrap().unwrap(),
+        b"payload payload payload"
+    );
+    assert_eq!(
+        archive.read_file("data/plain.txt").unwrap().unwrap(),
+        b"plain"
+    );
+    assert_eq!(
+        archive.read_file("data/forced.txt").unwrap().unwrap(),
+        b"forced forced forced"
+    );
+}
+
+#[test]
 fn writes_ba2_v3_archive_from_bytes() {
     let mut builder = Builder::new();
     builder.set_version(ArchiveVersion::v3);

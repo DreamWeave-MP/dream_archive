@@ -1,9 +1,11 @@
-//! Small, pure-Rust library for Bethesda archive formats.
+//! Pure-Rust library for Bethesda archive formats.
 //!
-//! The implementation targets the runtime operations `OpenMW` needs: detect,
-//! list, lookup, extract files, and reconstruct DDS streams from BA2 DX10
-//! texture archives. It also provides deterministic builders for the archive
-//! families whose writer semantics are implemented.
+//! The top-level [`Archive`] facade is the ordinary entry point: detect an
+//! archive, list entries, look files up, and extract them without first caring
+//! whether the container is BA2, TES3 BSA, or TES4 BSA. Format-specific modules
+//! remain available for archive metadata, hash-only BSA workflows, builder
+//! policy, and other places where the formats insist on being different
+//! (because of course they do).
 //!
 //! Archive paths are byte strings. Bethesda archive formats do not reliably
 //! declare filename encodings, and older tools commonly wrote paths using the
@@ -12,18 +14,32 @@
 //! the BSA filename helpers to encode that text explicitly before lookup rather
 //! than guessing a code page.
 //!
+//! # Capability summary
+//!
+//! - BA2 GNRL: read, extract, and write.
+//! - BA2 DX10: read and extract by reconstructing DDS headers from archive
+//!   texture metadata. Writing is not implemented yet.
+//! - BA2 GNMF: metadata parsing only; payload extraction/writing is not
+//!   implemented.
+//! - TES3 BSA: read, extract, and write.
+//! - TES4 BSA: read, extract, and write for PC v103/v104/v105 archives,
+//!   including compressed, hash-only, and embedded-name layouts.
+//! - Console/Xbox archive layouts and `XMem` compression are explicitly
+//!   unsupported.
+//!
 //! # Example
 //!
-//! ```ignore
-//! # #[cfg(feature = "ba2")]
-//! # fn main() -> dream_archive::ba2::Result<()> {
-//! let archive = dream_archive::ba2::Archive::open_path("Data/SomeArchive.ba2")?;
+//! ```no_run
+//! # fn main() -> dream_archive::Result<()> {
+//! let archive = dream_archive::Archive::open_path("Data/SomeArchive.bsa")?;
 //! for entry in archive.entries() {
-//!     println!("{}", entry.name());
+//!     if let Some(path) = entry.path() {
+//!         println!("{path}");
+//!     }
 //! }
-//! if let Some(bytes) = archive.read_file("textures/example.dds")? {
-//!     println!("extracted {} bytes", bytes.len());
-//! }
+//!
+//! let bytes = archive.read_file_required("textures/example.dds")?;
+//! println!("extracted {} bytes", bytes.len());
 //! # Ok(())
 //! # }
 //! ```

@@ -250,10 +250,12 @@ impl Builder {
     pub fn write_to(&self, mut out: impl Write) -> Result<()> {
         let entries = self.sorted_entries();
         let prepared = self.prepare_entries(&entries)?;
-        let string_table_offset = string_table_offset(entries.len(), self.version)?;
-        let payload_offset = string_table_offset
-            .checked_add(string_table_len(&entries)?)
-            .ok_or(Error::OutOfBounds)?;
+        let payload_offset = payload_offset(entries.len(), self.version)?;
+        let string_table_offset = prepared.iter().try_fold(payload_offset, |offset, entry| {
+            offset
+                .checked_add(entry.stored.len())
+                .ok_or(Error::OutOfBounds)
+        })?;
 
         write_u32(&mut out, MAGIC)?;
         write_u32(&mut out, self.version as u32)?;
@@ -296,12 +298,12 @@ impl Builder {
                 .ok_or(Error::OutOfBounds)?;
         }
 
+        for entry in &prepared {
+            out.write_all(&entry.stored)?;
+        }
         for entry in &entries {
             write_u16(&mut out, entry.name.len().try_into()?)?;
             out.write_all(&entry.name)?;
-        }
-        for entry in &prepared {
-            out.write_all(&entry.stored)?;
         }
         Ok(())
     }
@@ -356,7 +358,7 @@ impl BuilderEntry {
     }
 }
 
-fn string_table_offset(file_count: usize, version: ArchiveVersion) -> Result<usize> {
+fn payload_offset(file_count: usize, version: ArchiveVersion) -> Result<usize> {
     header_size(version)?
         .checked_add(FILE_RECORD_SIZE_GNRL * file_count)
         .ok_or(Error::OutOfBounds)
@@ -368,13 +370,6 @@ fn header_size(version: ArchiveVersion) -> Result<usize> {
         ArchiveVersion::v2 => HEADER_SIZE_V1.checked_add(8).ok_or(Error::OutOfBounds),
         ArchiveVersion::v3 => HEADER_SIZE_V1.checked_add(12).ok_or(Error::OutOfBounds),
     }
-}
-
-fn string_table_len(entries: &[&BuilderEntry]) -> Result<usize> {
-    entries.iter().try_fold(0usize, |sum, entry| {
-        sum.checked_add(2 + entry.name.len())
-            .ok_or(Error::OutOfBounds)
-    })
 }
 
 fn normalize_stored_path(path: &[u8]) -> Result<BString> {
