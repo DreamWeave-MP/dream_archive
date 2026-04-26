@@ -85,6 +85,27 @@ fn tes3_extract_to_rejects_parent_directory_paths() {
 }
 
 #[test]
+fn tes3_extract_to_rejects_colon_paths() {
+    let archive = Archive::read(&tiny_tes3_archive(b"Meshes/bad:name.nif", b"hello")).unwrap();
+    let out = output_dir("tes3-colon");
+
+    assert!(
+        matches!(archive.extract_to(&out), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::InvalidData)
+    );
+    assert!(!out.join("Meshes").join("bad:name.nif").exists());
+}
+
+#[test]
+fn tes3_extract_to_rejects_empty_paths() {
+    let archive = Archive::read(&tiny_tes3_archive(b"", b"hello")).unwrap();
+    let out = output_dir("tes3-empty");
+
+    assert!(
+        matches!(archive.extract_to(&out), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::InvalidData)
+    );
+}
+
+#[test]
 fn rejects_invalid_tes3_version() {
     let mut bytes = tiny_tes3_archive(b"file.txt", b"hello");
     bytes[0..4].copy_from_slice(&42_u32.to_le_bytes());

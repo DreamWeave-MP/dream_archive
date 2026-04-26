@@ -194,6 +194,24 @@ fn tes4_extract_to_rejects_parent_directory_paths() {
 }
 
 #[test]
+fn tes4_extract_to_rejects_colon_paths() {
+    let archive = Archive::read(&tiny_tes4_index_with_version_names_and_payload(
+        104,
+        0,
+        b"data",
+        b"bad:name.txt",
+        b"payload",
+    ))
+    .unwrap();
+    let out = output_dir("tes4-colon");
+
+    assert!(
+        matches!(archive.extract_to(&out), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::InvalidData)
+    );
+    assert!(!out.join("data").join("bad:name.txt").exists());
+}
+
+#[test]
 fn rejects_truncated_tes4_folder_record() {
     let mut bytes = tiny_tes4_index();
     bytes.truncate(40);

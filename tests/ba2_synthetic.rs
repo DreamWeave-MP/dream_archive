@@ -444,6 +444,37 @@ fn ba2_extract_to_rejects_parent_directory_paths() {
 }
 
 #[test]
+fn ba2_extract_to_rejects_colon_paths() {
+    let archive = Archive::read(&tiny_archive(TinyArchiveOptions {
+        name: Some(b"textures/bad:name.txt"),
+        chunk_offset: 60 + 2 + u64::try_from(b"textures/bad:name.txt".len()).unwrap(),
+        ..TinyArchiveOptions::default()
+    }))
+    .unwrap();
+    let out = output_dir("ba2-colon");
+
+    assert!(
+        matches!(archive.extract_to(&out), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::InvalidData)
+    );
+    assert!(!out.join("textures").join("bad:name.txt").exists());
+}
+
+#[test]
+fn ba2_extract_to_rejects_unnamed_entries() {
+    let archive = Archive::read(&tiny_archive(TinyArchiveOptions {
+        name: None,
+        string_table_offset: 0,
+        ..TinyArchiveOptions::default()
+    }))
+    .unwrap();
+    let out = output_dir("ba2-unnamed");
+
+    assert!(
+        matches!(archive.extract_to(&out), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::InvalidData)
+    );
+}
+
+#[test]
 fn detects_zlib_decompression_size_mismatch() {
     let payload = zlib_compress(b"short");
     let bytes = tiny_archive(TinyArchiveOptions {

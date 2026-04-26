@@ -52,3 +52,8 @@ required-features = ["bsa-tes4"]
 [[test]]
 name = "bsa_tes3_synthetic"
 required-features = ["bsa-tes3"]
+
+[[bench]]
+name = "morrowind_extract"
+harness = false
+required-features = ["bsa-tes3"]
