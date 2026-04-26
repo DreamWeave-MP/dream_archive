@@ -5,6 +5,22 @@ pub mod tes4;
 
 use std::{collections::TryReserveError, fmt, io, num::TryFromIntError};
 
+pub(crate) fn normalize_lookup_path(path: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(path.len());
+    for byte in path.iter().copied() {
+        let byte = match byte {
+            b'\\' => b'/',
+            b'A'..=b'Z' => byte + 32,
+            _ => byte,
+        };
+        if byte == b'/' && (out.is_empty() || out.last() == Some(&b'/')) {
+            continue;
+        }
+        out.push(byte);
+    }
+    out
+}
+
 /// Result type for BSA operations.
 pub type Result<T> = std::result::Result<T, Error>;
 

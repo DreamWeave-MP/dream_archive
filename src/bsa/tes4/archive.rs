@@ -1,4 +1,5 @@
 use super::{Error, Result, parser};
+use crate::bsa::normalize_lookup_path;
 use crate::{
     Copied,
     extract::{ensure_parent_dir, output_path_into},
@@ -216,7 +217,7 @@ impl Archive {
     /// Get an entry by case-insensitive path with slash normalization.
     #[must_use]
     pub fn get(&self, path: impl AsRef<[u8]>) -> Option<&Entry> {
-        let normalized = normalize_path(path.as_ref());
+        let normalized = normalize_lookup_path(path.as_ref());
         self.lookup
             .get(normalized.as_slice())
             .map(|&index| &self.entries[index])
@@ -566,7 +567,7 @@ fn read_decompressed(
 impl Entry {
     pub(super) fn new(folder: BString, name: BString, record: FileRecord) -> Self {
         let path = join_path(&folder, &name);
-        let lookup_path = BString::from(normalize_path(&path));
+        let lookup_path = BString::from(normalize_lookup_path(&path));
         Self {
             path,
             folder,
@@ -585,17 +586,6 @@ fn join_path(folder: &[u8], name: &[u8]) -> BString {
     }
     path.extend_from_slice(name);
     BString::from(path)
-}
-
-fn normalize_path(path: &[u8]) -> Vec<u8> {
-    path.iter()
-        .copied()
-        .map(|byte| match byte {
-            b'/' => b'\\',
-            b'A'..=b'Z' => byte + 32,
-            _ => byte,
-        })
-        .collect()
 }
 
 impl TryFrom<Copied<'_>> for Archive {

@@ -1,4 +1,5 @@
 use super::{Error, Result, parser};
+use crate::bsa::normalize_lookup_path;
 use crate::{
     Copied,
     extract::{ensure_parent_dir, output_path_into},
@@ -112,7 +113,7 @@ impl Archive {
 
     #[must_use]
     pub fn get(&self, path: impl AsRef<[u8]>) -> Option<&Entry> {
-        let normalized = normalize_path(path.as_ref());
+        let normalized = normalize_lookup_path(path.as_ref());
         self.lookup
             .get(normalized.as_slice())
             .map(|&index| &self.entries[index])
@@ -282,7 +283,7 @@ impl Archive {
 
 impl Entry {
     pub(super) fn new(path: BString, record: FileRecord, hash: u64) -> Self {
-        let lookup_path = BString::from(normalize_path(&path));
+        let lookup_path = BString::from(normalize_lookup_path(&path));
         Self {
             path,
             lookup_path,
@@ -290,17 +291,6 @@ impl Entry {
             hash,
         }
     }
-}
-
-fn normalize_path(path: &[u8]) -> Vec<u8> {
-    path.iter()
-        .copied()
-        .map(|byte| match byte {
-            b'/' => b'\\',
-            b'A'..=b'Z' => byte + 32,
-            _ => byte,
-        })
-        .collect()
 }
 
 impl TryFrom<Copied<'_>> for Archive {

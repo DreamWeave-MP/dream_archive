@@ -48,6 +48,7 @@ fn extracts_synthetic_tes3_file() {
     assert_eq!(archive.entries()[0].file().size, 5);
     assert_eq!(archive.entries()[0].hash(), 0x0123_4567_89ab_cdef);
     assert!(archive.contains("meshes\\foo.nif"));
+    assert!(archive.contains("/MESHES//foo.nif"));
     assert_eq!(
         archive.read_file("meshes/foo.nif").unwrap().unwrap(),
         b"hello"
@@ -81,6 +82,19 @@ fn writes_tes3_archive_from_bytes() {
     assert_eq!(archive.entries()[0].hash(), 0xECDD_AD85_071D_1701);
     assert_eq!(archive.entries()[0].path(), "textures\\bar.dds");
     assert_eq!(archive.entries()[1].path(), "meshes\\foo.nif");
+}
+
+#[test]
+fn tes3_lookup_uses_openmw_style_path_normalization() {
+    let archive = Archive::read(&tiny_tes3_archive(b"\\Meshes//Foo.NIF", b"hello")).unwrap();
+
+    assert_eq!(archive.entries()[0].path(), "\\Meshes//Foo.NIF");
+    assert!(archive.contains("meshes/foo.nif"));
+    assert!(archive.contains("/MESHES\\\\FOO.NIF"));
+    assert_eq!(
+        archive.read_file("meshes//foo.nif").unwrap().unwrap(),
+        b"hello"
+    );
 }
 
 #[test]

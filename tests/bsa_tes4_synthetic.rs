@@ -182,6 +182,27 @@ fn parses_synthetic_tes4_index() {
     assert_eq!(entry.file().stored_size, 7);
     assert_eq!(entry.file().data_offset, 83);
     assert!(archive.get("DATA/file.TXT").is_some());
+    assert!(archive.get("/DATA//file.TXT").is_some());
+}
+
+#[test]
+fn tes4_lookup_uses_openmw_style_path_normalization() {
+    let archive = Archive::read(&tiny_tes4_index_with_version_names_and_payload(
+        104,
+        0,
+        b"\\Data//Meshes",
+        b"Foo.NIF",
+        b"payload",
+    ))
+    .unwrap();
+
+    assert_eq!(archive.entries()[0].path(), "\\Data//Meshes\\Foo.NIF");
+    assert!(archive.contains("data/meshes/foo.nif"));
+    assert!(archive.contains("/DATA\\\\MESHES//FOO.NIF"));
+    assert_eq!(
+        archive.read_file("data//meshes/foo.nif").unwrap().unwrap(),
+        b"payload"
+    );
 }
 
 #[test]
