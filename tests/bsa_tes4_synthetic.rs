@@ -516,6 +516,55 @@ fn writes_compressed_tes4_v105_archive_from_bytes() {
 }
 
 #[test]
+fn tes4_writer_can_toggle_per_file_compression() {
+    let mut builder = Builder::new();
+    builder.set_compressed(true);
+    builder
+        .add_bytes_with_compression("compressed.txt", b"compressed payload", None)
+        .unwrap();
+    builder
+        .add_bytes_with_compression("plain.txt", b"plain payload", Some(false))
+        .unwrap();
+
+    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+
+    let compressed = archive.get("compressed.txt").unwrap().file();
+    let plain = archive.get("plain.txt").unwrap().file();
+    assert!(!compressed.compression_toggled);
+    assert!(plain.compression_toggled);
+    assert_eq!(
+        archive.read_file("plain.txt").unwrap().unwrap(),
+        b"plain payload"
+    );
+    assert_eq!(
+        archive.read_file("compressed.txt").unwrap().unwrap(),
+        b"compressed payload"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn tes4_writer_add_dir_follows_file_symlinks_at_relative_path() {
+    let root = output_dir("tes4-add-dir-symlink");
+    let external = output_dir("tes4-add-dir-external");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&external).unwrap();
+    std::fs::write(external.join("different.dds"), b"target bytes").unwrap();
+    std::os::unix::fs::symlink(external.join("different.dds"), root.join("someThing.dds")).unwrap();
+
+    let mut builder = Builder::new();
+    builder.add_dir(&root).unwrap();
+    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+
+    assert_eq!(
+        archive.read_file("something.dds").unwrap().unwrap(),
+        b"target bytes"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+    std::fs::remove_dir_all(external).unwrap();
+}
+
+#[test]
 fn tes4_writer_encodes_legacy_text_paths() {
     let mut builder = Builder::new();
     builder

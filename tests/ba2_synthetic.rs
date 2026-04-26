@@ -188,6 +188,49 @@ fn writes_lz4_compressed_ba2_v3_gnrl_archive() {
 }
 
 #[test]
+fn ba2_writer_can_leave_one_file_uncompressed() {
+    let mut builder = Builder::new();
+    builder.set_compression(Some(Ba2CompressionFormat::Zip));
+    builder
+        .add_bytes_with_compression("compressed.txt", b"compressed payload", None)
+        .unwrap();
+    builder
+        .add_bytes_with_compression("plain.txt", b"plain payload", Some(false))
+        .unwrap();
+
+    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+
+    assert!(archive.get("compressed.txt").unwrap().file().chunks()[0].is_compressed());
+    assert!(!archive.get("plain.txt").unwrap().file().chunks()[0].is_compressed());
+    assert_eq!(
+        archive.read_file("plain.txt").unwrap().unwrap(),
+        b"plain payload"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn ba2_writer_add_dir_follows_file_symlinks_at_relative_path() {
+    let root = output_dir("ba2-add-dir-symlink");
+    let external = output_dir("ba2-add-dir-external");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&external).unwrap();
+    std::fs::write(external.join("different.dds"), b"target bytes").unwrap();
+    std::os::unix::fs::symlink(external.join("different.dds"), root.join("someThing.dds")).unwrap();
+
+    let mut builder = Builder::new();
+    builder.add_dir(&root).unwrap();
+    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+
+    assert_eq!(
+        archive.read_file("something.dds").unwrap().unwrap(),
+        b"target bytes"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+    std::fs::remove_dir_all(external).unwrap();
+}
+
+#[test]
 fn ba2_lz4_writer_requires_v3_header() {
     let mut builder = Builder::new();
     builder.set_compression(Some(Ba2CompressionFormat::LZ4));

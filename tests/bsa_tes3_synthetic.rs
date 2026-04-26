@@ -102,6 +102,28 @@ fn tes3_writer_encodes_legacy_text_paths() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn tes3_writer_add_dir_follows_file_symlinks_at_relative_path() {
+    let root = output_dir("tes3-add-dir-symlink");
+    let external = output_dir("tes3-add-dir-external");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&external).unwrap();
+    std::fs::write(external.join("different.dds"), b"target bytes").unwrap();
+    std::os::unix::fs::symlink(external.join("different.dds"), root.join("someThing.dds")).unwrap();
+
+    let mut builder = Builder::new();
+    builder.add_dir(&root).unwrap();
+    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+
+    assert_eq!(
+        archive.read_file("something.dds").unwrap().unwrap(),
+        b"target bytes"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+    std::fs::remove_dir_all(external).unwrap();
+}
+
 #[test]
 fn tes3_lookup_uses_openmw_style_path_normalization() {
     let archive = Archive::read(&tiny_tes3_archive(b"\\Meshes//Foo.NIF", b"hello")).unwrap();

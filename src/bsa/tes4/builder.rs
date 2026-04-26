@@ -6,9 +6,9 @@ use crate::bsa::{FilenameEncoding, encode_filename};
 use bstr::BString;
 use flate2::{Compression, write::ZlibEncoder};
 use std::{
-    fs::File,
+    fs::{self, File},
     io::{BufWriter, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 const MAGIC: u32 = u32::from_le_bytes(*b"BSA\0");
@@ -27,6 +27,7 @@ pub struct Builder {
     version: ArchiveVersion,
     archive_types: ArchiveTypes,
     compressed: bool,
+    zlib_level: Compression,
     entries: Vec<BuilderEntry>,
 }
 
@@ -36,6 +37,7 @@ struct BuilderEntry {
     name: BString,
     folder_hash: HashFields,
     file_hash: HashFields,
+    compressed: Option<bool>,
     bytes: Vec<u8>,
 }
 
@@ -58,6 +60,7 @@ impl Default for Builder {
             version: ArchiveVersion::v104,
             archive_types: ArchiveTypes::MISC,
             compressed: false,
+            zlib_level: Compression::default(),
             entries: Vec::new(),
         }
     }
@@ -100,6 +103,16 @@ impl Builder {
     }
 
     #[must_use]
+    pub fn zlib_level(&self) -> Compression {
+        self.zlib_level
+    }
+
+    pub fn set_zlib_level(&mut self, level: Compression) -> &mut Self {
+        self.zlib_level = level;
+        self
+    }
+
+    #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -116,6 +129,24 @@ impl Builder {
     /// Returns an error if the path can not be represented safely, is a
     /// duplicate after TES4 archive normalization, or allocation fails.
     pub fn add_bytes(&mut self, path: impl AsRef<[u8]>, bytes: impl AsRef<[u8]>) -> Result<()> {
+        self.add_bytes_with_compression(path, bytes, None)
+    }
+
+    /// Add bytes with an explicit per-file compression override.
+    ///
+    /// `None` uses the builder default. TES4 stores this as the archive
+    /// compression flag plus, when needed, the per-file compression toggle bit.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path can not be represented safely, is a
+    /// duplicate after TES4 archive normalization, or allocation fails.
+    pub fn add_bytes_with_compression(
+        &mut self,
+        path: impl AsRef<[u8]>,
+        bytes: impl AsRef<[u8]>,
+        compressed: Option<bool>,
+    ) -> Result<()> {
         let (folder, name) = normalize_stored_path(path.as_ref())?;
         if self
             .entries
@@ -134,8 +165,73 @@ impl Builder {
             name,
             folder_hash,
             file_hash,
+            compressed,
             bytes: owned,
         });
+        Ok(())
+    }
+
+    /// Read a filesystem file and store it at `archive_path`.
+    ///
+    /// Symlinked files are followed for payload bytes; the archive path is the
+    /// path supplied by the caller.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading the file fails or adding the archive entry fails.
+    pub fn add_file(
+        &mut self,
+        archive_path: impl AsRef<[u8]>,
+        source: impl AsRef<Path>,
+    ) -> Result<()> {
+        self.add_file_with_compression(archive_path, source, None)
+    }
+
+    /// Read a filesystem file with a per-file compression override.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading the file fails or adding the archive entry fails.
+    pub fn add_file_with_compression(
+        &mut self,
+        archive_path: impl AsRef<[u8]>,
+        source: impl AsRef<Path>,
+        compressed: Option<bool>,
+    ) -> Result<()> {
+        let bytes = fs::read(source)?;
+        self.add_bytes_with_compression(archive_path, bytes, compressed)
+    }
+
+    /// Recursively add all files below `root` using paths relative to `root`.
+    ///
+    /// File symlinks are followed for payload bytes, but stored at the relative
+    /// path where the symlink was found.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if directory traversal, file reading, or adding an entry fails.
+    pub fn add_dir(&mut self, root: impl AsRef<Path>) -> Result<()> {
+        self.add_dir_with_compression(root, None)
+    }
+
+    /// Recursively add a directory with a per-file compression override.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if directory traversal, file reading, or adding an entry fails.
+    pub fn add_dir_with_compression(
+        &mut self,
+        root: impl AsRef<Path>,
+        compressed: Option<bool>,
+    ) -> Result<()> {
+        let root = root.as_ref();
+        for path in collect_files(root)? {
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|_| Error::InvalidArchivePath)?;
+            let archive_path = path_to_archive_bytes(relative)?;
+            self.add_file_with_compression(archive_path, &path, compressed)?;
+        }
         Ok(())
     }
 
@@ -238,7 +334,7 @@ impl Builder {
             write_bzstring(&mut out, folder.name)?;
             for entry in &prepared[folder.files_start..folder.files_end] {
                 write_hash(&mut out, entry.entry.file_hash)?;
-                write_u32(&mut out, entry.stored.len().try_into()?)?;
+                write_u32(&mut out, entry.file_size(self.compressed)?)?;
                 write_u32(&mut out, payload_offset)?;
                 payload_offset = payload_offset
                     .checked_add(entry.stored.len().try_into()?)
@@ -260,8 +356,8 @@ impl Builder {
         let mut prepared = Vec::new();
         prepared.try_reserve_exact(entries.len())?;
         for entry in entries {
-            let stored = if self.compressed {
-                compressed_payload(self.version, &entry.bytes)?
+            let stored = if entry.is_compressed(self.compressed) {
+                compressed_payload(self.version, &entry.bytes, self.zlib_level)?
             } else {
                 entry.bytes.clone()
             };
@@ -303,6 +399,22 @@ impl Builder {
                 .ok_or(Error::OutOfBounds)?,
         )
         .ok_or(Error::OutOfBounds)
+    }
+}
+
+impl PreparedEntry<'_> {
+    fn file_size(&self, default_compressed: bool) -> Result<u32> {
+        let mut size: u32 = self.stored.len().try_into()?;
+        if self.entry.is_compressed(default_compressed) != default_compressed {
+            size |= 1 << 30;
+        }
+        Ok(size)
+    }
+}
+
+impl BuilderEntry {
+    fn is_compressed(&self, default_compressed: bool) -> bool {
+        self.compressed.unwrap_or(default_compressed)
     }
 }
 
@@ -383,13 +495,17 @@ fn write_folder_record(
     Ok(())
 }
 
-fn compressed_payload(version: ArchiveVersion, bytes: &[u8]) -> Result<Vec<u8>> {
+fn compressed_payload(
+    version: ArchiveVersion,
+    bytes: &[u8],
+    zlib_level: Compression,
+) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     out.try_reserve_exact(bytes.len().saturating_add(4))?;
     out.extend_from_slice(&u32::try_from(bytes.len())?.to_le_bytes());
     match version {
         ArchiveVersion::v103 | ArchiveVersion::v104 => {
-            let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+            let mut encoder = ZlibEncoder::new(Vec::new(), zlib_level);
             encoder.write_all(bytes)?;
             out.extend_from_slice(&encoder.finish()?);
         }
@@ -473,4 +589,52 @@ fn write_u32(out: &mut impl Write, value: u32) -> Result<()> {
 fn write_u64(out: &mut impl Write, value: u64) -> Result<()> {
     out.write_all(&value.to_le_bytes())?;
     Ok(())
+}
+
+fn collect_files(root: &Path) -> Result<Vec<PathBuf>> {
+    let mut pending = vec![root.to_path_buf()];
+    let mut files = Vec::new();
+    while let Some(dir) = pending.pop() {
+        let mut entries = Vec::new();
+        for entry in fs::read_dir(&dir)? {
+            entries.push(entry?.path());
+        }
+        entries.sort();
+        for path in entries {
+            let symlink_metadata = fs::symlink_metadata(&path)?;
+            if symlink_metadata.file_type().is_symlink() {
+                if fs::metadata(&path)?.is_file() {
+                    files.push(path);
+                }
+            } else if symlink_metadata.is_dir() {
+                pending.push(path);
+            } else if symlink_metadata.is_file() {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+fn path_to_archive_bytes(path: &Path) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    for component in path.components() {
+        if !out.is_empty() {
+            out.push(b'/');
+        }
+        let std::path::Component::Normal(part) = component else {
+            return Err(Error::InvalidArchivePath);
+        };
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt as _;
+            out.extend_from_slice(part.as_bytes());
+        }
+        #[cfg(not(unix))]
+        {
+            out.extend_from_slice(part.to_str().ok_or(Error::InvalidArchivePath)?.as_bytes());
+        }
+    }
+    Ok(out)
 }
