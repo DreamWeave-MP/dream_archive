@@ -2,12 +2,14 @@ mod archive;
 mod builder;
 mod chunk;
 mod dds;
+mod dx10_builder;
 mod hash;
 mod parser;
 
 pub use archive::{Archive, ArchiveFile, ArchiveInfo, Entry, FileHeader, TextureHeader};
 pub use builder::Builder;
 pub use chunk::{Ba2CompressionFormat, Chunk};
+pub use dx10_builder::Dx10Builder;
 pub use hash::{FileHash, Hash, hash_file, hash_file_in_place};
 
 use std::{collections::TryReserveError, fmt, io, num::TryFromIntError};
@@ -122,9 +124,17 @@ impl From<crate::read::Error> for Error {
 /// BA2 archive payload format.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum PayloadFormat {
+    /// General-file BA2 payload table.
     #[default]
     GNRL,
+    /// DirectX texture BA2 payload table.
     DX10,
+    /// Sony GNM (`.gnf`) texture payload table.
+    ///
+    /// `dream_archive` parses GNMF metadata so callers can identify these
+    /// archives, but extraction and writing are intentionally unsupported. GNMF
+    /// payloads require console texture swizzle/unswizzle semantics rather than
+    /// a raw chunk dump.
     GNMF,
 }
 

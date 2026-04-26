@@ -1,7 +1,10 @@
 use bstr::ByteSlice as _;
 use dream_archive::{
     CompressionOverride,
-    ba2::{Archive, ArchiveVersion, Ba2CompressionFormat, Builder, Error, PayloadFormat},
+    ba2::{
+        Archive, ArchiveVersion, Ba2CompressionFormat, Builder, Dx10Builder, Error, PayloadFormat,
+        TextureHeader,
+    },
 };
 use flate2::{Compression, write::ZlibEncoder};
 use std::path::PathBuf;
@@ -384,6 +387,163 @@ fn ba2_writer_rejects_unsafe_paths() {
             Err(Error::InvalidArchivePath)
         ));
     }
+}
+
+fn tiny_texture_header() -> TextureHeader {
+    TextureHeader {
+        height: 8,
+        width: 16,
+        mip_count: 4,
+        format: 98,
+        flags: 0,
+        tile_mode: 0,
+    }
+}
+
+#[test]
+fn writes_ba2_dx10_archive_from_texture_payload() {
+    let mut builder = Dx10Builder::new();
+    builder
+        .add_texture_bytes("Textures/Tiny.DDS", tiny_texture_header(), b"texture-bytes")
+        .unwrap();
+
+    let bytes = builder.to_vec().unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
+
+    assert_eq!(archive.info().format, PayloadFormat::DX10);
+    assert_eq!(archive.info().version, ArchiveVersion::v1);
+    assert_eq!(archive.info().compression_format, Ba2CompressionFormat::Zip);
+    assert!(archive.info().strings);
+    assert_eq!(archive.entries()[0].file().chunks()[0].mips, Some(0..=3));
+
+    let data = archive.read_file("textures/tiny.dds").unwrap().unwrap();
+    assert_eq!(&data[0..4], b"DDS ");
+    assert_eq!(u32::from_le_bytes(data[12..16].try_into().unwrap()), 8);
+    assert_eq!(u32::from_le_bytes(data[16..20].try_into().unwrap()), 16);
+    assert_eq!(u32::from_le_bytes(data[28..32].try_into().unwrap()), 4);
+    assert_eq!(&data[84..88], b"DX10");
+    assert_eq!(u32::from_le_bytes(data[128..132].try_into().unwrap()), 98);
+    assert_eq!(&data[148..], b"texture-bytes");
+}
+
+#[test]
+fn ba2_dx10_writer_places_payloads_before_string_table() {
+    let mut builder = Dx10Builder::new();
+    builder.set_compression(Some(Ba2CompressionFormat::Zip));
+    builder
+        .add_texture_bytes_with_compression(
+            "textures/compressed.dds",
+            tiny_texture_header(),
+            b"payload payload payload",
+            CompressionOverride::Inherit,
+        )
+        .unwrap();
+    builder
+        .add_texture_bytes_with_compression(
+            "textures/plain.dds",
+            tiny_texture_header(),
+            b"plain",
+            CompressionOverride::Store,
+        )
+        .unwrap();
+
+    let bytes = builder.to_vec().unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
+    let string_table_offset = u64::from_le_bytes(bytes[16..24].try_into().unwrap());
+    let mut payload_end = 24 + 48 * archive.len();
+
+    for entry in archive.entries() {
+        let chunk = &entry.file().chunks()[0];
+        assert!(chunk.offset() < string_table_offset);
+        assert_eq!(chunk.offset(), u64::try_from(payload_end).unwrap());
+        payload_end += usize::try_from(chunk.stored_size()).unwrap();
+    }
+    assert_eq!(u64::try_from(payload_end).unwrap(), string_table_offset);
+    assert_eq!(
+        archive
+            .read_file("textures/compressed.dds")
+            .unwrap()
+            .unwrap()
+            .split_off(148),
+        b"payload payload payload"
+    );
+    assert_eq!(
+        archive
+            .read_file("textures/plain.dds")
+            .unwrap()
+            .unwrap()
+            .split_off(148),
+        b"plain"
+    );
+}
+
+#[test]
+fn writes_lz4_compressed_ba2_v3_dx10_archive() {
+    let mut builder = Dx10Builder::new();
+    builder.set_version(ArchiveVersion::v3);
+    builder.set_compression(Some(Ba2CompressionFormat::LZ4));
+    builder
+        .add_texture_bytes(
+            "textures/tiny.dds",
+            tiny_texture_header(),
+            b"texture texture",
+        )
+        .unwrap();
+
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
+
+    assert_eq!(archive.info().version, ArchiveVersion::v3);
+    assert_eq!(archive.info().compression_format, Ba2CompressionFormat::LZ4);
+    assert!(archive.entries()[0].file().chunks()[0].is_compressed());
+    assert_eq!(
+        archive
+            .read_file("textures/tiny.dds")
+            .unwrap()
+            .unwrap()
+            .split_off(148),
+        b"texture texture"
+    );
+}
+
+#[test]
+fn ba2_dx10_lz4_writer_requires_v3_header() {
+    let mut builder = Dx10Builder::new();
+    builder.set_compression(Some(Ba2CompressionFormat::LZ4));
+    builder
+        .add_texture_bytes("textures/tiny.dds", tiny_texture_header(), b"texture")
+        .unwrap();
+
+    assert!(matches!(
+        builder.to_vec(),
+        Err(Error::NotImplemented("BA2 LZ4 writer requires version 3"))
+    ));
+}
+
+#[test]
+fn ba2_dx10_writer_rejects_invalid_texture_metadata() {
+    let mut builder = Dx10Builder::new();
+    assert!(matches!(
+        builder.add_texture_bytes(
+            "textures/tiny.dds",
+            TextureHeader {
+                width: 0,
+                ..tiny_texture_header()
+            },
+            b"texture"
+        ),
+        Err(Error::Dds("zero-sized texture"))
+    ));
+    assert!(matches!(
+        builder.add_texture_bytes(
+            "textures/tiny.dds",
+            TextureHeader {
+                format: 255,
+                ..tiny_texture_header()
+            },
+            b"texture"
+        ),
+        Err(Error::Dds("unsupported DXGI format"))
+    ));
 }
 
 #[derive(Clone, Copy)]

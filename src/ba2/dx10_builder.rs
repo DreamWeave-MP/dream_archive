@@ -1,7 +1,7 @@
-use super::{ArchiveVersion, Error, FileHash, Result, hash_file};
+use super::{ArchiveVersion, Error, FileHash, Result, TextureHeader, builder, dds, hash_file};
 use crate::{CompressionOverride, builder_fs};
 use bstr::{BString, ByteSlice as _};
-use flate2::{Compression, write::ZlibEncoder};
+use flate2::Compression;
 use std::{
     borrow::Cow,
     collections::HashSet,
@@ -11,40 +11,42 @@ use std::{
 };
 
 const MAGIC: u32 = u32::from_le_bytes(*b"BTDX");
-const GNRL: u32 = u32::from_le_bytes(*b"GNRL");
-const HEADER_SIZE_V1: usize = 24;
-const FILE_RECORD_SIZE_GNRL: usize = 36;
-const FILE_HEADER_SIZE_GNRL: u16 = 0x10;
+const DX10: u32 = u32::from_le_bytes(*b"DX10");
+const FILE_HEADER_SIZE_DX10: u16 = 0x18;
+const FILE_RECORD_BASE_SIZE_DX10: usize = 24;
+const CHUNK_RECORD_SIZE_DX10: usize = 24;
 const CHUNK_SENTINEL: u32 = 0xBAAD_F00D;
 
-/// Builder for string-backed BA2 GNRL archives.
+/// Builder for BA2 DX10 texture archives.
 ///
-/// This deliberately writes one boring GNRL chunk per file. DX10 has texture
-/// metadata semantics. That is a separate feature, not a checkbox on a
-/// constructor pretending to be done.
+/// This takes explicit BA2 texture metadata and raw texture payload bytes. It
+/// does not parse DDS files or silently strip DDS headers. A texture archive API
+/// that lies about where the mip layout came from is how you get interestingly
+/// corrupt textures, and not the fun kind of interesting.
 #[derive(Clone, Debug)]
-pub struct Builder {
+pub struct Dx10Builder {
     version: ArchiveVersion,
     compression: Option<super::Ba2CompressionFormat>,
     zlib_level: Compression,
-    entries: Vec<BuilderEntry>,
+    entries: Vec<TextureEntry>,
     names: HashSet<BString>,
 }
 
 #[derive(Clone, Debug)]
-struct BuilderEntry {
+struct TextureEntry {
     name: BString,
     hash: FileHash,
+    header: TextureHeader,
     compression: CompressionOverride,
     bytes: Vec<u8>,
 }
 
-struct PreparedEntry<'a> {
-    entry: &'a BuilderEntry,
+struct PreparedTexture<'a> {
+    entry: &'a TextureEntry,
     stored: Cow<'a, [u8]>,
 }
 
-impl Default for Builder {
+impl Default for Dx10Builder {
     fn default() -> Self {
         Self {
             version: ArchiveVersion::v1,
@@ -56,7 +58,7 @@ impl Default for Builder {
     }
 }
 
-impl Builder {
+impl Dx10Builder {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -105,29 +107,41 @@ impl Builder {
         self.entries.is_empty()
     }
 
-    /// Add an owned copy of one raw file payload.
+    /// Add one texture payload with explicit BA2 DX10 metadata.
+    ///
+    /// `bytes` must be the texture data stored after the DDS header, not a full
+    /// DDS file. The archive reader reconstructs the DDS header from `header`
+    /// during extraction.
     ///
     /// # Errors
     ///
-    /// Returns an error if the path can not be represented safely, is a
-    /// duplicate after BA2 path normalization, or allocation fails.
-    pub fn add_bytes(&mut self, path: impl AsRef<[u8]>, bytes: impl AsRef<[u8]>) -> Result<()> {
-        self.add_bytes_with_compression(path, bytes, CompressionOverride::Inherit)
-    }
-
-    /// Add bytes with an explicit per-file compression policy.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the path can not be represented safely, is a
-    /// duplicate after BA2 path normalization, or allocation fails.
-    pub fn add_bytes_with_compression(
+    /// Returns an error if the path is invalid, the texture metadata can not be
+    /// represented as a supported DDS header, the normalized path is duplicated,
+    /// or allocation fails.
+    pub fn add_texture_bytes(
         &mut self,
         path: impl AsRef<[u8]>,
+        header: TextureHeader,
+        bytes: impl AsRef<[u8]>,
+    ) -> Result<()> {
+        self.add_texture_bytes_with_compression(path, header, bytes, CompressionOverride::Inherit)
+    }
+
+    /// Add one texture payload with an explicit per-file compression policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path or texture metadata is invalid, the
+    /// normalized path is duplicated, or allocation fails.
+    pub fn add_texture_bytes_with_compression(
+        &mut self,
+        path: impl AsRef<[u8]>,
+        header: TextureHeader,
         bytes: impl AsRef<[u8]>,
         compression: CompressionOverride,
     ) -> Result<()> {
-        let name = normalize_stored_path(path.as_ref())?;
+        validate_texture_header(header)?;
+        let name = builder::normalize_stored_path(path.as_ref())?;
         let (hash, normalized) = hash_file(name.as_bstr());
         debug_assert_eq!(name, normalized);
         if self.names.contains(name.as_bstr()) {
@@ -140,71 +154,66 @@ impl Builder {
         self.entries.try_reserve(1)?;
         self.names.try_reserve(1)?;
         self.names.insert(name.clone());
-        self.entries.push(BuilderEntry {
+        self.entries.push(TextureEntry {
             name,
             hash,
+            header,
             compression,
             bytes: owned,
         });
         Ok(())
     }
 
-    /// Read a filesystem file and store it at `archive_path`.
+    /// Read a filesystem texture payload and store it at `archive_path`.
     ///
-    /// Symlinked files are followed for their payload bytes; the archive path is
-    /// still the path supplied by the caller. Which is the point, otherwise this
-    /// API would be a very small symlink-resolution surprise generator.
+    /// The file is treated as raw payload bytes. This method does not parse DDS.
     ///
     /// # Errors
     ///
-    /// Returns an error if reading the file fails or adding the archive entry fails.
-    pub fn add_file(
+    /// Returns an error if reading the file fails or adding the texture entry fails.
+    pub fn add_texture_file(
         &mut self,
         archive_path: impl AsRef<[u8]>,
+        header: TextureHeader,
         source: impl AsRef<Path>,
     ) -> Result<()> {
-        self.add_file_with_compression(archive_path, source, CompressionOverride::Inherit)
+        self.add_texture_file_with_compression(
+            archive_path,
+            header,
+            source,
+            CompressionOverride::Inherit,
+        )
     }
 
-    /// Read a filesystem file with a per-file compression policy.
+    /// Read a filesystem texture payload with a per-file compression policy.
     ///
     /// # Errors
     ///
-    /// Returns an error if reading the file fails or adding the archive entry fails.
-    pub fn add_file_with_compression(
+    /// Returns an error if reading the file fails or adding the texture entry fails.
+    pub fn add_texture_file_with_compression(
         &mut self,
         archive_path: impl AsRef<[u8]>,
+        header: TextureHeader,
         source: impl AsRef<Path>,
         compression: CompressionOverride,
     ) -> Result<()> {
         let bytes = fs::read(source)?;
-        self.add_bytes_with_compression(archive_path, bytes, compression)
+        self.add_texture_bytes_with_compression(archive_path, header, bytes, compression)
     }
 
-    /// Recursively add all files below `root` using paths relative to `root`.
+    /// Recursively add all files below `root` with the same texture metadata.
     ///
-    /// File symlinks are followed for payload bytes, but stored at the relative
-    /// path where the symlink was found. Directory symlinks are ignored.
+    /// This is mostly useful for synthetic archives and tests. Real texture
+    /// directories generally need per-file dimensions and formats; pretending
+    /// otherwise would be, technically, garbage.
     ///
     /// # Errors
     ///
-    /// Returns an error if directory traversal, file reading, or adding an entry fails.
-    pub fn add_dir(&mut self, root: impl AsRef<Path>) -> Result<()> {
-        self.add_dir_with_compression(root, CompressionOverride::Inherit)
-    }
-
-    /// Recursively add a directory with a per-file compression policy.
-    ///
-    /// File symlinks are followed for payload bytes. Directory symlinks are
-    /// ignored.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if directory traversal, file reading, or adding an entry fails.
-    pub fn add_dir_with_compression(
+    /// Returns an error if traversal, file reading, or adding an entry fails.
+    pub fn add_dir_with_texture_header(
         &mut self,
         root: impl AsRef<Path>,
-        compression: CompressionOverride,
+        header: TextureHeader,
     ) -> Result<()> {
         let root = root.as_ref();
         for path in builder_fs::collect_files(root)? {
@@ -213,7 +222,7 @@ impl Builder {
                 .map_err(|_| Error::InvalidArchivePath)?;
             let archive_path =
                 builder_fs::path_to_archive_bytes(relative).ok_or(Error::InvalidArchivePath)?;
-            self.add_file_with_compression(archive_path, &path, compression)?;
+            self.add_texture_file(archive_path, header, &path)?;
         }
         Ok(())
     }
@@ -257,16 +266,16 @@ impl Builder {
                 .ok_or(Error::OutOfBounds)
         })?;
 
-        write_u32(&mut out, MAGIC)?;
-        write_u32(&mut out, self.version as u32)?;
-        write_u32(&mut out, GNRL)?;
-        write_u32(&mut out, entries.len().try_into()?)?;
-        write_u64(&mut out, string_table_offset.try_into()?)?;
+        builder::write_u32(&mut out, MAGIC)?;
+        builder::write_u32(&mut out, self.version as u32)?;
+        builder::write_u32(&mut out, DX10)?;
+        builder::write_u32(&mut out, entries.len().try_into()?)?;
+        builder::write_u64(&mut out, string_table_offset.try_into()?)?;
         if matches!(self.version, ArchiveVersion::v2 | ArchiveVersion::v3) {
-            write_u64(&mut out, 1)?;
+            builder::write_u64(&mut out, 1)?;
         }
         if self.version == ArchiveVersion::v3 {
-            write_u32(
+            builder::write_u32(
                 &mut out,
                 if self.compression == Some(super::Ba2CompressionFormat::LZ4) {
                     3
@@ -278,21 +287,7 @@ impl Builder {
 
         let mut next_payload_offset: u64 = payload_offset.try_into()?;
         for entry in &prepared {
-            write_hash(&mut out, entry.entry.hash)?;
-            out.write_all(&[0])?;
-            out.write_all(&[1])?;
-            write_u16(&mut out, FILE_HEADER_SIZE_GNRL)?;
-            write_u64(&mut out, next_payload_offset)?;
-            write_u32(
-                &mut out,
-                if entry.entry.is_compressed(self.compression) {
-                    entry.stored.len().try_into()?
-                } else {
-                    0
-                },
-            )?;
-            write_u32(&mut out, entry.entry.bytes.len().try_into()?)?;
-            write_u32(&mut out, CHUNK_SENTINEL)?;
+            write_texture_record(&mut out, entry, next_payload_offset, self.compression)?;
             next_payload_offset = next_payload_offset
                 .checked_add(entry.stored.len().try_into()?)
                 .ok_or(Error::OutOfBounds)?;
@@ -302,13 +297,16 @@ impl Builder {
             out.write_all(&entry.stored)?;
         }
         for entry in &entries {
-            write_u16(&mut out, entry.name.len().try_into()?)?;
+            builder::write_u16(&mut out, entry.name.len().try_into()?)?;
             out.write_all(&entry.name)?;
         }
         Ok(())
     }
 
-    fn prepare_entries<'a>(&self, entries: &[&'a BuilderEntry]) -> Result<Vec<PreparedEntry<'a>>> {
+    fn prepare_entries<'a>(
+        &self,
+        entries: &[&'a TextureEntry],
+    ) -> Result<Vec<PreparedTexture<'a>>> {
         if self.compression == Some(super::Ba2CompressionFormat::LZ4)
             && self.version != ArchiveVersion::v3
             && entries
@@ -323,7 +321,7 @@ impl Builder {
             let stored = if entry.is_compressed(self.compression) {
                 match self.compression.unwrap_or(super::Ba2CompressionFormat::Zip) {
                     super::Ba2CompressionFormat::Zip => {
-                        Cow::Owned(zlib_compress(&entry.bytes, self.zlib_level)?)
+                        Cow::Owned(builder::zlib_compress(&entry.bytes, self.zlib_level)?)
                     }
                     super::Ba2CompressionFormat::LZ4 => {
                         Cow::Owned(lz4_flex::block::compress(&entry.bytes))
@@ -332,12 +330,12 @@ impl Builder {
             } else {
                 Cow::Borrowed(entry.bytes.as_slice())
             };
-            prepared.push(PreparedEntry { entry, stored });
+            prepared.push(PreparedTexture { entry, stored });
         }
         Ok(prepared)
     }
 
-    fn sorted_entries(&self) -> Vec<&BuilderEntry> {
+    fn sorted_entries(&self) -> Vec<&TextureEntry> {
         let mut entries: Vec<_> = self.entries.iter().collect();
         entries.sort_by(|left, right| {
             left.hash
@@ -348,7 +346,7 @@ impl Builder {
     }
 }
 
-impl BuilderEntry {
+impl TextureEntry {
     fn is_compressed(&self, default: Option<super::Ba2CompressionFormat>) -> bool {
         match self.compression {
             CompressionOverride::Inherit => default.is_some(),
@@ -358,78 +356,57 @@ impl BuilderEntry {
     }
 }
 
+fn validate_texture_header(header: TextureHeader) -> Result<()> {
+    if header.mip_count == 0 {
+        return Err(Error::Dds("zero mip count"));
+    }
+    dds::validate_texture_header(header)
+}
+
 fn payload_offset(file_count: usize, version: ArchiveVersion) -> Result<usize> {
-    header_size(version)?
-        .checked_add(FILE_RECORD_SIZE_GNRL * file_count)
+    builder::header_size(version)?
+        .checked_add(
+            file_count
+                .checked_mul(file_record_size()?)
+                .ok_or(Error::OutOfBounds)?,
+        )
         .ok_or(Error::OutOfBounds)
 }
 
-pub(super) fn header_size(version: ArchiveVersion) -> Result<usize> {
-    match version {
-        ArchiveVersion::v1 | ArchiveVersion::v7 | ArchiveVersion::v8 => Ok(HEADER_SIZE_V1),
-        ArchiveVersion::v2 => HEADER_SIZE_V1.checked_add(8).ok_or(Error::OutOfBounds),
-        ArchiveVersion::v3 => HEADER_SIZE_V1.checked_add(12).ok_or(Error::OutOfBounds),
-    }
+fn file_record_size() -> Result<usize> {
+    FILE_RECORD_BASE_SIZE_DX10
+        .checked_add(CHUNK_RECORD_SIZE_DX10)
+        .ok_or(Error::OutOfBounds)
 }
 
-pub(super) fn normalize_stored_path(path: &[u8]) -> Result<BString> {
-    if path.is_empty() {
-        return Err(Error::InvalidArchivePath);
-    }
-    let mut components = Vec::new();
-    for component in path.split(|byte| matches!(*byte, b'/' | b'\\')) {
-        if component.is_empty() || component == b"." {
-            continue;
-        }
-        if component == b".." || component.contains(&0) || component.contains(&b':') {
-            return Err(Error::InvalidArchivePath);
-        }
-        components.push(component);
-    }
-    if components.is_empty() {
-        return Err(Error::InvalidArchivePath);
-    }
-
-    let mut out = Vec::new();
-    out.try_reserve_exact(path.len())?;
-    for (index, component) in components.iter().enumerate() {
-        if index != 0 {
-            out.push(b'\\');
-        }
-        out.extend(component.iter().copied().map(|byte| match byte {
-            b'A'..=b'Z' => byte + 32,
-            _ => byte,
-        }));
-    }
-    if out.len() >= 260 {
-        return Err(Error::InvalidArchivePath);
-    }
-    Ok(BString::from(out))
-}
-
-pub(super) fn zlib_compress(bytes: &[u8], level: Compression) -> Result<Vec<u8>> {
-    let mut encoder = ZlibEncoder::new(Vec::new(), level);
-    encoder.write_all(bytes)?;
-    Ok(encoder.finish()?)
-}
-
-pub(super) fn write_hash(out: &mut impl Write, hash: FileHash) -> Result<()> {
-    write_u32(out, hash.file)?;
-    write_u32(out, hash.extension)?;
-    write_u32(out, hash.directory)
-}
-
-pub(super) fn write_u16(out: &mut impl Write, value: u16) -> Result<()> {
-    out.write_all(&value.to_le_bytes())?;
-    Ok(())
-}
-
-pub(super) fn write_u32(out: &mut impl Write, value: u32) -> Result<()> {
-    out.write_all(&value.to_le_bytes())?;
-    Ok(())
-}
-
-pub(super) fn write_u64(out: &mut impl Write, value: u64) -> Result<()> {
-    out.write_all(&value.to_le_bytes())?;
-    Ok(())
+fn write_texture_record(
+    out: &mut impl Write,
+    prepared: &PreparedTexture<'_>,
+    payload_offset: u64,
+    default_compression: Option<super::Ba2CompressionFormat>,
+) -> Result<()> {
+    let entry = prepared.entry;
+    builder::write_hash(out, entry.hash)?;
+    out.write_all(&[0])?;
+    out.write_all(&[1])?;
+    builder::write_u16(out, FILE_HEADER_SIZE_DX10)?;
+    builder::write_u16(out, entry.header.height)?;
+    builder::write_u16(out, entry.header.width)?;
+    out.write_all(&[entry.header.mip_count])?;
+    out.write_all(&[entry.header.format])?;
+    out.write_all(&[entry.header.flags])?;
+    out.write_all(&[entry.header.tile_mode])?;
+    builder::write_u64(out, payload_offset)?;
+    builder::write_u32(
+        out,
+        if entry.is_compressed(default_compression) {
+            prepared.stored.len().try_into()?
+        } else {
+            0
+        },
+    )?;
+    builder::write_u32(out, entry.bytes.len().try_into()?)?;
+    builder::write_u16(out, 0)?;
+    builder::write_u16(out, u16::from(entry.header.mip_count) - 1)?;
+    builder::write_u32(out, CHUNK_SENTINEL)
 }

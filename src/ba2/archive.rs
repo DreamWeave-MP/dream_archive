@@ -64,6 +64,11 @@ pub enum FileHeader {
     #[default]
     GNRL,
     DX10(TextureHeader),
+    /// Sony GNM (`.gnf`) texture metadata.
+    ///
+    /// Metadata is exposed for identification only. GNMF extraction/writing is
+    /// intentionally unsupported because correct output requires console texture
+    /// swizzle/unswizzle semantics.
     GNMF([u32; 8]),
 }
 

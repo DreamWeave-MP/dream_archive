@@ -17,10 +17,13 @@
 //! # Capability summary
 //!
 //! - BA2 GNRL: read, extract, and write.
-//! - BA2 DX10: read and extract by reconstructing DDS headers from archive
-//!   texture metadata. Writing is not implemented yet.
-//! - BA2 GNMF: metadata parsing only; payload extraction/writing is not
-//!   implemented.
+//! - BA2 DX10: read, extract by reconstructing DDS headers from archive
+//!   texture metadata, and write from explicit texture metadata plus raw texture
+//!   payload bytes.
+//! - BA2 GNMF: Sony GNM (`.gnf`) texture metadata parsing only. Payload
+//!   extraction/writing is intentionally out of scope for now because correct
+//!   support requires console texture swizzle/unswizzle semantics, not a raw
+//!   chunk dump.
 //! - TES3 BSA: read, extract, and write.
 //! - TES4 BSA: read, extract, and write for PC v103/v104/v105 archives,
 //!   including compressed, hash-only, and embedded-name layouts.
@@ -77,6 +80,29 @@
 //! builder.set_compression(Some(dream_archive::ba2::Ba2CompressionFormat::Zip));
 //! builder.add_dir("Data")?;
 //! builder.write_path("MyMod.ba2")?;
+//! # Ok(())
+//! # }
+//! # #[cfg(not(feature = "ba2"))]
+//! # fn main() {}
+//! ```
+//!
+//! ```no_run
+//! # #[cfg(feature = "ba2")]
+//! # fn main() -> dream_archive::ba2::Result<()> {
+//! let mut builder = dream_archive::Ba2Dx10Builder::new();
+//! builder.add_texture_bytes(
+//!     "textures/example.dds",
+//!     dream_archive::ba2::TextureHeader {
+//!         height: 1024,
+//!         width: 1024,
+//!         mip_count: 1,
+//!         format: 98,
+//!         flags: 0,
+//!         tile_mode: 0,
+//!     },
+//!     b"raw texture payload",
+//! )?;
+//! builder.write_path("Textures.ba2")?;
 //! # Ok(())
 //! # }
 //! # #[cfg(not(feature = "ba2"))]
@@ -159,6 +185,8 @@ pub use bstr::{BStr, BString, ByteSlice, ByteVec};
 
 #[cfg(feature = "ba2")]
 pub type Ba2Builder = ba2::Builder;
+#[cfg(feature = "ba2")]
+pub type Ba2Dx10Builder = ba2::Dx10Builder;
 #[cfg(feature = "bsa-tes3")]
 pub type Tes3BsaBuilder = bsa::tes3::Builder;
 #[cfg(feature = "bsa-tes4")]

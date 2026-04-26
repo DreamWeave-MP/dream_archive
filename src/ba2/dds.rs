@@ -112,6 +112,20 @@ pub(crate) fn write_dds_header(out: &mut Vec<u8>, header: DdsHeader) -> Result<(
     Ok(())
 }
 
+pub(crate) fn validate_texture_header(header: super::TextureHeader) -> Result<()> {
+    let mut out = Vec::new();
+    write_dds_header(
+        &mut out,
+        DdsHeader {
+            height: header.height,
+            width: header.width,
+            mip_count: header.mip_count,
+            format: header.format,
+            flags: header.flags,
+        },
+    )
+}
+
 fn base_fields(header: DdsHeader) -> HeaderFields {
     let mut fields = HeaderFields {
         flags: DDSD_CAPS | DDSD_PIXELFORMAT | DDSD_WIDTH | DDSD_HEIGHT | DDSD_MIPMAPCOUNT,

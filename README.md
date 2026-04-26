@@ -14,8 +14,8 @@ an explicit encoding helper instead of a hopeful guess.
 | Format | Read | Extract | Write | Notes |
 | --- | --- | --- | --- | --- |
 | BA2 GNRL | yes | yes | yes | General-file BA2 archives. |
-| BA2 DX10 | yes | yes | planned | DDS headers are reconstructed from BA2 texture metadata. Writer support needs a texture-aware API. |
-| BA2 GNMF | metadata | no | no | Sony/console-oriented; not a PC support blocker unless real PC fixtures prove otherwise. |
+| BA2 DX10 | yes | yes | yes | DDS headers are reconstructed from BA2 texture metadata. Writer takes explicit texture metadata and raw payload bytes. |
+| BA2 GNMF | metadata | no | no | Sony GNM (`.gnf`) texture archives. Explicitly out of scope for now; metadata is parsed only so callers can identify them instead of getting mystery meat. |
 | TES3 BSA | yes | yes | yes | Morrowind-era archives. |
 | TES4 BSA | yes | yes | yes | Oblivion/Fallout/Skyrim PC archives, including hash-only and embedded-name layouts. |
 | Console/Xbox layouts | no | no | no | Out of scope. |
@@ -24,6 +24,12 @@ an explicit encoding helper instead of a hopeful guess.
 “Write support” above means the writer semantics for that specific row are
 implemented. It does **not** mean “every BA2 payload type is writable.” Words
 mean things. Annoying, but useful.
+
+GNMF is not a missing general-file feature. It is Sony GNM texture data with
+console-style swizzle/unswizzle requirements. This crate does not currently
+extract or write it. If you need GNMF support, bring real fixtures and a clear
+compatibility target; otherwise we are not guessing our way into a PlayStation
+texture pipeline.
 
 ## 30-second usage
 
@@ -117,9 +123,37 @@ builder.write_path("MyMod.ba2")?;
 # }
 ```
 
-BA2 DX10 texture writing is intentionally not hidden behind `add_bytes`. Texture
-archives need texture metadata, mip layout, DDS parsing, and a few opportunities
-to get things subtly wrong. That writer will get its own API.
+Build a BA2 DX10 texture archive from raw texture payload bytes:
+
+```rust,no_run
+use dream_archive::{
+    Ba2Dx10Builder,
+    ba2::{Ba2CompressionFormat, TextureHeader},
+};
+
+# fn main() -> dream_archive::ba2::Result<()> {
+let mut builder = Ba2Dx10Builder::new();
+builder.set_compression(Some(Ba2CompressionFormat::Zip));
+builder.add_texture_bytes(
+    "textures/example.dds",
+    TextureHeader {
+        height: 1024,
+        width: 1024,
+        mip_count: 1,
+        format: 98, // DXGI_FORMAT_BC7_UNORM
+        flags: 0,
+        tile_mode: 0,
+    },
+    std::fs::read("example.payload")?,
+)?;
+builder.write_path("Textures.ba2")?;
+# Ok(())
+# }
+```
+
+That payload is the bytes after the DDS header, not a whole DDS file. The DX10
+writer is texture-aware, but it is not a DDS parser pretending that mip layout is
+someone else's problem.
 
 ## Archive paths are not filesystem paths
 
@@ -147,7 +181,7 @@ let encoded = encode_filename("textures/zażółć.dds", FilenameEncoding::Windo
 
 Default features enable BA2 and both BSA families.
 
-- `ba2`: BA2 reader/extractor and GNRL writer.
+- `ba2`: BA2 reader/extractor plus GNRL and DX10 writers.
 - `bsa-tes3`: TES3 BSA support.
 - `bsa-tes4`: TES4-family BSA support.
 - `bsa`: both BSA families.
