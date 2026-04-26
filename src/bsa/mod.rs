@@ -6,7 +6,7 @@ pub mod tes4;
 mod encoding;
 mod hash;
 
-pub use encoding::{FilenameEncoding, decode_filename_lossy};
+pub use encoding::{FilenameEncodeError, FilenameEncoding, decode_filename_lossy, encode_filename};
 
 use std::{collections::TryReserveError, fmt, io, num::TryFromIntError};
 
