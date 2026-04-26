@@ -9,7 +9,7 @@ use walkdir::WalkDir;
 
 #[test]
 fn invalid_headers_match_expected_errors() {
-    let root = common::fixture("bsa-rs/data/fo4_invalid_test");
+    let root = common::ba2_fixture("invalid");
     assert!(matches!(
         Archive::open_path(root.join("invalid_magic.ba2")),
         Err(Error::InvalidMagic(_))
@@ -34,7 +34,7 @@ fn invalid_headers_match_expected_errors() {
 
 #[test]
 fn missing_string_tables_are_accepted() {
-    let root = common::fixture("bsa-rs/data/fo4_missing_string_table_test");
+    let root = common::ba2_fixture("missing_string_table");
     let archive = Archive::open_path(root.join("in.ba2")).unwrap();
     assert_eq!(archive.options().format, Format::GNRL);
     let entry = archive.get("misc/example.txt").unwrap();
@@ -47,7 +47,7 @@ fn missing_string_tables_are_accepted() {
 
 #[test]
 fn lists_names_for_vfs_indexing() {
-    let root = common::fixture("bsa-rs/data/fo4_next_gen_test");
+    let root = common::ba2_fixture("next_gen");
     let archive = Archive::open_path(root.join("gnrl_v8.ba2")).unwrap();
     let names: Vec<_> = archive
         .entries()
@@ -61,8 +61,7 @@ fn lists_names_for_vfs_indexing() {
 
 #[test]
 fn parsed_general_metadata_matches_archive_index() {
-    let archive =
-        Archive::open_path(common::fixture("bsa-rs/data/fo4_next_gen_test/gnrl_v8.ba2")).unwrap();
+    let archive = Archive::open_path(common::ba2_fixture("next_gen/gnrl_v8.ba2")).unwrap();
 
     assert_eq!(archive.len(), 2);
     assert!(!archive.is_empty());
@@ -84,7 +83,7 @@ fn parsed_general_metadata_matches_archive_index() {
 
 #[test]
 fn reads_compressed_general_archives() {
-    let root = common::fixture("bsa-rs/data/fo4_compression_test");
+    let root = common::ba2_fixture("compression");
     for archive_name in ["normal.ba2", "xbox.ba2"] {
         let archive = Archive::open_path(root.join(archive_name)).unwrap();
         assert_eq!(archive.options().format, Format::GNRL);
@@ -107,7 +106,7 @@ fn reads_compressed_general_archives() {
 
 #[test]
 fn reconstructs_dx10_dds() {
-    let root = common::fixture("bsa-rs/data/fo4_dds_test");
+    let root = common::ba2_fixture("dds");
     let archive = Archive::open_path(root.join("in.ba2")).unwrap();
     assert_eq!(archive.options().format, Format::DX10);
     let data = archive
@@ -127,8 +126,7 @@ fn reconstructs_dx10_dds() {
 
 #[test]
 fn parsed_dx10_metadata_matches_archive_index() {
-    let archive =
-        Archive::open_path(common::fixture("bsa-rs/data/fo4_next_gen_test/dx10_v8.ba2")).unwrap();
+    let archive = Archive::open_path(common::ba2_fixture("next_gen/dx10_v8.ba2")).unwrap();
 
     assert_eq!(archive.options().format, Format::DX10);
     assert_eq!(archive.options().version, Version::v8);
@@ -155,7 +153,7 @@ fn parsed_dx10_metadata_matches_archive_index() {
 
 #[test]
 fn reconstructs_cubemap_dds() {
-    let root = common::fixture("bsa-rs/data/fo4_cubemap_test");
+    let root = common::ba2_fixture("cubemap");
     let archive = Archive::open_path(root.join("in.ba2")).unwrap();
     let data = archive.read_file("blacksky_e.dds").unwrap().unwrap();
     assert_eq!(data, fs::read(root.join("blacksky_e.dds")).unwrap());
@@ -163,7 +161,7 @@ fn reconstructs_cubemap_dds() {
 
 #[test]
 fn next_gen_versions_are_accepted() {
-    let root = common::fixture("bsa-rs/data/fo4_next_gen_test");
+    let root = common::ba2_fixture("next_gen");
     for (path, format, version) in [
         ("gnrl_v7.ba2", Format::GNRL, Version::v7),
         ("gnrl_v8.ba2", Format::GNRL, Version::v8),
@@ -178,7 +176,7 @@ fn next_gen_versions_are_accepted() {
 
 #[test]
 fn next_gen_dx10_extracts_bsa_rs_compatible_dds() {
-    let root = common::fixture("bsa-rs/data/fo4_next_gen_test");
+    let root = common::ba2_fixture("next_gen");
     let expected = fs::read(root.join("dx10/Fence006_1K_Roughness.dds")).unwrap();
     for archive_name in ["dx10_v7.ba2", "dx10_v8.ba2"] {
         let archive = Archive::open_path(root.join(archive_name)).unwrap();
@@ -196,8 +194,7 @@ fn next_gen_dx10_extracts_bsa_rs_compatible_dds() {
 
 #[test]
 fn guessed_format_is_btdx() {
-    let mut file =
-        fs::File::open(common::fixture("bsa-rs/data/common_guess_test/fo4.ba2")).unwrap();
+    let mut file = fs::File::open(common::ba2_fixture("guess/fo4.ba2")).unwrap();
     assert_eq!(
         dream_archive::guess_format(&mut file).unwrap(),
         Some(FileFormat::BA2)
