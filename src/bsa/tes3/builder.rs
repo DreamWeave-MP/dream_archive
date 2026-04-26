@@ -1,4 +1,4 @@
-use super::{Error, Result};
+use super::{Error, Result, hash::FileHash, hash::hash_normalized_file};
 use bstr::{BString, ByteSlice as _};
 use std::{
     fs::File,
@@ -25,20 +25,8 @@ pub struct Builder {
 #[derive(Clone, Debug)]
 struct BuilderEntry {
     path: BString,
-    hash: Hash,
+    hash: FileHash,
     bytes: Vec<u8>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct Hash {
-    lo: u32,
-    hi: u32,
-}
-
-impl Hash {
-    fn numeric(self) -> u64 {
-        (u64::from(self.hi)) | (u64::from(self.lo) << 32)
-    }
 }
 
 impl Builder {
@@ -71,7 +59,7 @@ impl Builder {
         let mut owned = Vec::new();
         owned.try_reserve_exact(bytes.as_ref().len())?;
         owned.extend_from_slice(bytes.as_ref());
-        let hash = hash_file(path.as_bstr());
+        let hash = hash_normalized_file(path.as_bstr());
         self.entries.push(BuilderEntry {
             path,
             hash,
@@ -217,20 +205,6 @@ fn normalize_stored_path(path: &[u8]) -> Result<BString> {
         return Err(Error::InvalidArchivePath);
     }
     Ok(BString::from(normalized))
-}
-
-fn hash_file(path: &[u8]) -> Hash {
-    let midpoint = path.len() / 2;
-    let mut lo = 0u32;
-    let mut hi = 0u32;
-    for (index, byte) in path.iter().take(midpoint).enumerate() {
-        lo ^= u32::from(*byte) << ((index % 4) * 8);
-    }
-    for (index, byte) in path.iter().skip(midpoint).enumerate() {
-        let rot = u32::from(*byte) << ((index % 4) * 8);
-        hi = u32::rotate_right(hi ^ rot, rot);
-    }
-    Hash { lo, hi }
 }
 
 fn write_u32(out: &mut impl Write, value: u32) -> Result<()> {

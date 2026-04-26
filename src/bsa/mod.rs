@@ -3,6 +3,11 @@ pub mod tes3;
 #[cfg(feature = "bsa-tes4")]
 pub mod tes4;
 
+mod encoding;
+mod hash;
+
+pub use encoding::{FilenameEncoding, decode_filename_lossy};
+
 use std::{collections::TryReserveError, fmt, io, num::TryFromIntError};
 
 pub(crate) fn normalize_lookup_path(path: &[u8]) -> Vec<u8> {

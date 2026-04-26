@@ -7,6 +7,7 @@ license = "GPL-3.0-only"
 
 [dependencies]
 bstr = { version = "1.12", default-features = false, features = ["std"] }
+encoding_rs = "0.8"
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"], optional = true }
 lz4_flex = { version = "0.13", default-features = false, optional = true }
 memmap2 = { version = "0.9", optional = true }
@@ -42,6 +43,14 @@ required-features = ["ba2"]
 [[test]]
 name = "ba2_synthetic"
 required-features = ["ba2"]
+
+[[test]]
+name = "bsa_hash"
+required-features = ["bsa"]
+
+[[test]]
+name = "bsa_encoding"
+required-features = ["bsa"]
 
 [[test]]
 name = "bsa_tes4_fixtures"
