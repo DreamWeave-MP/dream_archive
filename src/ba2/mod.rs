@@ -2,8 +2,9 @@ mod archive;
 mod chunk;
 mod dds;
 mod hash;
+mod parser;
 
-pub use archive::{Archive, ArchiveOptions, Entry, File, FileHeader, TextureHeader};
+pub use archive::{Archive, ArchiveFile, ArchiveOptions, Entry, FileHeader, TextureHeader};
 pub use chunk::{Chunk, CompressionFormat};
 pub use hash::{FileHash, Hash, hash_file, hash_file_in_place};
 

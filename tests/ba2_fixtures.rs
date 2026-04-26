@@ -2,7 +2,7 @@ mod common;
 
 use dream_archive::{
     FileFormat,
-    ba2::{Archive, Error, Format, Version},
+    ba2::{Archive, CompressionFormat, Error, FileHeader, Format, Version},
 };
 use std::{fs, io::Read as _};
 use walkdir::WalkDir;
@@ -60,6 +60,29 @@ fn lists_names_for_vfs_indexing() {
 }
 
 #[test]
+fn parsed_general_metadata_matches_archive_index() {
+    let archive =
+        Archive::open_path(common::fixture("bsa-rs/data/fo4_next_gen_test/gnrl_v8.ba2")).unwrap();
+
+    assert_eq!(archive.len(), 2);
+    assert!(!archive.is_empty());
+    assert_eq!(archive.options().format, Format::GNRL);
+    assert_eq!(archive.options().version, Version::v8);
+    assert_eq!(archive.options().compression_format, CompressionFormat::Zip);
+    assert!(archive.options().strings);
+
+    let first = &archive.entries()[0];
+    assert_eq!(first.name(), "License.txt");
+    assert!(matches!(first.file().header, FileHeader::GNRL));
+    assert_eq!(first.file().len(), 1);
+    assert!(!first.file().is_empty());
+    assert_eq!(first.file().chunks()[0].offset(), 96);
+    assert_eq!(first.file().chunks()[0].size(), 574);
+    assert_eq!(first.file().chunks()[0].packed_size(), 324);
+    assert!(first.file().chunks()[0].is_compressed());
+}
+
+#[test]
 fn reads_compressed_general_archives() {
     let root = common::fixture("bsa-rs/data/fo4_compression_test");
     for archive_name in ["normal.ba2", "xbox.ba2"] {
@@ -100,6 +123,34 @@ fn reconstructs_dx10_dds() {
     assert_eq!(u32::from_le_bytes(data[140..144].try_into().unwrap()), 1);
     assert_eq!(u32::from_le_bytes(data[68..72].try_into().unwrap()), 0);
     assert_eq!(u32::from_le_bytes(data[144..148].try_into().unwrap()), 0);
+}
+
+#[test]
+fn parsed_dx10_metadata_matches_archive_index() {
+    let archive =
+        Archive::open_path(common::fixture("bsa-rs/data/fo4_next_gen_test/dx10_v8.ba2")).unwrap();
+
+    assert_eq!(archive.options().format, Format::DX10);
+    assert_eq!(archive.options().version, Version::v8);
+    let entry = archive.entries().first().unwrap();
+    assert_eq!(entry.name(), "Fence006_1K_Roughness.dds");
+    let FileHeader::DX10(texture) = entry.file().header else {
+        panic!("expected DX10 texture header");
+    };
+    assert_eq!(texture.height, 1024);
+    assert_eq!(texture.width, 1024);
+    assert_eq!(texture.mip_count, 11);
+    assert_eq!(texture.format, 98);
+    assert_eq!(texture.flags, 0);
+    assert_eq!(texture.tile_mode, 8);
+    assert_eq!(entry.file().chunks().len(), 3);
+    assert!(
+        entry
+            .file()
+            .chunks()
+            .iter()
+            .all(|chunk| chunk.mips.is_some())
+    );
 }
 
 #[test]

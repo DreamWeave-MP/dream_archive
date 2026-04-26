@@ -41,6 +41,18 @@ impl Chunk {
         self.size
     }
 
+    /// Byte offset of this chunk's stored payload in the archive.
+    #[must_use]
+    pub fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    /// Compressed byte count stored in the archive. Zero means uncompressed.
+    #[must_use]
+    pub fn packed_size(&self) -> u32 {
+        self.packed_size
+    }
+
     /// Stored size. Zero packed size means the chunk is stored uncompressed.
     #[must_use]
     pub fn stored_size(&self) -> u32 {

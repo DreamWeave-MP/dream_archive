@@ -1,11 +1,13 @@
 use bstr::ByteSlice as _;
-use dream_archive::ba2::{Archive, CompressionFormat, Error, Version};
+use dream_archive::ba2::{Archive, CompressionFormat, Error, Format, Version};
 use flate2::{Compression, write::ZlibEncoder};
 
 const MAGIC: u32 = u32::from_le_bytes(*b"BTDX");
 const GNRL: u32 = u32::from_le_bytes(*b"GNRL");
+const DX10: u32 = u32::from_le_bytes(*b"DX10");
 const CHUNK_SENTINEL: u32 = 0xBAAD_F00D;
 const FILE_HEADER_SIZE_GNRL: u16 = 0x10;
+const FILE_HEADER_SIZE_DX10: u16 = 0x18;
 
 fn push_u16(out: &mut Vec<u8>, value: u16) {
     out.extend_from_slice(&value.to_le_bytes());
@@ -94,6 +96,119 @@ fn zlib_compress(bytes: &[u8]) -> Vec<u8> {
     encoder.finish().unwrap()
 }
 
+#[derive(Clone, Copy)]
+struct TinyTextureOptions<'a> {
+    height: u16,
+    width: u16,
+    mip_count: u8,
+    format: u8,
+    flags: u8,
+    tile_mode: u8,
+    first_mip: u16,
+    last_mip: u16,
+    name: &'a [u8],
+    payload: &'a [u8],
+}
+
+impl Default for TinyTextureOptions<'_> {
+    fn default() -> Self {
+        Self {
+            height: 8,
+            width: 16,
+            mip_count: 4,
+            format: 98,
+            flags: 0,
+            tile_mode: 0,
+            first_mip: 0,
+            last_mip: 3,
+            name: b"tiny.dds",
+            payload: b"texture-bytes",
+        }
+    }
+}
+
+fn tiny_texture_archive(options: TinyTextureOptions<'_>) -> Vec<u8> {
+    let string_table_offset = 72_u64;
+    let payload_offset = string_table_offset + 2 + u64::try_from(options.name.len()).unwrap();
+    let mut bytes = Vec::new();
+    push_u32(&mut bytes, MAGIC);
+    push_u32(&mut bytes, 1);
+    push_u32(&mut bytes, DX10);
+    push_u32(&mut bytes, 1);
+    push_u64(&mut bytes, string_table_offset);
+
+    let (hash, _) = dream_archive::ba2::hash_file(options.name.as_bstr());
+    push_u32(&mut bytes, hash.file);
+    push_u32(&mut bytes, hash.extension);
+    push_u32(&mut bytes, hash.directory);
+    bytes.push(0);
+    bytes.push(1);
+    push_u16(&mut bytes, FILE_HEADER_SIZE_DX10);
+    push_u16(&mut bytes, options.height);
+    push_u16(&mut bytes, options.width);
+    bytes.push(options.mip_count);
+    bytes.push(options.format);
+    bytes.push(options.flags);
+    bytes.push(options.tile_mode);
+    push_u64(&mut bytes, payload_offset);
+    push_u32(&mut bytes, 0);
+    push_u32(&mut bytes, options.payload.len().try_into().unwrap());
+    push_u16(&mut bytes, options.first_mip);
+    push_u16(&mut bytes, options.last_mip);
+    push_u32(&mut bytes, CHUNK_SENTINEL);
+    assert_eq!(u64::try_from(bytes.len()).unwrap(), string_table_offset);
+    push_u16(&mut bytes, options.name.len().try_into().unwrap());
+    bytes.extend_from_slice(options.name);
+    bytes.extend_from_slice(options.payload);
+    bytes
+}
+
+#[test]
+fn rejects_invalid_magic() {
+    let mut bytes = tiny_archive(TinyArchiveOptions::default());
+    bytes[0..4].copy_from_slice(&u32::to_le_bytes(0x1234_5678));
+    assert!(matches!(
+        Archive::read(&bytes),
+        Err(Error::InvalidMagic(0x1234_5678))
+    ));
+}
+
+#[test]
+fn rejects_invalid_format() {
+    let bytes = tiny_archive(TinyArchiveOptions {
+        format: u32::from_le_bytes(*b"NOPE"),
+        ..TinyArchiveOptions::default()
+    });
+    assert!(matches!(
+        Archive::read(&bytes),
+        Err(Error::InvalidFormat(_))
+    ));
+}
+
+#[test]
+fn rejects_invalid_version() {
+    let bytes = tiny_archive(TinyArchiveOptions {
+        version: 0x101,
+        ..TinyArchiveOptions::default()
+    });
+    assert!(matches!(
+        Archive::read(&bytes),
+        Err(Error::InvalidVersion(0x101))
+    ));
+}
+
+#[test]
+fn rejects_invalid_chunk_sentinel() {
+    let bytes = tiny_archive(TinyArchiveOptions {
+        sentinel: 0xDEAD_BEEF,
+        ..TinyArchiveOptions::default()
+    });
+    assert!(matches!(
+        Archive::read(&bytes),
+        Err(Error::InvalidChunkSentinel(0xDEAD_BEEF))
+    ));
+}
+
 #[test]
 fn rejects_chunk_offsets_outside_archive() {
     let bytes = tiny_archive(TinyArchiveOptions {
@@ -144,6 +259,54 @@ fn accepts_v2_extra_header_field() {
     let archive = Archive::read(&bytes).unwrap();
     assert_eq!(archive.options().version, Version::v2);
     assert_eq!(archive.options().compression_format, CompressionFormat::Zip);
+}
+
+#[test]
+fn synthetic_texture_archive_reconstructs_dx10_dds_header() {
+    let bytes = tiny_texture_archive(TinyTextureOptions::default());
+    let archive = Archive::read(&bytes).unwrap();
+    assert_eq!(archive.options().format, Format::DX10);
+    let data = archive.read_file("tiny.dds").unwrap().unwrap();
+
+    assert_eq!(&data[0..4], b"DDS ");
+    assert_eq!(u32::from_le_bytes(data[12..16].try_into().unwrap()), 8);
+    assert_eq!(u32::from_le_bytes(data[16..20].try_into().unwrap()), 16);
+    assert_eq!(u32::from_le_bytes(data[28..32].try_into().unwrap()), 4);
+    assert_eq!(&data[84..88], b"DX10");
+    assert_eq!(u32::from_le_bytes(data[128..132].try_into().unwrap()), 98);
+    assert_eq!(u32::from_le_bytes(data[132..136].try_into().unwrap()), 3);
+    assert_eq!(u32::from_le_bytes(data[140..144].try_into().unwrap()), 1);
+    assert_eq!(&data[148..], b"texture-bytes");
+}
+
+#[test]
+fn synthetic_cubemap_sets_dds_cube_metadata() {
+    let bytes = tiny_texture_archive(TinyTextureOptions {
+        flags: 1,
+        ..TinyTextureOptions::default()
+    });
+    let archive = Archive::read(&bytes).unwrap();
+    let data = archive.read_file("tiny.dds").unwrap().unwrap();
+
+    assert_eq!(
+        u32::from_le_bytes(data[112..116].try_into().unwrap()),
+        0xFE00
+    );
+    assert_eq!(u32::from_le_bytes(data[136..140].try_into().unwrap()), 4);
+    assert_eq!(u32::from_le_bytes(data[140..144].try_into().unwrap()), 6);
+}
+
+#[test]
+fn rejects_zero_sized_texture_during_extraction() {
+    let bytes = tiny_texture_archive(TinyTextureOptions {
+        width: 0,
+        ..TinyTextureOptions::default()
+    });
+    let archive = Archive::read(&bytes).unwrap();
+    assert!(matches!(
+        archive.read_file("tiny.dds"),
+        Err(Error::Dds("zero-sized texture"))
+    ));
 }
 
 #[test]
