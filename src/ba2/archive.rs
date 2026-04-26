@@ -1,6 +1,6 @@
 use super::{
-    Error, FileHash, Format, Result, Version, chunk::CompressionFormat, dds, dds::DdsHeader,
-    hash_file, parser,
+    Ba2CompressionFormat, Error, FileHash, Format, Result, Version, dds, dds::DdsHeader, hash_file,
+    parser,
 };
 use crate::{Borrowed, Copied};
 use bstr::{BStr, BString, ByteSlice as _};
@@ -8,19 +8,19 @@ use std::{fs, path::Path, sync::Arc};
 
 /// Metadata read from the archive header.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ArchiveOptions {
+pub struct ArchiveInfo {
     pub format: Format,
     pub version: Version,
-    pub compression_format: CompressionFormat,
+    pub compression_format: Ba2CompressionFormat,
     pub strings: bool,
 }
 
-impl Default for ArchiveOptions {
+impl Default for ArchiveInfo {
     fn default() -> Self {
         Self {
             format: Format::GNRL,
             version: Version::v1,
-            compression_format: CompressionFormat::Zip,
+            compression_format: Ba2CompressionFormat::Zip,
             strings: false,
         }
     }
@@ -110,7 +110,7 @@ impl ArchiveFile {
 #[derive(Clone, Debug)]
 pub struct Archive {
     bytes: Arc<[u8]>,
-    options: ArchiveOptions,
+    info: ArchiveInfo,
     entries: Vec<Entry>,
 }
 
@@ -145,8 +145,15 @@ impl Archive {
 
     /// Metadata read from the archive header.
     #[must_use]
-    pub fn options(&self) -> ArchiveOptions {
-        self.options
+    pub fn info(&self) -> ArchiveInfo {
+        self.info
+    }
+
+    /// Metadata read from the archive header.
+    #[must_use]
+    #[deprecated(note = "use Archive::info")]
+    pub fn options(&self) -> ArchiveInfo {
+        self.info
     }
 
     /// All entries, in archive table order.
@@ -225,19 +232,15 @@ impl Archive {
 
     fn extract_chunks(&self, file: &ArchiveFile, out: &mut Vec<u8>) -> Result<()> {
         for chunk in &file.chunks {
-            chunk.extract(&self.bytes, self.options.compression_format, out)?;
+            chunk.extract(&self.bytes, self.info.compression_format, out)?;
         }
         Ok(())
     }
 
-    pub(super) fn from_parts(
-        bytes: Arc<[u8]>,
-        options: ArchiveOptions,
-        entries: Vec<Entry>,
-    ) -> Self {
+    pub(super) fn from_parts(bytes: Arc<[u8]>, info: ArchiveInfo, entries: Vec<Entry>) -> Self {
         Self {
             bytes,
-            options,
+            info,
             entries,
         }
     }

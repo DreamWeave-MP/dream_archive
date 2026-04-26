@@ -1,5 +1,5 @@
 use bstr::ByteSlice as _;
-use dream_archive::ba2::{Archive, CompressionFormat, Error, Format, Version};
+use dream_archive::ba2::{Archive, Ba2CompressionFormat, Error, Format, Version};
 use flate2::{Compression, write::ZlibEncoder};
 
 const MAGIC: u32 = u32::from_le_bytes(*b"BTDX");
@@ -210,6 +210,15 @@ fn rejects_invalid_chunk_sentinel() {
 }
 
 #[test]
+fn rejects_truncated_headers_as_unexpected_eof() {
+    for bytes in [&b""[..], &b"BTDX"[..], &b"BTDX\x01\0"[..]] {
+        assert!(
+            matches!(Archive::read(bytes), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof)
+        );
+    }
+}
+
+#[test]
 fn rejects_chunk_offsets_outside_archive() {
     let bytes = tiny_archive(TinyArchiveOptions {
         chunk_offset: 10_000,
@@ -257,15 +266,15 @@ fn accepts_v2_extra_header_field() {
         ..TinyArchiveOptions::default()
     });
     let archive = Archive::read(&bytes).unwrap();
-    assert_eq!(archive.options().version, Version::v2);
-    assert_eq!(archive.options().compression_format, CompressionFormat::Zip);
+    assert_eq!(archive.info().version, Version::v2);
+    assert_eq!(archive.info().compression_format, Ba2CompressionFormat::Zip);
 }
 
 #[test]
 fn synthetic_texture_archive_reconstructs_dx10_dds_header() {
     let bytes = tiny_texture_archive(TinyTextureOptions::default());
     let archive = Archive::read(&bytes).unwrap();
-    assert_eq!(archive.options().format, Format::DX10);
+    assert_eq!(archive.info().format, Format::DX10);
     let data = archive.read_file("tiny.dds").unwrap().unwrap();
 
     assert_eq!(&data[0..4], b"DDS ");
@@ -319,8 +328,8 @@ fn v3_unknown_compression_code_means_zip() {
         ..TinyArchiveOptions::default()
     });
     let archive = Archive::read(&bytes).unwrap();
-    assert_eq!(archive.options().version, Version::v3);
-    assert_eq!(archive.options().compression_format, CompressionFormat::Zip);
+    assert_eq!(archive.info().version, Version::v3);
+    assert_eq!(archive.info().compression_format, Ba2CompressionFormat::Zip);
 }
 
 #[test]
@@ -333,7 +342,7 @@ fn v3_compression_code_three_means_lz4() {
         ..TinyArchiveOptions::default()
     });
     let archive = Archive::read(&bytes).unwrap();
-    assert_eq!(archive.options().compression_format, CompressionFormat::LZ4);
+    assert_eq!(archive.info().compression_format, Ba2CompressionFormat::LZ4);
 }
 
 #[test]

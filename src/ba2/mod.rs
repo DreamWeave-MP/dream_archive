@@ -4,8 +4,8 @@ mod dds;
 mod hash;
 mod parser;
 
-pub use archive::{Archive, ArchiveFile, ArchiveOptions, Entry, FileHeader, TextureHeader};
-pub use chunk::{Chunk, CompressionFormat};
+pub use archive::{Archive, ArchiveFile, ArchiveInfo, Entry, FileHeader, TextureHeader};
+pub use chunk::{Ba2CompressionFormat, Chunk};
 pub use hash::{FileHash, Hash, hash_file, hash_file_in_place};
 
 use std::{io, num::TryFromIntError};
@@ -50,6 +50,15 @@ pub enum Error {
 impl From<TryFromIntError> for Error {
     fn from(_: TryFromIntError) -> Self {
         Self::IntegralTruncation
+    }
+}
+
+impl From<crate::read::Error> for Error {
+    fn from(value: crate::read::Error) -> Self {
+        match value {
+            crate::read::Error::OutOfBounds => Self::OutOfBounds,
+            crate::read::Error::UnexpectedEof => Self::Io(value.into()),
+        }
     }
 }
 

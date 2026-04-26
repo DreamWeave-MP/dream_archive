@@ -1,7 +1,8 @@
 use super::{
-    Archive, ArchiveFile, ArchiveOptions, Chunk, CompressionFormat, Entry, Error, FileHeader,
+    Archive, ArchiveFile, ArchiveInfo, Ba2CompressionFormat, Chunk, Entry, Error, FileHeader,
     Format, Hash, Result, TextureHeader, Version,
 };
+use crate::read::Cursor;
 use bstr::BString;
 use std::sync::Arc;
 
@@ -27,7 +28,7 @@ pub(super) fn parse(bytes: Arc<[u8]>) -> Result<Archive> {
 
     Ok(Archive::from_parts(
         bytes,
-        ArchiveOptions {
+        ArchiveInfo {
             format: header.format,
             version: header.version,
             compression_format: header.compression_format,
@@ -42,7 +43,7 @@ struct RawHeader {
     version: Version,
     file_count: usize,
     string_table_offset: u64,
-    compression_format: CompressionFormat,
+    compression_format: Ba2CompressionFormat,
 }
 
 impl RawHeader {
@@ -59,9 +60,9 @@ impl RawHeader {
             let _ = cursor.u64()?;
         }
         let compression_format = if version == Version::v3 && cursor.u32()? == 3 {
-            CompressionFormat::LZ4
+            Ba2CompressionFormat::LZ4
         } else {
-            CompressionFormat::Zip
+            Ba2CompressionFormat::Zip
         };
         Ok(Self {
             format,
@@ -174,49 +175,4 @@ fn read_string_table(bytes: &[u8], offset: u64, entries: &mut [Entry]) -> Result
         entry.set_name(BString::new(names.bytes(len)?.to_vec()));
     }
     Ok(())
-}
-
-struct Cursor<'a> {
-    bytes: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> Cursor<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, pos: 0 }
-    }
-
-    fn seek(&mut self, pos: usize) -> Result<()> {
-        if pos > self.bytes.len() {
-            return Err(Error::OutOfBounds);
-        }
-        self.pos = pos;
-        Ok(())
-    }
-
-    fn bytes(&mut self, len: usize) -> Result<&'a [u8]> {
-        let end = self.pos.checked_add(len).ok_or(Error::OutOfBounds)?;
-        let bytes = self
-            .bytes
-            .get(self.pos..end)
-            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::UnexpectedEof))?;
-        self.pos = end;
-        Ok(bytes)
-    }
-
-    fn u8(&mut self) -> Result<u8> {
-        Ok(self.bytes(1)?[0])
-    }
-
-    fn u16(&mut self) -> Result<u16> {
-        Ok(u16::from_le_bytes(self.bytes(2)?.try_into().unwrap()))
-    }
-
-    fn u32(&mut self) -> Result<u32> {
-        Ok(u32::from_le_bytes(self.bytes(4)?.try_into().unwrap()))
-    }
-
-    fn u64(&mut self) -> Result<u64> {
-        Ok(u64::from_le_bytes(self.bytes(8)?.try_into().unwrap()))
-    }
 }

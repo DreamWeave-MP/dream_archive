@@ -3,8 +3,24 @@
 //! The implementation is intentionally read-oriented. It targets the same BA2
 //! runtime operations `OpenMW` needs: detect, list, hash lookup, extract GNRL
 //! files, and reconstruct DDS streams from DX10 texture archives.
+//!
+//! # Example
+//!
+//! ```no_run
+//! # fn main() -> dream_archive::ba2::Result<()> {
+//! let archive = dream_archive::ba2::Archive::open_path("Data/SomeArchive.ba2")?;
+//! for entry in archive.entries() {
+//!     println!("{}", entry.name());
+//! }
+//! if let Some(bytes) = archive.read_file("textures/example.dds")? {
+//!     println!("extracted {} bytes", bytes.len());
+//! }
+//! # Ok(())
+//! # }
+//! ```
 
 pub mod ba2;
+mod read;
 
 use std::io::{self, Read};
 
@@ -19,9 +35,21 @@ pub struct Copied<'copy>(pub &'copy [u8]);
 pub enum FileFormat {
     /// Bethesda BA2 (`BTDX`).
     BA2,
+    /// Bethesda BSA.
+    BSA(BsaFormat),
 }
 
-/// Weak archive-family sniffing. This is not full validation.
+/// BSA archive generation detected by [`guess_format`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BsaFormat {
+    /// Morrowind-era BSA with version `0x100` and no FourCC-style magic.
+    TES3,
+    /// Oblivion/Fallout-era BSA with `BSA\0` magic.
+    TES4,
+}
+
+/// Weak archive-family sniffing. This is not full validation, but it reads
+/// enough header bytes to distinguish BA2, TES3 BSA, and TES4+ BSA containers.
 ///
 /// # Errors
 ///
@@ -31,6 +59,8 @@ pub fn guess_format(input: &mut impl Read) -> io::Result<Option<FileFormat>> {
     input.read_exact(&mut magic)?;
     Ok(match &magic {
         b"BTDX" => Some(FileFormat::BA2),
+        b"BSA\0" => Some(FileFormat::BSA(BsaFormat::TES4)),
+        [0, 1, 0, 0] => Some(FileFormat::BSA(BsaFormat::TES3)),
         _ => None,
     })
 }

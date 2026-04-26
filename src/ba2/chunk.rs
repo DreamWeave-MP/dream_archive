@@ -4,7 +4,7 @@ use std::io::Read as _;
 
 /// BA2 compression method.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum CompressionFormat {
+pub enum Ba2CompressionFormat {
     #[default]
     Zip,
     LZ4,
@@ -79,7 +79,7 @@ impl Chunk {
     pub(crate) fn extract(
         &self,
         archive: &[u8],
-        compression: CompressionFormat,
+        compression: Ba2CompressionFormat,
         out: &mut Vec<u8>,
     ) -> Result<()> {
         let stored = self.stored_bytes(archive)?;
@@ -91,13 +91,13 @@ impl Chunk {
         let expected: usize = self.size.try_into()?;
         let before = out.len();
         match compression {
-            CompressionFormat::Zip => {
+            Ba2CompressionFormat::Zip => {
                 let mut decoder = ZlibDecoder::new(stored);
                 decoder
                     .read_to_end(out)
                     .map_err(|e| Error::Zlib(e.to_string()))?;
             }
-            CompressionFormat::LZ4 => {
+            Ba2CompressionFormat::LZ4 => {
                 let mut buf = vec![0; expected];
                 let actual = lz4_flex::block::decompress_into(stored, &mut buf)
                     .map_err(|e| Error::Lz4(e.to_string()))?;

@@ -1,8 +1,8 @@
 mod common;
 
 use dream_archive::{
-    FileFormat,
-    ba2::{Archive, CompressionFormat, Error, FileHeader, Format, Version},
+    BsaFormat, FileFormat,
+    ba2::{Archive, Ba2CompressionFormat, Error, FileHeader, Format, Version},
 };
 use std::{fs, io::Read as _};
 use walkdir::WalkDir;
@@ -36,7 +36,7 @@ fn invalid_headers_match_expected_errors() {
 fn missing_string_tables_are_accepted() {
     let root = common::ba2_fixture("missing_string_table");
     let archive = Archive::open_path(root.join("in.ba2")).unwrap();
-    assert_eq!(archive.options().format, Format::GNRL);
+    assert_eq!(archive.info().format, Format::GNRL);
     let entry = archive.get("misc/example.txt").unwrap();
     assert!(entry.name().is_empty());
     assert_eq!(
@@ -65,10 +65,10 @@ fn parsed_general_metadata_matches_archive_index() {
 
     assert_eq!(archive.len(), 2);
     assert!(!archive.is_empty());
-    assert_eq!(archive.options().format, Format::GNRL);
-    assert_eq!(archive.options().version, Version::v8);
-    assert_eq!(archive.options().compression_format, CompressionFormat::Zip);
-    assert!(archive.options().strings);
+    assert_eq!(archive.info().format, Format::GNRL);
+    assert_eq!(archive.info().version, Version::v8);
+    assert_eq!(archive.info().compression_format, Ba2CompressionFormat::Zip);
+    assert!(archive.info().strings);
 
     let first = &archive.entries()[0];
     assert_eq!(first.name(), "License.txt");
@@ -86,7 +86,7 @@ fn reads_compressed_general_archives() {
     let root = common::ba2_fixture("compression");
     for archive_name in ["normal.ba2", "xbox.ba2"] {
         let archive = Archive::open_path(root.join(archive_name)).unwrap();
-        assert_eq!(archive.options().format, Format::GNRL);
+        assert_eq!(archive.info().format, Format::GNRL);
         for item in WalkDir::new(root.join("data"))
             .into_iter()
             .filter_map(Result::ok)
@@ -108,7 +108,7 @@ fn reads_compressed_general_archives() {
 fn reconstructs_dx10_dds() {
     let root = common::ba2_fixture("dds");
     let archive = Archive::open_path(root.join("in.ba2")).unwrap();
-    assert_eq!(archive.options().format, Format::DX10);
+    assert_eq!(archive.info().format, Format::DX10);
     let data = archive
         .read_file("Fence006_1K_Roughness.dds")
         .unwrap()
@@ -128,8 +128,8 @@ fn reconstructs_dx10_dds() {
 fn parsed_dx10_metadata_matches_archive_index() {
     let archive = Archive::open_path(common::ba2_fixture("next_gen/dx10_v8.ba2")).unwrap();
 
-    assert_eq!(archive.options().format, Format::DX10);
-    assert_eq!(archive.options().version, Version::v8);
+    assert_eq!(archive.info().format, Format::DX10);
+    assert_eq!(archive.info().version, Version::v8);
     let entry = archive.entries().first().unwrap();
     assert_eq!(entry.name(), "Fence006_1K_Roughness.dds");
     let FileHeader::DX10(texture) = entry.file().header else {
@@ -169,8 +169,28 @@ fn next_gen_versions_are_accepted() {
         ("dx10_v8.ba2", Format::DX10, Version::v8),
     ] {
         let archive = Archive::open_path(root.join(path)).unwrap();
-        assert_eq!(archive.options().format, format);
-        assert_eq!(archive.options().version, version);
+        assert_eq!(archive.info().format, format);
+        assert_eq!(archive.info().version, version);
+    }
+}
+
+#[test]
+fn valid_fixture_metadata_is_stable() {
+    for (path, format, version, entries) in [
+        ("compression/normal.ba2", Format::GNRL, Version::v1, 19),
+        ("compression/xbox.ba2", Format::GNRL, Version::v1, 19),
+        ("cubemap/in.ba2", Format::DX10, Version::v1, 1),
+        ("dds/in.ba2", Format::DX10, Version::v1, 1),
+        ("missing_string_table/in.ba2", Format::GNRL, Version::v1, 1),
+        ("next_gen/dx10_v7.ba2", Format::DX10, Version::v7, 1),
+        ("next_gen/dx10_v8.ba2", Format::DX10, Version::v8, 1),
+        ("next_gen/gnrl_v7.ba2", Format::GNRL, Version::v7, 2),
+        ("next_gen/gnrl_v8.ba2", Format::GNRL, Version::v8, 2),
+    ] {
+        let archive = Archive::open_path(common::ba2_fixture(path)).unwrap();
+        assert_eq!(archive.info().format, format, "{path}");
+        assert_eq!(archive.info().version, version, "{path}");
+        assert_eq!(archive.len(), entries, "{path}");
     }
 }
 
@@ -202,6 +222,21 @@ fn guessed_format_is_btdx() {
     let mut rest = Vec::new();
     file.read_to_end(&mut rest).unwrap();
     assert!(!rest.is_empty());
+}
+
+#[test]
+fn guessed_format_distinguishes_bsa_generations() {
+    let mut tes3 = fs::File::open(common::ba2_fixture("guess/tes3.bsa")).unwrap();
+    assert_eq!(
+        dream_archive::guess_format(&mut tes3).unwrap(),
+        Some(FileFormat::BSA(BsaFormat::TES3))
+    );
+
+    let mut tes4 = fs::File::open(common::ba2_fixture("guess/tes4.bsa")).unwrap();
+    assert_eq!(
+        dream_archive::guess_format(&mut tes4).unwrap(),
+        Some(FileFormat::BSA(BsaFormat::TES4))
+    );
 }
 
 #[test]
