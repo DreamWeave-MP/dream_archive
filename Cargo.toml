@@ -7,9 +7,37 @@ license = "GPL-3.0-only"
 
 [dependencies]
 bstr = "1.12"
-flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
-lz4_flex = { version = "0.13", default-features = false }
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"], optional = true }
+lz4_flex = { version = "0.13", default-features = false, optional = true }
+memmap2 = { version = "0.9", optional = true }
 thiserror = "2"
 
 [dev-dependencies]
 walkdir = "2.5"
+
+[features]
+default = ["ba2", "bsa"]
+ba2 = ["dep:flate2", "dep:lz4_flex", "dep:memmap2"]
+bsa = ["bsa-tes3", "bsa-tes4"]
+bsa-tes3 = []
+bsa-tes4 = ["dep:flate2"]
+
+[[example]]
+name = "list_ba2"
+required-features = ["ba2"]
+
+[[example]]
+name = "extract_ba2"
+required-features = ["ba2"]
+
+[[test]]
+name = "ba2_fixtures"
+required-features = ["ba2"]
+
+[[test]]
+name = "ba2_hash"
+required-features = ["ba2"]
+
+[[test]]
+name = "ba2_synthetic"
+required-features = ["ba2"]

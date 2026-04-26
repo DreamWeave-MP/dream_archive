@@ -2,9 +2,8 @@ use super::{
     Archive, ArchiveFile, ArchiveInfo, ArchiveVersion, Ba2CompressionFormat, Chunk, Entry, Error,
     FileHeader, Hash, PayloadFormat, Result, TextureHeader,
 };
-use crate::read::Cursor;
+use crate::{read::Cursor, storage::Storage};
 use bstr::BString;
-use std::sync::Arc;
 
 const MAGIC: u32 = u32::from_le_bytes(*b"BTDX");
 const GNRL: u32 = u32::from_le_bytes(*b"GNRL");
@@ -16,18 +15,19 @@ const FILE_HEADER_SIZE_DX10: u16 = 0x18;
 const FILE_HEADER_SIZE_GNMF: u16 = 0x30;
 const CHUNK_SENTINEL: u32 = 0xBAAD_F00D;
 
-pub(super) fn parse(bytes: Arc<[u8]>) -> Result<Archive> {
-    let mut cursor = Cursor::new(&bytes);
+pub(super) fn parse(storage: Storage) -> Result<Archive> {
+    let bytes = storage.as_bytes();
+    let mut cursor = Cursor::new(bytes);
     let header = RawHeader::read(&mut cursor)?;
     let mut entries = Vec::with_capacity(header.file_count);
     for _ in 0..header.file_count {
-        entries.push(read_entry_record(&mut cursor, header.format, &bytes)?);
+        entries.push(read_entry_record(&mut cursor, header.format, bytes)?);
     }
 
-    read_string_table(&bytes, header.string_table_offset, &mut entries)?;
+    read_string_table(bytes, header.string_table_offset, &mut entries)?;
 
     Ok(Archive::from_parts(
-        bytes,
+        storage,
         ArchiveInfo {
             format: header.format,
             version: header.version,

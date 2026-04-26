@@ -2,9 +2,9 @@ use super::{
     ArchiveVersion, Ba2CompressionFormat, Error, FileHash, PayloadFormat, Result, dds,
     dds::DdsHeader, hash_file, parser,
 };
-use crate::{Borrowed, Copied};
+use crate::{Borrowed, Copied, storage::Storage};
 use bstr::{BStr, BString, ByteSlice as _};
-use std::{fs, path::Path, sync::Arc};
+use std::path::Path;
 
 /// Metadata read from the archive header.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -109,7 +109,7 @@ impl ArchiveFile {
 /// performed through shared references.
 #[derive(Clone, Debug)]
 pub struct Archive {
-    bytes: Arc<[u8]>,
+    storage: Storage,
     info: ArchiveInfo,
     entries: Vec<Entry>,
 }
@@ -121,7 +121,7 @@ impl Archive {
     ///
     /// Returns an error when the buffer is not a valid supported BA2 archive.
     pub fn from_vec(bytes: Vec<u8>) -> Result<Self> {
-        parser::parse(Arc::from(bytes.into_boxed_slice()))
+        parser::parse(Storage::from_vec(bytes))
     }
 
     /// Read an archive from a byte slice, copying the archive data.
@@ -140,7 +140,7 @@ impl Archive {
     /// Returns an I/O error if the path can not be read, or a parse error when
     /// the file is not a valid supported BA2 archive.
     pub fn open_path(path: impl AsRef<Path>) -> Result<Self> {
-        Self::from_vec(fs::read(path)?)
+        parser::parse(Storage::open_path(path)?)
     }
 
     /// Metadata read from the archive header.
@@ -207,7 +207,7 @@ impl Archive {
     ///
     /// Returns the same errors as [`Self::read_entry_into`].
     pub fn read_entry(&self, entry: &Entry) -> Result<Vec<u8>> {
-        let mut out = Vec::new();
+        let mut out = Vec::with_capacity(entry.extraction_capacity_hint()?);
         self.read_entry_into(entry, &mut out)?;
         Ok(out)
     }
@@ -225,14 +225,14 @@ impl Archive {
 
     fn extract_chunks(&self, file: &ArchiveFile, out: &mut Vec<u8>) -> Result<()> {
         for chunk in &file.chunks {
-            chunk.extract(&self.bytes, self.info.compression_format, out)?;
+            chunk.extract(self.storage.as_bytes(), self.info.compression_format, out)?;
         }
         Ok(())
     }
 
-    pub(super) fn from_parts(bytes: Arc<[u8]>, info: ArchiveInfo, entries: Vec<Entry>) -> Self {
+    pub(super) fn from_parts(storage: Storage, info: ArchiveInfo, entries: Vec<Entry>) -> Self {
         Self {
-            bytes,
+            storage,
             info,
             entries,
         }
@@ -250,6 +250,26 @@ impl Entry {
 
     pub(super) fn set_name(&mut self, name: BString) {
         self.name = name;
+    }
+
+    fn extraction_capacity_hint(&self) -> Result<usize> {
+        let chunks_size = self.file.decompressed_size()?;
+        if matches!(self.file.header, FileHeader::DX10(_)) {
+            chunks_size
+                .checked_add(dds::MAX_HEADER_SIZE)
+                .ok_or(Error::OutOfBounds)
+        } else {
+            Ok(chunks_size)
+        }
+    }
+}
+
+impl ArchiveFile {
+    fn decompressed_size(&self) -> Result<usize> {
+        self.chunks.iter().try_fold(0usize, |sum, chunk| {
+            let size: usize = chunk.size().try_into()?;
+            sum.checked_add(size).ok_or(Error::OutOfBounds)
+        })
     }
 }
 

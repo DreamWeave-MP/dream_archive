@@ -29,6 +29,8 @@ const DDPF_LUMINANCE: u32 = 0x0002_0000;
 const DDS_DIMENSION_TEXTURE2D: u32 = 3;
 const DDS_RESOURCE_MISC_TEXTURECUBE: u32 = 4;
 
+pub(crate) const MAX_HEADER_SIZE: usize = 148;
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct DdsHeader {
     pub height: u16,

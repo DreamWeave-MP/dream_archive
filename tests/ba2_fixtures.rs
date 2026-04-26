@@ -1,7 +1,7 @@
 mod common;
 
 use dream_archive::{
-    BsaFormat, FileFormat,
+    FileFormat,
     ba2::{Archive, ArchiveVersion, Ba2CompressionFormat, Error, FileHeader, PayloadFormat},
 };
 use std::{fs, io::Read as _};
@@ -260,17 +260,18 @@ fn guessed_format_is_btdx() {
 }
 
 #[test]
+#[cfg(all(feature = "bsa-tes3", feature = "bsa-tes4"))]
 fn guessed_format_distinguishes_bsa_generations() {
     let mut tes3 = fs::File::open(common::ba2_fixture("guess/tes3.bsa")).unwrap();
     assert_eq!(
         dream_archive::guess_format(&mut tes3).unwrap(),
-        Some(FileFormat::BSA(BsaFormat::TES3))
+        Some(FileFormat::BSA(dream_archive::BsaFormat::TES3))
     );
 
     let mut tes4 = fs::File::open(common::ba2_fixture("guess/tes4.bsa")).unwrap();
     assert_eq!(
         dream_archive::guess_format(&mut tes4).unwrap(),
-        Some(FileFormat::BSA(BsaFormat::TES4))
+        Some(FileFormat::BSA(dream_archive::BsaFormat::TES4))
     );
 }
 

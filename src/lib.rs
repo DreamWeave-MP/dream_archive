@@ -6,7 +6,8 @@
 //!
 //! # Example
 //!
-//! ```no_run
+//! ```ignore
+//! # #[cfg(feature = "ba2")]
 //! # fn main() -> dream_archive::ba2::Result<()> {
 //! let archive = dream_archive::ba2::Archive::open_path("Data/SomeArchive.ba2")?;
 //! for entry in archive.entries() {
@@ -19,8 +20,12 @@
 //! # }
 //! ```
 
+#[cfg(feature = "ba2")]
 pub mod ba2;
+#[cfg(feature = "ba2")]
 mod read;
+#[cfg(feature = "ba2")]
+mod storage;
 
 use std::io::{self, Read};
 
@@ -58,8 +63,11 @@ pub fn guess_format(input: &mut impl Read) -> io::Result<Option<FileFormat>> {
     let mut magic = [0; 4];
     input.read_exact(&mut magic)?;
     Ok(match &magic {
+        #[cfg(feature = "ba2")]
         b"BTDX" => Some(FileFormat::BA2),
+        #[cfg(feature = "bsa-tes4")]
         b"BSA\0" => Some(FileFormat::BSA(BsaFormat::TES4)),
+        #[cfg(feature = "bsa-tes3")]
         [0, 1, 0, 0] => Some(FileFormat::BSA(BsaFormat::TES3)),
         _ => None,
     })
