@@ -472,6 +472,85 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)
     }
 
+    fn push_u16(out: &mut Vec<u8>, value: u16) {
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn push_u32(out: &mut Vec<u8>, value: u32) {
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn push_u64(out: &mut Vec<u8>, value: u64) {
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+
+    #[derive(Clone, Copy)]
+    struct TinyArchiveOptions<'a> {
+        version: u32,
+        format: u32,
+        compression_code: Option<u32>,
+        string_table_offset: u64,
+        name: Option<&'a [u8]>,
+        chunk_offset: u64,
+        chunk_packed_size: u32,
+        chunk_size: u32,
+        sentinel: u32,
+    }
+
+    impl Default for TinyArchiveOptions<'_> {
+        fn default() -> Self {
+            Self {
+                version: 1,
+                format: GNRL,
+                compression_code: None,
+                string_table_offset: 60,
+                name: Some(b"hello.txt"),
+                chunk_offset: 60,
+                chunk_packed_size: 0,
+                chunk_size: 5,
+                sentinel: CHUNK_SENTINEL,
+            }
+        }
+    }
+
+    fn tiny_archive(options: TinyArchiveOptions<'_>) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        push_u32(&mut bytes, MAGIC);
+        push_u32(&mut bytes, options.version);
+        push_u32(&mut bytes, options.format);
+        push_u32(&mut bytes, 1);
+        push_u64(&mut bytes, options.string_table_offset);
+        if matches!(options.version, 2 | 3) {
+            push_u64(&mut bytes, 1);
+        }
+        if let Some(code) = options.compression_code {
+            push_u32(&mut bytes, code);
+        }
+
+        let (hash, _) = super::super::hash_file(b"hello.txt".as_bstr());
+        push_u32(&mut bytes, hash.file);
+        push_u32(&mut bytes, hash.extension);
+        push_u32(&mut bytes, hash.directory);
+        bytes.push(0);
+        bytes.push(1);
+        push_u16(&mut bytes, FILE_HEADER_SIZE_GNRL);
+        push_u64(&mut bytes, options.chunk_offset);
+        push_u32(&mut bytes, options.chunk_packed_size);
+        push_u32(&mut bytes, options.chunk_size);
+        push_u32(&mut bytes, options.sentinel);
+
+        if let Some(name) = options.name {
+            assert_eq!(
+                u64::try_from(bytes.len()).unwrap(),
+                options.string_table_offset
+            );
+            push_u16(&mut bytes, name.len().try_into().unwrap());
+            bytes.extend_from_slice(name);
+        }
+        bytes.extend_from_slice(b"hello");
+        bytes
+    }
+
     #[test]
     fn invalid_headers_match_expected_errors() {
         let root = fixture("bsa-rs/data/fo4_invalid_test");
@@ -528,6 +607,38 @@ mod tests {
         assert_eq!(hash.file, 0x0785_843B);
         assert_eq!(hash.extension, 0x6D73_6762);
         assert_eq!(hash.directory, 0x8183_74CC);
+    }
+
+    #[test]
+    fn hash_normalization_edges_are_stable() {
+        let (hash_a, normalized_a) = super::super::hash_file(b"/Textures/Foo/Bar.DDS\\".as_bstr());
+        let (hash_b, normalized_b) = super::super::hash_file(b"textures\\foo\\bar.dds".as_bstr());
+        assert_eq!(hash_a, hash_b);
+        assert_eq!(normalized_a.as_bstr(), b"textures\\foo\\bar.dds".as_bstr());
+        assert_eq!(normalized_b.as_bstr(), b"textures\\foo\\bar.dds".as_bstr());
+
+        let (hash_non_ascii, normalized_non_ascii) = super::super::hash_file(
+            b"Sound/Voice/Fallout4.esm/RobotMrHandy/Mar\xEDa_M.fuz".as_bstr(),
+        );
+        let (hash_ascii_removed, _) =
+            super::super::hash_file(b"Sound/Voice/Fallout4.esm/RobotMrHandy/Mara_M.fuz".as_bstr());
+        assert_eq!(hash_non_ascii, hash_ascii_removed);
+        assert_eq!(
+            normalized_non_ascii.as_bstr(),
+            b"sound\\voice\\fallout4.esm\\robotmrhandy\\mar\xEDa_m.fuz".as_bstr()
+        );
+
+        let (_, normalized_empty) = super::super::hash_file(b"".as_bstr());
+        assert_eq!(normalized_empty.as_bstr(), b".".as_bstr());
+    }
+
+    #[test]
+    fn path_lookup_uses_normalized_hashes() {
+        let archive =
+            Archive::open_path(fixture("bsa-rs/data/fo4_next_gen_test/gnrl_v8.ba2")).unwrap();
+        assert!(archive.contains("/LICENSE.TXT\\"));
+        assert!(archive.contains("samplea.png"));
+        assert!(archive.contains("SampleA.PNG"));
     }
 
     #[test]
@@ -639,5 +750,94 @@ mod tests {
         let mut rest = Vec::new();
         file.read_to_end(&mut rest).unwrap();
         assert!(!rest.is_empty());
+    }
+
+    #[test]
+    fn guess_format_is_weak_and_consumes_magic() {
+        let mut bytes = &b"BTDX this is not a real archive"[..];
+        assert_eq!(
+            crate::guess_format(&mut bytes).unwrap(),
+            Some(crate::FileFormat::FO4)
+        );
+        assert_eq!(bytes, b" this is not a real archive");
+    }
+
+    #[test]
+    fn rejects_chunk_offsets_outside_archive() {
+        let bytes = tiny_archive(TinyArchiveOptions {
+            chunk_offset: 10_000,
+            ..TinyArchiveOptions::default()
+        });
+        assert!(matches!(Archive::read(&bytes), Err(Error::OutOfBounds)));
+    }
+
+    #[test]
+    fn rejects_chunk_size_overflow() {
+        let bytes = tiny_archive(TinyArchiveOptions {
+            chunk_offset: u64::MAX,
+            ..TinyArchiveOptions::default()
+        });
+        assert!(matches!(
+            Archive::read(&bytes),
+            Err(Error::IntegralTruncation | Error::OutOfBounds)
+        ));
+    }
+
+    #[test]
+    fn rejects_string_table_offset_outside_archive() {
+        let bytes = tiny_archive(TinyArchiveOptions {
+            string_table_offset: 10_000,
+            name: None,
+            chunk_offset: 60,
+            ..TinyArchiveOptions::default()
+        });
+        assert!(matches!(Archive::read(&bytes), Err(Error::OutOfBounds)));
+    }
+
+    #[test]
+    fn rejects_truncated_string_table_entry() {
+        let mut bytes = tiny_archive(TinyArchiveOptions::default());
+        bytes.truncate(62 + 3);
+        assert!(matches!(Archive::read(&bytes), Err(Error::Io(_))));
+    }
+
+    #[test]
+    fn accepts_v2_extra_header_field() {
+        let bytes = tiny_archive(TinyArchiveOptions {
+            version: 2,
+            string_table_offset: 68,
+            chunk_offset: 68,
+            ..TinyArchiveOptions::default()
+        });
+        let archive = Archive::read(&bytes).unwrap();
+        assert_eq!(archive.options().version, Version::v2);
+        assert_eq!(archive.options().compression_format, CompressionFormat::Zip);
+    }
+
+    #[test]
+    fn v3_unknown_compression_code_means_zip() {
+        let bytes = tiny_archive(TinyArchiveOptions {
+            version: 3,
+            compression_code: Some(0xFFFF_FFFE),
+            string_table_offset: 72,
+            chunk_offset: 72,
+            ..TinyArchiveOptions::default()
+        });
+        let archive = Archive::read(&bytes).unwrap();
+        assert_eq!(archive.options().version, Version::v3);
+        assert_eq!(archive.options().compression_format, CompressionFormat::Zip);
+    }
+
+    #[test]
+    fn v3_compression_code_three_means_lz4() {
+        let bytes = tiny_archive(TinyArchiveOptions {
+            version: 3,
+            compression_code: Some(3),
+            string_table_offset: 72,
+            chunk_offset: 72,
+            ..TinyArchiveOptions::default()
+        });
+        let archive = Archive::read(&bytes).unwrap();
+        assert_eq!(archive.options().compression_format, CompressionFormat::LZ4);
     }
 }
