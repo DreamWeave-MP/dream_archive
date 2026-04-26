@@ -108,6 +108,48 @@ fn tiny_archive(options: TinyArchiveOptions<'_>) -> Vec<u8> {
     bytes
 }
 
+fn two_entry_gnrl_archive_with_colliding_hashes() -> Vec<u8> {
+    let names = [b"a.txt".as_slice(), b"b.txt".as_slice()];
+    let payloads = [b"first".as_slice(), b"second".as_slice()];
+    let table_size = 24 + 36 * names.len();
+    let payload_offset = table_size;
+    let string_table_offset =
+        payload_offset + payloads.iter().map(|payload| payload.len()).sum::<usize>();
+    let (hash, _) = dream_archive::ba2::hash_file(b"a.txt".as_bstr());
+
+    let mut bytes = Vec::new();
+    push_u32(&mut bytes, MAGIC);
+    push_u32(&mut bytes, 1);
+    push_u32(&mut bytes, GNRL);
+    push_u32(&mut bytes, names.len().try_into().unwrap());
+    push_u64(&mut bytes, string_table_offset.try_into().unwrap());
+
+    let mut next_payload = payload_offset;
+    for payload in payloads {
+        push_u32(&mut bytes, hash.file);
+        push_u32(&mut bytes, hash.extension);
+        push_u32(&mut bytes, hash.directory);
+        bytes.push(0);
+        bytes.push(1);
+        push_u16(&mut bytes, FILE_HEADER_SIZE_GNRL);
+        push_u64(&mut bytes, next_payload.try_into().unwrap());
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, payload.len().try_into().unwrap());
+        push_u32(&mut bytes, CHUNK_SENTINEL);
+        next_payload += payload.len();
+    }
+    assert_eq!(bytes.len(), payload_offset);
+    for payload in payloads {
+        bytes.extend_from_slice(payload);
+    }
+    assert_eq!(bytes.len(), string_table_offset);
+    for name in names {
+        push_u16(&mut bytes, name.len().try_into().unwrap());
+        bytes.extend_from_slice(name);
+    }
+    bytes
+}
+
 fn tiny_gnmf_archive(metadata: [u32; 8], payload: &[u8]) -> Vec<u8> {
     let payload_offset = 24 + 12 + 4 + 32 + 24;
     let (hash, _) = dream_archive::ba2::hash_file(b"mesh.bin".as_bstr());
@@ -398,6 +440,15 @@ fn ba2_writer_rejects_unsafe_paths() {
     }
 }
 
+#[test]
+fn ba2_named_lookup_prefers_string_table_over_hash_collision() {
+    let bytes = two_entry_gnrl_archive_with_colliding_hashes();
+    let archive = Archive::from_slice(&bytes).unwrap();
+
+    assert_eq!(archive.read_file("a.txt").unwrap().unwrap(), b"first");
+    assert_eq!(archive.read_file("b.txt").unwrap().unwrap(), b"second");
+}
+
 fn tiny_texture_header() -> TextureHeader {
     TextureHeader {
         height: 8,
@@ -446,6 +497,10 @@ fn dx10_dds(width: u32, height: u32, mip_count: u32, format: u32, payload: &[u8]
     assert_eq!(bytes.len(), 148);
     bytes.extend_from_slice(payload);
     bytes
+}
+
+fn set_u32(bytes: &mut [u8], offset: usize, value: u32) {
+    bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
 }
 
 fn legacy_fourcc_dds(
@@ -654,6 +709,19 @@ fn ba2_dx10_writer_ingests_dx10_dds() {
 }
 
 #[test]
+fn reconstructed_dx10_dds_uses_zero_depth_for_2d_textures() {
+    let mut builder = Dx10Builder::new();
+    builder
+        .add_texture_bytes("textures/tiny.dds", tiny_texture_header(), [0xab; 64])
+        .unwrap();
+
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
+    let data = archive.read_file("textures/tiny.dds").unwrap().unwrap();
+
+    assert_eq!(u32::from_le_bytes(data[24..28].try_into().unwrap()), 0);
+}
+
+#[test]
 fn ba2_dx10_writer_ingests_legacy_dxt1_dds() {
     let payload = [0xcdu8; 8];
     let dds = legacy_fourcc_dds(4, 4, 1, u32::from_le_bytes(*b"DXT1"), &payload);
@@ -683,6 +751,78 @@ fn ba2_dx10_writer_rejects_dds_payload_size_mismatch() {
 
     assert!(matches!(
         builder.add_dds_bytes("textures/tiny.dds", &dds),
+        Err(Error::Dds("DDS payload size does not match metadata"))
+    ));
+}
+
+#[test]
+fn ba2_dx10_writer_rejects_dds_arrays_and_volumes() {
+    let mut array = dx10_dds(4, 4, 1, 98, &[0; 32]);
+    set_u32(&mut array, 140, 2);
+    let mut builder = Dx10Builder::new();
+    assert!(matches!(
+        builder.add_dds_bytes("textures/array.dds", &array),
+        Err(Error::Dds("unsupported DDS array size"))
+    ));
+
+    let mut volume = dx10_dds(4, 4, 1, 98, &[0; 16]);
+    set_u32(&mut volume, 132, 4);
+    assert!(matches!(
+        builder.add_dds_bytes("textures/volume.dds", &volume),
+        Err(Error::Dds("unsupported DDS resource dimension"))
+    ));
+}
+
+#[test]
+fn ba2_dx10_writer_rejects_malformed_dds_headers() {
+    let mut builder = Dx10Builder::new();
+    assert!(matches!(
+        builder.add_dds_bytes("textures/bad.dds", b"not a dds"),
+        Err(Error::Dds("truncated DDS header"))
+    ));
+
+    let mut invalid_magic = dx10_dds(4, 4, 1, 98, &[0; 16]);
+    invalid_magic[0..4].copy_from_slice(b"NOPE");
+    assert!(matches!(
+        builder.add_dds_bytes("textures/bad.dds", &invalid_magic),
+        Err(Error::Dds("invalid DDS magic"))
+    ));
+
+    let mut invalid_header_size = dx10_dds(4, 4, 1, 98, &[0; 16]);
+    set_u32(&mut invalid_header_size, 4, 120);
+    assert!(matches!(
+        builder.add_dds_bytes("textures/bad.dds", &invalid_header_size),
+        Err(Error::Dds("invalid DDS header size"))
+    ));
+
+    let mut truncated_dx10 = dx10_dds(4, 4, 1, 98, &[0; 16]);
+    truncated_dx10.truncate(147);
+    assert!(matches!(
+        builder.add_dds_bytes("textures/bad.dds", &truncated_dx10),
+        Err(Error::Dds("truncated DDS DX10 header"))
+    ));
+}
+
+#[test]
+fn ba2_dx10_writer_validates_multimip_block_payload_size() {
+    let payload = [0x55; 96];
+    let dds = dx10_dds(8, 8, 3, 98, &payload);
+    let mut builder = Dx10Builder::new();
+    builder.add_dds_bytes("textures/mips.dds", &dds).unwrap();
+
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
+    assert_eq!(
+        archive
+            .read_file("textures/mips.dds")
+            .unwrap()
+            .unwrap()
+            .split_off(148),
+        payload
+    );
+
+    let short = dx10_dds(8, 8, 3, 98, &[0; 95]);
+    assert!(matches!(
+        builder.add_dds_bytes("textures/short.dds", &short),
         Err(Error::Dds("DDS payload size does not match metadata"))
     ));
 }

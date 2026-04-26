@@ -260,7 +260,7 @@ fn parse_dx10_format(bytes: &[u8], payload_offset: usize) -> Result<u8> {
     if dimension != DDS_DIMENSION_TEXTURE2D {
         return Err(Error::Dds("unsupported DDS resource dimension"));
     }
-    if array_size == 0 || array_size > u32::from(u8::MAX) {
+    if array_size != 1 {
         return Err(Error::Dds("unsupported DDS array size"));
     }
     let format = u8::try_from(format).map_err(|_| Error::Dds("unsupported DXGI format"))?;
@@ -658,7 +658,7 @@ fn emit_header(
     push_u32(out, height);
     push_u32(out, width);
     push_u32(out, fields.pitch_or_linear);
-    push_u32(out, u32::from(fields.fourcc == fourcc(*b"DX10")));
+    push_u32(out, 0);
     push_u32(out, u32::from(header.mip_count));
     for _ in 0..11 {
         push_u32(out, 0);

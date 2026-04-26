@@ -10,6 +10,7 @@ fn main() -> dream_archive::Result<()> {
         std::process::exit(2);
     };
 
+    eprintln!("note: this demo interprets <member-path> as UTF-8/ASCII archive bytes");
     let archive = Archive::open_path(archive_path)?;
     let output = std::fs::File::create(output_path)?;
     archive.extract_file_required(member_path.to_string_lossy().as_bytes(), output)?;

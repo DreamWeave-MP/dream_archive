@@ -39,6 +39,7 @@ pub struct TextureHeader {
     pub height: u16,
     pub width: u16,
     pub mip_count: u8,
+    /// DXGI format number stored by BA2.
     pub format: u8,
     /// Low byte of the BA2 texture flags field. Bit 0 marks cubemaps.
     pub flags: u8,
@@ -125,6 +126,7 @@ pub struct Archive {
     info: ArchiveInfo,
     entries: Vec<Entry>,
     lookup: HashMap<FileHash, usize>,
+    name_lookup: HashMap<BString, usize>,
 }
 
 impl Archive {
@@ -187,7 +189,11 @@ impl Archive {
     /// Get an entry by path. The path is normalized using BA2 rules.
     #[must_use]
     pub fn get(&self, path: impl AsRef<[u8]>) -> Option<&Entry> {
-        self.get_by_hash(hash_file(path.as_ref().as_bstr()).0)
+        let (hash, normalized) = hash_file(path.as_ref().as_bstr());
+        self.name_lookup
+            .get(&normalized)
+            .or_else(|| self.lookup.get(&hash))
+            .map(|&index| &self.entries[index])
     }
 
     /// Get an entry by path, returning an error when it is absent.
@@ -449,14 +455,20 @@ impl Archive {
 
     pub(super) fn from_parts(storage: Storage, info: ArchiveInfo, entries: Vec<Entry>) -> Self {
         let mut lookup = HashMap::with_capacity(entries.len());
+        let mut name_lookup = HashMap::with_capacity(entries.len());
         for (index, entry) in entries.iter().enumerate() {
             lookup.entry(entry.hash).or_insert(index);
+            if !entry.name.is_empty() {
+                let (_, normalized) = hash_file(entry.name.as_bstr());
+                name_lookup.entry(normalized).or_insert(index);
+            }
         }
         Self {
             storage,
             info,
             entries,
             lookup,
+            name_lookup,
         }
     }
 }

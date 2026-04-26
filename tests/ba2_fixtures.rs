@@ -116,7 +116,7 @@ fn reconstructs_dx10_dds() {
     let expected = fs::read(root.join("Fence006_1K_Roughness.dds")).unwrap();
     assert_eq!(data.len(), expected.len());
     assert_eq!(&data[148..], &expected[148..]);
-    assert_eq!(u32::from_le_bytes(data[24..28].try_into().unwrap()), 1);
+    assert_eq!(u32::from_le_bytes(data[24..28].try_into().unwrap()), 0);
     assert_eq!(u32::from_le_bytes(data[128..132].try_into().unwrap()), 98);
     assert_eq!(u32::from_le_bytes(data[132..136].try_into().unwrap()), 3);
     assert_eq!(u32::from_le_bytes(data[140..144].try_into().unwrap()), 1);
@@ -241,7 +241,7 @@ fn next_gen_dx10_extracts_bsa_rs_compatible_dds() {
             .unwrap();
         assert_eq!(data.len(), expected.len());
         assert_eq!(&data[148..], &expected[148..]);
-        assert_eq!(u32::from_le_bytes(data[24..28].try_into().unwrap()), 1);
+        assert_eq!(u32::from_le_bytes(data[24..28].try_into().unwrap()), 0);
         assert_eq!(u32::from_le_bytes(data[68..72].try_into().unwrap()), 0);
         assert_eq!(u32::from_le_bytes(data[144..148].try_into().unwrap()), 0);
     }

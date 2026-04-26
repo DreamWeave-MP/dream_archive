@@ -10,6 +10,7 @@ fn main() -> dream_archive::ba2::Result<()> {
         std::process::exit(2);
     };
 
+    eprintln!("note: this demo interprets <member-path> as UTF-8/ASCII archive bytes");
     let archive = Archive::open_path(archive_path)?;
     let Some(bytes) = archive.read_file(member_path.to_string_lossy().as_bytes())? else {
         eprintln!(

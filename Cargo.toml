@@ -46,6 +46,10 @@ name = "build_ba2"
 required-features = ["ba2"]
 
 [[example]]
+name = "build_ba2_dx10"
+required-features = ["ba2"]
+
+[[example]]
 name = "build_tes3_bsa"
 required-features = ["bsa-tes3"]
 

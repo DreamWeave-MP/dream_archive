@@ -1,8 +1,9 @@
 # dream_archive
 
-Pure-Rust Bethesda archive tooling for real PC archives. It reads, lists,
-extracts, and builds the archive families used by Morrowind, Oblivion,
-Fallout, Skyrim, Fallout 4, and Starfield-era games.
+Pure-Rust Bethesda archive tooling for common PC archive layouts. It reads,
+lists, extracts, and builds the archive families used by Morrowind, Oblivion,
+Fallout, Skyrim, Fallout 4, and Starfield-era games, subject to the format rows
+below rather than wishful thinking.
 
 The crate keeps archive paths as bytes. That is intentional. Old Bethesda tools
 and mods do not always agree on Unicode, code pages, or reality in general.
@@ -142,6 +143,11 @@ validates the payload size, strips the DDS header, and stores the raw texture
 payload. It does not transcode formats or generate mips. If you already have BA2
 texture metadata, `add_texture_bytes` still accepts the raw bytes after the DDS
 header directly.
+
+DX10/DDS support here is archive plumbing, not a texture processing library. It
+does not decode pixels, preserve vendor/private DDS fields, handle texture
+arrays/volumes, or aim for DirectXTex parity. A broader DDS crate belongs with a
+renderer; this crate only does the pieces BA2 writing and extraction need today.
 
 ## Archive paths are not filesystem paths
 
