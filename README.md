@@ -14,7 +14,7 @@ an explicit encoding helper instead of a hopeful guess.
 | Format | Read | Extract | Write | Notes |
 | --- | --- | --- | --- | --- |
 | BA2 GNRL | yes | yes | yes | General-file BA2 archives. |
-| BA2 DX10 | yes | yes | yes | DDS headers are reconstructed from BA2 texture metadata. Writer takes explicit texture metadata and raw payload bytes. |
+| BA2 DX10 | yes | yes | yes | DDS headers are reconstructed from BA2 texture metadata. Writer accepts supported DDS files or explicit texture metadata plus raw payload bytes. |
 | BA2 GNMF | metadata | no | no | Sony GNM (`.gnf`) texture archives. Explicitly out of scope for now; metadata is parsed only so callers can identify them instead of getting mystery meat. |
 | TES3 BSA | yes | yes | yes | Morrowind-era archives. |
 | TES4 BSA | yes | yes | yes | Oblivion/Fallout/Skyrim PC archives, including hash-only and embedded-name layouts. |
@@ -123,37 +123,25 @@ builder.write_path("MyMod.ba2")?;
 # }
 ```
 
-Build a BA2 DX10 texture archive from raw texture payload bytes:
+Build a BA2 DX10 texture archive from DDS files:
 
 ```rust,no_run
-use dream_archive::{
-    Ba2Dx10Builder,
-    ba2::{Ba2CompressionFormat, TextureHeader},
-};
+use dream_archive::{Ba2Dx10Builder, ba2::Ba2CompressionFormat};
 
 # fn main() -> dream_archive::ba2::Result<()> {
 let mut builder = Ba2Dx10Builder::new();
 builder.set_compression(Some(Ba2CompressionFormat::Zip));
-builder.add_texture_bytes(
-    "textures/example.dds",
-    TextureHeader {
-        height: 1024,
-        width: 1024,
-        mip_count: 1,
-        format: 98, // DXGI_FORMAT_BC7_UNORM
-        flags: 0,
-        tile_mode: 0,
-    },
-    std::fs::read("example.payload")?,
-)?;
+builder.add_dds_file("textures/example.dds", "example.dds")?;
 builder.write_path("Textures.ba2")?;
 # Ok(())
 # }
 ```
 
-That payload is the bytes after the DDS header, not a whole DDS file. The DX10
-writer is texture-aware, but it is not a DDS parser pretending that mip layout is
-someone else's problem.
+The DDS path parses supported DDS headers, maps them to BA2 texture metadata,
+validates the payload size, strips the DDS header, and stores the raw texture
+payload. It does not transcode formats or generate mips. If you already have BA2
+texture metadata, `add_texture_bytes` still accepts the raw bytes after the DDS
+header directly.
 
 ## Archive paths are not filesystem paths
 

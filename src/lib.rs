@@ -18,8 +18,8 @@
 //!
 //! - BA2 GNRL: read, extract, and write.
 //! - BA2 DX10: read, extract by reconstructing DDS headers from archive
-//!   texture metadata, and write from explicit texture metadata plus raw texture
-//!   payload bytes.
+//!   texture metadata, and write from supported DDS files or explicit texture
+//!   metadata plus raw texture payload bytes.
 //! - BA2 GNMF: Sony GNM (`.gnf`) texture metadata parsing only. Payload
 //!   extraction/writing is intentionally out of scope for now because correct
 //!   support requires console texture swizzle/unswizzle semantics, not a raw
@@ -90,18 +90,7 @@
 //! # #[cfg(feature = "ba2")]
 //! # fn main() -> dream_archive::ba2::Result<()> {
 //! let mut builder = dream_archive::Ba2Dx10Builder::new();
-//! builder.add_texture_bytes(
-//!     "textures/example.dds",
-//!     dream_archive::ba2::TextureHeader {
-//!         height: 1024,
-//!         width: 1024,
-//!         mip_count: 1,
-//!         format: 98,
-//!         flags: 0,
-//!         tile_mode: 0,
-//!     },
-//!     b"raw texture payload",
-//! )?;
+//! builder.add_dds_file("textures/example.dds", "example.dds")?;
 //! builder.write_path("Textures.ba2")?;
 //! # Ok(())
 //! # }
@@ -131,6 +120,8 @@ pub mod ba2;
 pub mod bsa;
 #[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
 mod builder_fs;
+#[cfg(feature = "ba2")]
+mod dds;
 #[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
 mod extract;
 #[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]

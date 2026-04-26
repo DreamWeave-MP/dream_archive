@@ -1,9 +1,9 @@
 use super::{
-    ArchiveVersion, Ba2CompressionFormat, Error, FileHash, PayloadFormat, Result, dds,
-    dds::DdsHeader, hash_file, parser,
+    ArchiveVersion, Ba2CompressionFormat, Error, FileHash, PayloadFormat, Result, hash_file, parser,
 };
 use crate::{
     Copied,
+    dds::{self, DdsHeader},
     extract::{ensure_parent_dir, output_path_into, write_file_atomically},
     storage::Storage,
 };

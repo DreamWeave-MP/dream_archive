@@ -1,5 +1,5 @@
-use super::{ArchiveVersion, Error, FileHash, Result, TextureHeader, builder, dds, hash_file};
-use crate::{CompressionOverride, builder_fs};
+use super::{ArchiveVersion, Error, FileHash, Result, TextureHeader, builder, hash_file};
+use crate::{CompressionOverride, builder_fs, dds};
 use bstr::{BString, ByteSlice as _};
 use flate2::Compression;
 use std::{
@@ -19,10 +19,9 @@ const CHUNK_SENTINEL: u32 = 0xBAAD_F00D;
 
 /// Builder for BA2 DX10 texture archives.
 ///
-/// This takes explicit BA2 texture metadata and raw texture payload bytes. It
-/// does not parse DDS files or silently strip DDS headers. A texture archive API
-/// that lies about where the mip layout came from is how you get interestingly
-/// corrupt textures, and not the fun kind of interesting.
+/// This can either take explicit BA2 texture metadata plus raw texture payload
+/// bytes, or parse a supported DDS header and strip it before writing the BA2
+/// texture payload. It does not transcode texture formats or generate mips.
 #[derive(Clone, Debug)]
 pub struct Dx10Builder {
     version: ArchiveVersion,
@@ -164,6 +163,36 @@ impl Dx10Builder {
         Ok(())
     }
 
+    /// Add one texture from a DDS file held in memory.
+    ///
+    /// The DDS header is parsed and stripped; only the texture payload is stored
+    /// in the BA2. Supported formats are the same formats this crate can
+    /// reconstruct when extracting DX10 BA2 archives.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the DDS header or payload layout is unsupported, the
+    /// path is invalid, the normalized path is duplicated, or allocation fails.
+    pub fn add_dds_bytes(&mut self, path: impl AsRef<[u8]>, dds: impl AsRef<[u8]>) -> Result<()> {
+        self.add_dds_bytes_with_compression(path, dds, CompressionOverride::Inherit)
+    }
+
+    /// Add one DDS texture with an explicit per-file compression policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the DDS header or payload layout is unsupported, the
+    /// path is invalid, the normalized path is duplicated, or allocation fails.
+    pub fn add_dds_bytes_with_compression(
+        &mut self,
+        path: impl AsRef<[u8]>,
+        dds: impl AsRef<[u8]>,
+        compression: CompressionOverride,
+    ) -> Result<()> {
+        let texture = dds::parse_dds_for_dx10(dds.as_ref())?;
+        self.add_texture_bytes_with_compression(path, texture.header, texture.payload, compression)
+    }
+
     /// Read a filesystem texture payload and store it at `archive_path`.
     ///
     /// The file is treated as raw payload bytes. This method does not parse DDS.
@@ -199,6 +228,36 @@ impl Dx10Builder {
     ) -> Result<()> {
         let bytes = fs::read(source)?;
         self.add_texture_bytes_with_compression(archive_path, header, bytes, compression)
+    }
+
+    /// Read a DDS file, parse and strip its header, and store its texture payload.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading the file fails, the DDS is unsupported, or
+    /// adding the archive entry fails.
+    pub fn add_dds_file(
+        &mut self,
+        archive_path: impl AsRef<[u8]>,
+        source: impl AsRef<Path>,
+    ) -> Result<()> {
+        self.add_dds_file_with_compression(archive_path, source, CompressionOverride::Inherit)
+    }
+
+    /// Read a DDS file with a per-file compression policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading the file fails, the DDS is unsupported, or
+    /// adding the archive entry fails.
+    pub fn add_dds_file_with_compression(
+        &mut self,
+        archive_path: impl AsRef<[u8]>,
+        source: impl AsRef<Path>,
+        compression: CompressionOverride,
+    ) -> Result<()> {
+        let bytes = fs::read(source)?;
+        self.add_dds_bytes_with_compression(archive_path, bytes, compression)
     }
 
     /// Recursively add all files below `root` with the same texture metadata.

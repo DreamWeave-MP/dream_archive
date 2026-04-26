@@ -17,6 +17,15 @@ const CHUNK_SENTINEL: u32 = 0xBAAD_F00D;
 const FILE_HEADER_SIZE_GNRL: u16 = 0x10;
 const FILE_HEADER_SIZE_DX10: u16 = 0x18;
 const FILE_HEADER_SIZE_GNMF: u16 = 0x30;
+const DDSD_CAPS: u32 = 0x0000_0001;
+const DDSD_HEIGHT: u32 = 0x0000_0002;
+const DDSD_WIDTH: u32 = 0x0000_0004;
+const DDSD_PIXELFORMAT: u32 = 0x0000_1000;
+const DDSD_MIPMAPCOUNT: u32 = 0x0002_0000;
+const DDSD_LINEARSIZE: u32 = 0x0008_0000;
+const DDPF_FOURCC: u32 = 0x0000_0004;
+const DDSCAPS_TEXTURE: u32 = 0x0000_1000;
+const DDS_DIMENSION_TEXTURE2D: u32 = 3;
 
 fn push_u16(out: &mut Vec<u8>, value: u16) {
     out.extend_from_slice(&value.to_le_bytes());
@@ -400,6 +409,81 @@ fn tiny_texture_header() -> TextureHeader {
     }
 }
 
+fn push_zeros(out: &mut Vec<u8>, count: usize) {
+    out.resize(out.len() + count, 0);
+}
+
+fn dx10_dds(width: u32, height: u32, mip_count: u32, format: u32, payload: &[u8]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"DDS ");
+    push_u32(&mut bytes, 124);
+    push_u32(
+        &mut bytes,
+        DDSD_CAPS
+            | DDSD_HEIGHT
+            | DDSD_WIDTH
+            | DDSD_PIXELFORMAT
+            | DDSD_MIPMAPCOUNT
+            | DDSD_LINEARSIZE,
+    );
+    push_u32(&mut bytes, height);
+    push_u32(&mut bytes, width);
+    push_u32(&mut bytes, payload.len().try_into().unwrap());
+    push_u32(&mut bytes, 1);
+    push_u32(&mut bytes, mip_count);
+    push_zeros(&mut bytes, 44);
+    push_u32(&mut bytes, 32);
+    push_u32(&mut bytes, DDPF_FOURCC);
+    push_u32(&mut bytes, DX10);
+    push_zeros(&mut bytes, 20);
+    push_u32(&mut bytes, DDSCAPS_TEXTURE);
+    push_zeros(&mut bytes, 16);
+    push_u32(&mut bytes, format);
+    push_u32(&mut bytes, DDS_DIMENSION_TEXTURE2D);
+    push_u32(&mut bytes, 0);
+    push_u32(&mut bytes, 1);
+    push_u32(&mut bytes, 0);
+    assert_eq!(bytes.len(), 148);
+    bytes.extend_from_slice(payload);
+    bytes
+}
+
+fn legacy_fourcc_dds(
+    width: u32,
+    height: u32,
+    mip_count: u32,
+    fourcc: u32,
+    payload: &[u8],
+) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"DDS ");
+    push_u32(&mut bytes, 124);
+    push_u32(
+        &mut bytes,
+        DDSD_CAPS
+            | DDSD_HEIGHT
+            | DDSD_WIDTH
+            | DDSD_PIXELFORMAT
+            | DDSD_MIPMAPCOUNT
+            | DDSD_LINEARSIZE,
+    );
+    push_u32(&mut bytes, height);
+    push_u32(&mut bytes, width);
+    push_u32(&mut bytes, payload.len().try_into().unwrap());
+    push_u32(&mut bytes, 0);
+    push_u32(&mut bytes, mip_count);
+    push_zeros(&mut bytes, 44);
+    push_u32(&mut bytes, 32);
+    push_u32(&mut bytes, DDPF_FOURCC);
+    push_u32(&mut bytes, fourcc);
+    push_zeros(&mut bytes, 20);
+    push_u32(&mut bytes, DDSCAPS_TEXTURE);
+    push_zeros(&mut bytes, 16);
+    assert_eq!(bytes.len(), 128);
+    bytes.extend_from_slice(payload);
+    bytes
+}
+
 #[test]
 fn writes_ba2_dx10_archive_from_texture_payload() {
     let mut builder = Dx10Builder::new();
@@ -543,6 +627,63 @@ fn ba2_dx10_writer_rejects_invalid_texture_metadata() {
             b"texture"
         ),
         Err(Error::Dds("unsupported DXGI format"))
+    ));
+}
+
+#[test]
+fn ba2_dx10_writer_ingests_dx10_dds() {
+    let payload = [0xabu8; 16];
+    let dds = dx10_dds(4, 4, 1, 98, &payload);
+    let mut builder = Dx10Builder::new();
+    builder.add_dds_bytes("textures/tiny.dds", &dds).unwrap();
+
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
+    let entry = archive.get("textures/tiny.dds").unwrap();
+    assert_eq!(
+        entry.file().header,
+        dream_archive::ba2::FileHeader::DX10(TextureHeader {
+            height: 4,
+            width: 4,
+            mip_count: 1,
+            format: 98,
+            flags: 0,
+            tile_mode: 0,
+        })
+    );
+    assert_eq!(archive.read_entry(entry).unwrap().split_off(148), payload);
+}
+
+#[test]
+fn ba2_dx10_writer_ingests_legacy_dxt1_dds() {
+    let payload = [0xcdu8; 8];
+    let dds = legacy_fourcc_dds(4, 4, 1, u32::from_le_bytes(*b"DXT1"), &payload);
+    let mut builder = Dx10Builder::new();
+    builder.add_dds_bytes("textures/tiny.dds", &dds).unwrap();
+
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
+    let entry = archive.get("textures/tiny.dds").unwrap();
+    assert_eq!(
+        entry.file().header,
+        dream_archive::ba2::FileHeader::DX10(TextureHeader {
+            height: 4,
+            width: 4,
+            mip_count: 1,
+            format: 71,
+            flags: 0,
+            tile_mode: 0,
+        })
+    );
+    assert_eq!(archive.read_entry(entry).unwrap().split_off(128), payload);
+}
+
+#[test]
+fn ba2_dx10_writer_rejects_dds_payload_size_mismatch() {
+    let dds = dx10_dds(4, 4, 1, 98, &[0; 15]);
+    let mut builder = Dx10Builder::new();
+
+    assert!(matches!(
+        builder.add_dds_bytes("textures/tiny.dds", &dds),
+        Err(Error::Dds("DDS payload size does not match metadata"))
     ));
 }
 

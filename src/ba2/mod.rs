@@ -1,7 +1,6 @@
 mod archive;
 mod builder;
 mod chunk;
-mod dds;
 mod dx10_builder;
 mod hash;
 mod parser;
