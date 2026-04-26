@@ -1719,3 +1719,35 @@ fn detects_lz4_decompression_size_mismatch() {
         })
     ));
 }
+
+#[test]
+fn failed_lz4_extract_entry_to_path_keeps_existing_ba2_file_and_removes_temp() {
+    let payload = lz4_flex::block::compress(b"lz4 short");
+    let bytes = tiny_archive(TinyArchiveOptions {
+        version: 3,
+        compression_code: Some(3),
+        string_table_offset: 0,
+        name: None,
+        chunk_offset: 72,
+        chunk_packed_size: payload.len().try_into().unwrap(),
+        chunk_size: 99,
+        payload: &payload,
+        ..TinyArchiveOptions::default()
+    });
+    let archive = Archive::from_slice(&bytes).unwrap();
+    let out = output_dir("ba2-entry-lz4-atomic-failure");
+    std::fs::create_dir_all(&out).unwrap();
+    let file_path = out.join("hello.txt");
+    std::fs::write(&file_path, b"old contents").unwrap();
+
+    assert!(matches!(
+        archive.extract_entry_to_path(&archive.entries()[0], &file_path),
+        Err(Error::DecompressionSizeMismatch {
+            expected: 99,
+            actual: 9
+        })
+    ));
+    assert_eq!(std::fs::read(&file_path).unwrap(), b"old contents");
+    assert_no_temp_extract_files(&out);
+    std::fs::remove_dir_all(out).unwrap();
+}

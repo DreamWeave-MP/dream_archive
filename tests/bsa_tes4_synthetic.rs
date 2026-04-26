@@ -606,6 +606,31 @@ fn writes_embedded_name_tes4_archive_with_string_tables() {
 }
 
 #[test]
+fn string_tables_take_precedence_over_disagreeing_embedded_names() {
+    let mut builder = Builder::new();
+    builder.set_name_mode(NameMode::StringsAndEmbedded);
+    builder.add_bytes("meshes/foo/bar.nif", b"mesh").unwrap();
+    let mut bytes = builder.to_vec().unwrap();
+
+    let original = b"meshes\\foo\\bar.nif";
+    let replacement = b"others\\foo\\bar.nif";
+    let start = bytes
+        .windows(original.len())
+        .rposition(|window| window == original)
+        .unwrap();
+    bytes[start..start + original.len()].copy_from_slice(replacement);
+
+    let archive = Archive::from_slice(&bytes).unwrap();
+
+    assert_eq!(archive.entries()[0].path().unwrap(), "meshes\\foo\\bar.nif");
+    assert_eq!(
+        archive.read_file("meshes/foo/bar.nif").unwrap().unwrap(),
+        b"mesh"
+    );
+    assert!(archive.read_file("others/foo/bar.nif").unwrap().is_none());
+}
+
+#[test]
 fn writes_compressed_embedded_name_tes4_archive() {
     let mut builder = Builder::new();
     builder.set_compressed(true);
