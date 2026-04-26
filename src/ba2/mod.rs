@@ -52,7 +52,7 @@ impl From<TryFromIntError> for Error {
     }
 }
 
-/// Archive payload format.
+/// BA2 archive payload format.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Format {
     #[default]

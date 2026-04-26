@@ -1,5 +1,5 @@
 use bstr::ByteSlice as _;
-use dream_archive::fo4::{Archive, CompressionFormat, Error, Version};
+use dream_archive::ba2::{Archive, CompressionFormat, Error, Version};
 use flate2::{Compression, write::ZlibEncoder};
 
 const MAGIC: u32 = u32::from_le_bytes(*b"BTDX");
@@ -64,7 +64,7 @@ fn tiny_archive(options: TinyArchiveOptions<'_>) -> Vec<u8> {
         push_u32(&mut bytes, code);
     }
 
-    let (hash, _) = dream_archive::fo4::hash_file(b"hello.txt".as_bstr());
+    let (hash, _) = dream_archive::ba2::hash_file(b"hello.txt".as_bstr());
     push_u32(&mut bytes, hash.file);
     push_u32(&mut bytes, hash.extension);
     push_u32(&mut bytes, hash.directory);

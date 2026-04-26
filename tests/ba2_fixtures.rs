@@ -2,7 +2,7 @@ mod common;
 
 use dream_archive::{
     FileFormat,
-    fo4::{Archive, Error, Format, Version},
+    ba2::{Archive, Error, Format, Version},
 };
 use std::{fs, io::Read as _};
 use walkdir::WalkDir;
@@ -149,7 +149,7 @@ fn guessed_format_is_btdx() {
         fs::File::open(common::fixture("bsa-rs/data/common_guess_test/fo4.ba2")).unwrap();
     assert_eq!(
         dream_archive::guess_format(&mut file).unwrap(),
-        Some(FileFormat::FO4)
+        Some(FileFormat::BA2)
     );
     let mut rest = Vec::new();
     file.read_to_end(&mut rest).unwrap();
@@ -161,7 +161,7 @@ fn guess_format_is_weak_and_consumes_magic() {
     let mut bytes = &b"BTDX this is not a real archive"[..];
     assert_eq!(
         dream_archive::guess_format(&mut bytes).unwrap(),
-        Some(FileFormat::FO4)
+        Some(FileFormat::BA2)
     );
     assert_eq!(bytes, b" this is not a real archive");
 }

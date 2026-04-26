@@ -1,7 +1,7 @@
 mod common;
 
 use bstr::ByteSlice as _;
-use dream_archive::fo4::{Archive, hash_file};
+use dream_archive::ba2::{Archive, hash_file};
 
 #[test]
 fn hashes_match_known_ba2_values() {

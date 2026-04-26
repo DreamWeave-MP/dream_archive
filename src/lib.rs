@@ -4,7 +4,7 @@
 //! runtime operations `OpenMW` needs: detect, list, hash lookup, extract GNRL
 //! files, and reconstruct DDS streams from DX10 texture archives.
 
-pub mod fo4;
+pub mod ba2;
 
 use std::io::{self, Read};
 
@@ -17,8 +17,8 @@ pub struct Copied<'copy>(pub &'copy [u8]);
 /// Archive family detected by [`guess_format`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FileFormat {
-    /// Fallout 4 / Starfield BA2 (`BTDX`).
-    FO4,
+    /// Bethesda BA2 (`BTDX`).
+    BA2,
 }
 
 /// Weak archive-family sniffing. This is not full validation.
@@ -30,7 +30,7 @@ pub fn guess_format(input: &mut impl Read) -> io::Result<Option<FileFormat>> {
     let mut magic = [0; 4];
     input.read_exact(&mut magic)?;
     Ok(match &magic {
-        b"BTDX" => Some(FileFormat::FO4),
+        b"BTDX" => Some(FileFormat::BA2),
         _ => None,
     })
 }
