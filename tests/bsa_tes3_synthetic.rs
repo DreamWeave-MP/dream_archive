@@ -1,6 +1,6 @@
 #![cfg(feature = "bsa-tes3")]
 
-use dream_archive::bsa::tes3::{Archive, Error};
+use dream_archive::bsa::tes3::{Archive, Builder, Error};
 use std::path::PathBuf;
 
 const VERSION: u32 = 0x0000_0100;
@@ -58,6 +58,79 @@ fn extracts_synthetic_tes3_file() {
         Some(5)
     );
     assert_eq!(out, b"hello");
+}
+
+#[test]
+fn writes_tes3_archive_from_bytes() {
+    let mut builder = Builder::new();
+    builder.add_bytes("Meshes/Foo.NIF", b"mesh").unwrap();
+    builder.add_bytes("textures/bar.dds", b"texture").unwrap();
+
+    let bytes = builder.into_vec().unwrap();
+    let archive = Archive::read(&bytes).unwrap();
+
+    assert_eq!(archive.len(), 2);
+    assert_eq!(
+        archive.read_file("meshes/foo.nif").unwrap().unwrap(),
+        b"mesh"
+    );
+    assert_eq!(
+        archive.read_file("textures/bar.dds").unwrap().unwrap(),
+        b"texture"
+    );
+    assert_eq!(archive.entries()[0].hash(), 0xECDD_AD85_071D_1701);
+    assert_eq!(archive.entries()[0].path(), "textures\\bar.dds");
+    assert_eq!(archive.entries()[1].path(), "meshes\\foo.nif");
+}
+
+#[test]
+fn writes_tes3_archive_to_path() {
+    let mut builder = Builder::new();
+    builder.add_bytes("file.txt", b"hello").unwrap();
+    let out = output_dir("tes3-write-path");
+    std::fs::create_dir_all(&out).unwrap();
+    let archive_path = out.join("out.bsa");
+
+    builder.write_path(&archive_path).unwrap();
+    let archive = Archive::open_path(&archive_path).unwrap();
+
+    assert_eq!(archive.read_file("file.txt").unwrap().unwrap(), b"hello");
+    std::fs::remove_dir_all(out).unwrap();
+}
+
+#[test]
+fn tes3_writer_output_is_deterministic() {
+    let mut first = Builder::new();
+    first.add_bytes("b.txt", b"b").unwrap();
+    first.add_bytes("a.txt", b"a").unwrap();
+
+    let mut second = Builder::new();
+    second.add_bytes("a.txt", b"a").unwrap();
+    second.add_bytes("b.txt", b"b").unwrap();
+
+    assert_eq!(first.into_vec().unwrap(), second.into_vec().unwrap());
+}
+
+#[test]
+fn tes3_writer_rejects_duplicate_normalized_paths() {
+    let mut builder = Builder::new();
+    builder.add_bytes("Meshes/Foo.NIF", b"mesh").unwrap();
+
+    assert!(matches!(
+        builder.add_bytes("meshes\\foo.nif", b"other"),
+        Err(Error::DuplicatePath)
+    ));
+}
+
+#[test]
+fn tes3_writer_rejects_unsafe_paths() {
+    for path in ["", ".", "../evil.txt", "bad:name.txt", "bad\0name.txt"] {
+        let mut builder = Builder::new();
+        assert!(matches!(
+            builder.add_bytes(path.as_bytes(), b"payload"),
+            Err(Error::InvalidArchivePath)
+        ));
+    }
 }
 
 #[test]
