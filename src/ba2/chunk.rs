@@ -84,6 +84,7 @@ impl Chunk {
     ) -> Result<()> {
         let stored = self.stored_bytes(archive)?;
         if self.packed_size == 0 {
+            out.try_reserve_exact(stored.len())?;
             out.extend_from_slice(stored);
             return Ok(());
         }
@@ -93,11 +94,17 @@ impl Chunk {
         match compression {
             Ba2CompressionFormat::Zip => {
                 let mut decoder = ZlibDecoder::new(stored);
-                decoder
-                    .read_to_end(out)
-                    .map_err(|e| Error::Zlib(e.to_string()))?;
+                decoder.read_to_end(out).map_err(|e| {
+                    out.truncate(before);
+                    Error::Zlib(e.to_string())
+                })?;
+                if decoder.total_in() != u64::try_from(stored.len())? {
+                    out.truncate(before);
+                    return Err(Error::TrailingCompressedData);
+                }
             }
             Ba2CompressionFormat::LZ4 => {
+                out.try_reserve_exact(expected)?;
                 out.resize(before + expected, 0);
                 let actual = match lz4_flex::block::decompress_into(stored, &mut out[before..]) {
                     Ok(actual) => actual,
@@ -114,6 +121,7 @@ impl Chunk {
         if actual == expected {
             Ok(())
         } else {
+            out.truncate(before);
             Err(Error::DecompressionSizeMismatch { expected, actual })
         }
     }

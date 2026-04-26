@@ -8,7 +8,7 @@ pub use archive::{Archive, ArchiveFile, ArchiveInfo, Entry, FileHeader, TextureH
 pub use chunk::{Ba2CompressionFormat, Chunk};
 pub use hash::{FileHash, Hash, hash_file, hash_file_in_place};
 
-use std::{fmt, io, num::TryFromIntError};
+use std::{collections::TryReserveError, fmt, io, num::TryFromIntError};
 
 /// Result type for BA2 operations.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -18,6 +18,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[non_exhaustive]
 pub enum Error {
     DecompressionSizeMismatch { expected: usize, actual: usize },
+    TrailingCompressedData,
     Dds(&'static str),
     InvalidFormat(u32),
     InvalidMagic(u32),
@@ -26,6 +27,7 @@ pub enum Error {
     InvalidChunkSize(u16),
     OutOfBounds,
     IntegralTruncation,
+    Capacity,
     NotImplemented,
     Io(io::Error),
     Zlib(String),
@@ -39,6 +41,7 @@ impl fmt::Display for Error {
                 f,
                 "buffer failed to decompress to the expected size: expected {expected} bytes, got {actual} bytes"
             ),
+            Self::TrailingCompressedData => f.write_str("compressed payload has trailing data"),
             Self::Dds(message) => write!(f, "invalid DDS/texture metadata: {message}"),
             Self::InvalidFormat(value) => {
                 write!(f, "invalid format read from archive header: {value:#010x}")
@@ -59,11 +62,20 @@ impl fmt::Display for Error {
             Self::IntegralTruncation => {
                 f.write_str("archive integer field can not fit on this platform")
             }
+            Self::Capacity => {
+                f.write_str("archive table or payload requests more memory than can be allocated")
+            }
             Self::NotImplemented => f.write_str("support for this feature is not implemented"),
             Self::Io(error) => error.fmt(f),
             Self::Zlib(error) => write!(f, "zlib decompression failed: {error}"),
             Self::Lz4(error) => write!(f, "lz4 decompression failed: {error}"),
         }
+    }
+}
+
+impl From<TryReserveError> for Error {
+    fn from(_: TryReserveError) -> Self {
+        Self::Capacity
     }
 }
 

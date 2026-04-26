@@ -107,7 +107,7 @@ pub(crate) fn write_dds_header(out: &mut Vec<u8>, header: DdsHeader) -> Result<(
     }
 
     let mut fields = base_fields(header);
-    apply_format(&mut fields, header.format, width, height);
+    apply_format(&mut fields, header.format, width, height)?;
     emit_header(out, header, width, height, &fields);
     Ok(())
 }
@@ -137,17 +137,25 @@ fn base_fields(header: DdsHeader) -> HeaderFields {
     fields
 }
 
-fn apply_format(fields: &mut HeaderFields, format: u8, width: u32, height: u32) {
+fn apply_format(fields: &mut HeaderFields, format: u8, width: u32, height: u32) -> Result<()> {
     if apply_legacy_block_format(fields, format, width, height) {
-        return;
+        return Ok(());
     }
     if apply_dx10_block_format(fields, format, width, height) {
-        return;
+        return Ok(());
     }
     if apply_dx10_pitch_format(fields, format, width) {
-        return;
+        return Ok(());
     }
-    apply_plain_format(fields, format, width);
+    if apply_plain_format(fields, format, width) {
+        Ok(())
+    } else {
+        Err(Error::Dds("unsupported DXGI format"))
+    }
+}
+
+fn block_linear_size(width: u32, height: u32, block_bytes: u32) -> u32 {
+    width.div_ceil(4).max(1) * height.div_ceil(4).max(1) * block_bytes
 }
 
 fn set_fourcc_block(fields: &mut HeaderFields, fourcc_value: u32, pitch_or_linear: u32) {
@@ -178,25 +186,53 @@ fn apply_legacy_block_format(
 ) -> bool {
     match format {
         dxgi::BC1_UNORM => {
-            set_fourcc_block(fields, fourcc(*b"DXT1"), width * height / 2);
+            set_fourcc_block(
+                fields,
+                fourcc(*b"DXT1"),
+                block_linear_size(width, height, 8),
+            );
         }
         dxgi::BC2_UNORM => {
-            set_fourcc_block(fields, fourcc(*b"DXT3"), width * height);
+            set_fourcc_block(
+                fields,
+                fourcc(*b"DXT3"),
+                block_linear_size(width, height, 16),
+            );
         }
         dxgi::BC3_UNORM => {
-            set_fourcc_block(fields, fourcc(*b"DXT5"), width * height);
+            set_fourcc_block(
+                fields,
+                fourcc(*b"DXT5"),
+                block_linear_size(width, height, 16),
+            );
         }
         dxgi::BC4_SNORM => {
-            set_fourcc_block(fields, fourcc(*b"BC4S"), width * height / 2);
+            set_fourcc_block(
+                fields,
+                fourcc(*b"BC4S"),
+                block_linear_size(width, height, 8),
+            );
         }
         dxgi::BC4_UNORM => {
-            set_fourcc_block(fields, fourcc(*b"BC4U"), width * height / 2);
+            set_fourcc_block(
+                fields,
+                fourcc(*b"BC4U"),
+                block_linear_size(width, height, 8),
+            );
         }
         dxgi::BC5_SNORM => {
-            set_fourcc_block(fields, fourcc(*b"BC5S"), width * height);
+            set_fourcc_block(
+                fields,
+                fourcc(*b"BC5S"),
+                block_linear_size(width, height, 16),
+            );
         }
         dxgi::BC5_UNORM => {
-            set_fourcc_block(fields, fourcc(*b"BC5U"), width * height);
+            set_fourcc_block(
+                fields,
+                fourcc(*b"BC5U"),
+                block_linear_size(width, height, 16),
+            );
         }
         _ => return false,
     }
@@ -206,7 +242,7 @@ fn apply_legacy_block_format(
 fn apply_dx10_block_format(fields: &mut HeaderFields, format: u8, width: u32, height: u32) -> bool {
     match format {
         dxgi::BC1_UNORM_SRGB => {
-            set_dx10_block(fields, format, width * height / 2);
+            set_dx10_block(fields, format, block_linear_size(width, height, 8));
         }
         dxgi::BC2_UNORM_SRGB
         | dxgi::BC3_UNORM_SRGB
@@ -214,7 +250,7 @@ fn apply_dx10_block_format(fields: &mut HeaderFields, format: u8, width: u32, he
         | dxgi::BC6H_SF16
         | dxgi::BC7_UNORM
         | dxgi::BC7_UNORM_SRGB => {
-            set_dx10_block(fields, format, width * height);
+            set_dx10_block(fields, format, block_linear_size(width, height, 16));
         }
         _ => return false,
     }
@@ -241,7 +277,7 @@ fn apply_dx10_pitch_format(fields: &mut HeaderFields, format: u8, width: u32) ->
     true
 }
 
-fn apply_plain_format(fields: &mut HeaderFields, format: u8, width: u32) {
+fn apply_plain_format(fields: &mut HeaderFields, format: u8, width: u32) -> bool {
     match format {
         dxgi::R8G8B8A8_UNORM => {
             set_rgb(
@@ -304,8 +340,9 @@ fn apply_plain_format(fields: &mut HeaderFields, format: u8, width: u32) {
             fields.r_mask = 0x0000_00ff;
             fields.pitch_or_linear = width;
         }
-        _ => {}
+        _ => return false,
     }
+    true
 }
 
 fn set_rgb(fields: &mut HeaderFields, pitch: u32, bits: u32, r: u32, g: u32, b: u32, a: u32) {

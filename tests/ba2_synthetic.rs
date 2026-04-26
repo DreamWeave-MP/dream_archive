@@ -319,6 +319,34 @@ fn rejects_zero_sized_texture_during_extraction() {
 }
 
 #[test]
+fn rejects_unsupported_dxgi_format_without_partial_output() {
+    let bytes = tiny_texture_archive(TinyTextureOptions {
+        format: 255,
+        ..TinyTextureOptions::default()
+    });
+    let archive = Archive::read(&bytes).unwrap();
+    let mut out = b"prefix".to_vec();
+    assert!(matches!(
+        archive.read_entry_into(&archive.entries()[0], &mut out),
+        Err(Error::Dds("unsupported DXGI format"))
+    ));
+    assert_eq!(out, b"prefix");
+}
+
+#[test]
+fn block_compressed_dds_size_uses_rounded_blocks() {
+    let bytes = tiny_texture_archive(TinyTextureOptions {
+        width: 5,
+        height: 5,
+        format: 71,
+        ..TinyTextureOptions::default()
+    });
+    let archive = Archive::read(&bytes).unwrap();
+    let data = archive.read_file("tiny.dds").unwrap().unwrap();
+    assert_eq!(u32::from_le_bytes(data[20..24].try_into().unwrap()), 32);
+}
+
+#[test]
 fn v3_unknown_compression_code_means_zip() {
     let bytes = tiny_archive(TinyArchiveOptions {
         version: 3,
@@ -383,6 +411,48 @@ fn detects_zlib_decompression_size_mismatch() {
             expected: 99,
             actual: 5
         })
+    ));
+}
+
+#[test]
+fn failed_zlib_decompression_does_not_leave_partial_output() {
+    let payload = zlib_compress(b"short");
+    let bytes = tiny_archive(TinyArchiveOptions {
+        string_table_offset: 0,
+        name: None,
+        chunk_offset: 60,
+        chunk_packed_size: payload.len().try_into().unwrap(),
+        chunk_size: 99,
+        payload: &payload,
+        ..TinyArchiveOptions::default()
+    });
+    let archive = Archive::read(&bytes).unwrap();
+    let mut out = b"prefix".to_vec();
+    assert!(
+        archive
+            .read_entry_into(&archive.entries()[0], &mut out)
+            .is_err()
+    );
+    assert_eq!(out, b"prefix");
+}
+
+#[test]
+fn rejects_synthetic_zlib_trailing_data() {
+    let mut payload = zlib_compress(b"compressed hello");
+    payload.push(0);
+    let bytes = tiny_archive(TinyArchiveOptions {
+        string_table_offset: 0,
+        name: None,
+        chunk_offset: 60,
+        chunk_packed_size: payload.len().try_into().unwrap(),
+        chunk_size: 16,
+        payload: &payload,
+        ..TinyArchiveOptions::default()
+    });
+    let archive = Archive::read(&bytes).unwrap();
+    assert!(matches!(
+        archive.read_entry(&archive.entries()[0]),
+        Err(Error::TrailingCompressedData)
     ));
 }
 

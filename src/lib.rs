@@ -31,9 +31,6 @@ mod storage;
 
 use std::io::{self, Read};
 
-/// Makes a shallow copy of the input in APIs that support borrowed data.
-pub struct Borrowed<'borrow>(pub &'borrow [u8]);
-
 /// Makes a deep copy of the input in APIs that support owned data.
 pub struct Copied<'copy>(pub &'copy [u8]);
 

@@ -214,6 +214,12 @@ impl Archive {
             .map(|&index| &self.entries[index])
     }
 
+    /// Whether a path exists in this archive.
+    #[must_use]
+    pub fn contains(&self, path: impl AsRef<[u8]>) -> bool {
+        self.get(path).is_some()
+    }
+
     /// Size in bytes of the mapped or owned archive data.
     #[must_use]
     pub fn archive_size(&self) -> usize {

@@ -19,7 +19,8 @@ pub(super) fn parse(storage: Storage) -> Result<Archive> {
     let bytes = storage.as_bytes();
     let mut cursor = Cursor::new(bytes);
     let header = RawHeader::read(&mut cursor)?;
-    let mut entries = Vec::with_capacity(header.file_count);
+    let mut entries = Vec::new();
+    entries.try_reserve_exact(header.file_count)?;
     for _ in 0..header.file_count {
         entries.push(read_entry_record(&mut cursor, header.format, bytes)?);
     }
@@ -110,7 +111,8 @@ fn read_entry_record(
     let file_header_size = cursor.u16()?;
     validate_file_header_size(format, file_header_size)?;
     let header = read_file_header(cursor, format)?;
-    let mut chunks = Vec::with_capacity(chunk_count);
+    let mut chunks = Vec::new();
+    chunks.try_reserve_exact(chunk_count)?;
     for _ in 0..chunk_count {
         chunks.push(read_chunk(cursor, format, bytes)?);
     }

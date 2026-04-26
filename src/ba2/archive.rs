@@ -2,8 +2,9 @@ use super::{
     ArchiveVersion, Ba2CompressionFormat, Error, FileHash, PayloadFormat, Result, dds,
     dds::DdsHeader, hash_file, parser,
 };
-use crate::{Borrowed, Copied, storage::Storage};
+use crate::{Copied, storage::Storage};
 use bstr::{BStr, BString, ByteSlice as _};
+use std::collections::HashMap;
 use std::path::Path;
 
 /// Metadata read from the archive header.
@@ -112,6 +113,7 @@ pub struct Archive {
     storage: Storage,
     info: ArchiveInfo,
     entries: Vec<Entry>,
+    lookup: HashMap<FileHash, usize>,
 }
 
 impl Archive {
@@ -168,7 +170,7 @@ impl Archive {
     /// Get an entry by BA2 hash. Names are not required for this lookup.
     #[must_use]
     pub fn get_by_hash(&self, hash: FileHash) -> Option<&Entry> {
-        self.entries.iter().find(|entry| entry.hash == hash)
+        self.lookup.get(&hash).map(|&index| &self.entries[index])
     }
 
     /// Get an entry by path. The path is normalized using BA2 rules.
@@ -183,6 +185,12 @@ impl Archive {
         self.get(path).is_some()
     }
 
+    /// Size in bytes of the mapped or owned archive data.
+    #[must_use]
+    pub fn archive_size(&self) -> usize {
+        self.storage.as_bytes().len()
+    }
+
     /// Extract an entry into `out`.
     ///
     /// # Errors
@@ -191,14 +199,17 @@ impl Archive {
     /// declared decompressed size does not match, or the file format is not yet
     /// implemented.
     pub fn read_entry_into(&self, entry: &Entry, out: &mut Vec<u8>) -> Result<()> {
-        match entry.file.header {
+        let before = out.len();
+        let result = match entry.file.header {
             FileHeader::GNRL => self.extract_chunks(&entry.file, out),
-            FileHeader::DX10(texture) => {
-                dds::write_dds_header(out, texture.dds_header())?;
-                self.extract_chunks(&entry.file, out)
-            }
+            FileHeader::DX10(texture) => dds::write_dds_header(out, texture.dds_header())
+                .and_then(|()| self.extract_chunks(&entry.file, out)),
             FileHeader::GNMF(_) => Err(Error::NotImplemented),
+        };
+        if result.is_err() {
+            out.truncate(before);
         }
+        result
     }
 
     /// Extract an entry into a new vector.
@@ -207,7 +218,8 @@ impl Archive {
     ///
     /// Returns the same errors as [`Self::read_entry_into`].
     pub fn read_entry(&self, entry: &Entry) -> Result<Vec<u8>> {
-        let mut out = Vec::with_capacity(entry.extraction_capacity_hint()?);
+        let mut out = Vec::new();
+        out.try_reserve_exact(entry.extraction_capacity_hint()?)?;
         self.read_entry_into(entry, &mut out)?;
         Ok(out)
     }
@@ -231,10 +243,15 @@ impl Archive {
     }
 
     pub(super) fn from_parts(storage: Storage, info: ArchiveInfo, entries: Vec<Entry>) -> Self {
+        let mut lookup = HashMap::new();
+        for (index, entry) in entries.iter().enumerate() {
+            lookup.entry(entry.hash).or_insert(index);
+        }
         Self {
             storage,
             info,
             entries,
+            lookup,
         }
     }
 }
@@ -270,13 +287,6 @@ impl ArchiveFile {
             let size: usize = chunk.size().try_into()?;
             sum.checked_add(size).ok_or(Error::OutOfBounds)
         })
-    }
-}
-
-impl TryFrom<Borrowed<'_>> for Archive {
-    type Error = Error;
-    fn try_from(value: Borrowed<'_>) -> Result<Self> {
-        Self::read(value.0)
     }
 }
 
