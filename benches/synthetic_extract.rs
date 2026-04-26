@@ -116,6 +116,26 @@ fn bench_extract_to_case(
     print_throughput(name, bytes, start.elapsed());
 }
 
+fn bench_extract_entry_to_path_case<Entry>(
+    name: &str,
+    iterations: usize,
+    entry: &Entry,
+    mut extract_entry_to_path: impl FnMut(&Entry, &PathBuf) -> u64,
+) {
+    let start = Instant::now();
+    let mut bytes = 0usize;
+    for iteration in 0..iterations {
+        let out = output_dir(&format!("{name}-{iteration}")).join("large.bin");
+        bytes += usize::try_from(black_box(extract_entry_to_path(
+            black_box(entry),
+            black_box(&out),
+        )))
+        .unwrap();
+        std::fs::remove_dir_all(out.parent().unwrap()).unwrap();
+    }
+    print_throughput(name, bytes, start.elapsed());
+}
+
 fn print_throughput(name: &str, bytes: usize, elapsed: std::time::Duration) {
     let mib =
         f64::from(u32::try_from(bytes).expect("too many benchmark bytes")) / (1024.0 * 1024.0);
@@ -128,12 +148,19 @@ fn print_throughput(name: &str, bytes: usize, elapsed: std::time::Duration) {
 
 fn build_large_compressed_archives() -> (
     dream_archive::ba2::Archive,
+    dream_archive::ba2::Archive,
     dream_archive::bsa::tes4::Archive,
 ) {
     let payload = large_payload();
     let mut ba2_builder = Ba2Builder::new();
     ba2_builder.set_compression(Some(dream_archive::ba2::Ba2CompressionFormat::Zip));
     ba2_builder
+        .add_bytes("textures/large.bin", &payload)
+        .unwrap();
+    let mut ba2_lz4_builder = Ba2Builder::new();
+    ba2_lz4_builder.set_version(dream_archive::ba2::ArchiveVersion::v3);
+    ba2_lz4_builder.set_compression(Some(dream_archive::ba2::Ba2CompressionFormat::LZ4));
+    ba2_lz4_builder
         .add_bytes("textures/large.bin", &payload)
         .unwrap();
     let mut tes4_builder = Tes4BsaBuilder::new();
@@ -144,6 +171,7 @@ fn build_large_compressed_archives() -> (
 
     (
         dream_archive::ba2::Archive::from_vec(ba2_builder.to_vec().unwrap()).unwrap(),
+        dream_archive::ba2::Archive::from_vec(ba2_lz4_builder.to_vec().unwrap()).unwrap(),
         dream_archive::bsa::tes4::Archive::from_vec(tes4_builder.to_vec().unwrap()).unwrap(),
     )
 }
@@ -172,7 +200,7 @@ fn main() {
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(3);
-    let (large_ba2, large_tes4) = build_large_compressed_archives();
+    let (large_ba2, large_ba2_lz4, large_tes4) = build_large_compressed_archives();
     println!(
         "large compressed bytes/file: {LARGE_PAYLOAD_SIZE}, iterations per case: {large_runs}"
     );
@@ -191,6 +219,24 @@ fn main() {
     bench_extract_to_case("ba2 large extract_to", large_runs, |out| {
         large_ba2.extract_to(out).unwrap()
     });
+    bench_case(
+        "ba2 lz4 large read_entry",
+        large_runs,
+        large_ba2_lz4.entries(),
+        |entry| large_ba2_lz4.read_entry(entry).unwrap(),
+    );
+    bench_writer_case(
+        "ba2 lz4 large extract_entry sink",
+        large_runs,
+        &large_ba2_lz4.entries()[0],
+        |entry, sink| large_ba2_lz4.extract_entry(entry, sink).unwrap(),
+    );
+    bench_extract_entry_to_path_case(
+        "ba2 lz4 large extract_entry_to_path",
+        large_runs,
+        &large_ba2_lz4.entries()[0],
+        |entry, out| large_ba2_lz4.extract_entry_to_path(entry, out).unwrap(),
+    );
     bench_case(
         "tes4 large read_entry",
         large_runs,

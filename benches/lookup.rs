@@ -1,3 +1,4 @@
+use dream_archive::bsa::NormalizedPath;
 use dream_archive::{Ba2Builder, Tes3BsaBuilder, Tes4BsaBuilder};
 use std::{hint::black_box, time::Instant};
 
@@ -53,6 +54,32 @@ fn bench_case(
     );
 }
 
+fn bench_normalized_case(
+    name: &str,
+    iterations: usize,
+    paths: &[NormalizedPath],
+    mut contains: impl FnMut(&NormalizedPath) -> bool,
+) {
+    let lookups = iterations
+        .checked_mul(paths.len())
+        .expect("lookup benchmark iteration count overflowed");
+    let lookups_f64 = f64::from(u32::try_from(lookups).expect("too many benchmark lookups"));
+    let start = Instant::now();
+    let mut hits = 0usize;
+    for _ in 0..iterations {
+        for path in paths {
+            hits += usize::from(black_box(contains(black_box(path))));
+        }
+    }
+    let elapsed = start.elapsed();
+    let nanos_per_lookup = elapsed.as_secs_f64() * 1_000_000_000.0 / lookups_f64;
+    println!(
+        "{name:<28} {lookups:>10} lookups {hits:>10} hits {:>10.3} ms {:>10.1} ns/lookup",
+        elapsed.as_secs_f64() * 1000.0,
+        nanos_per_lookup
+    );
+}
+
 fn main() {
     let paths = build_paths();
     let mixed_paths = paths
@@ -63,6 +90,12 @@ fn main() {
         .iter()
         .map(|path| format!("missing/{path}"))
         .collect::<Vec<_>>();
+    let normalized_paths = paths.iter().map(NormalizedPath::new).collect::<Vec<_>>();
+    let normalized_mixed_paths = mixed_paths
+        .iter()
+        .map(NormalizedPath::new)
+        .collect::<Vec<_>>();
+    let normalized_misses = misses.iter().map(NormalizedPath::new).collect::<Vec<_>>();
     let runs = iterations();
 
     let mut ba2_builder = Ba2Builder::new();
@@ -93,6 +126,21 @@ fn main() {
         tes3.contains(path)
     });
     bench_case("tes3 miss", runs, &misses, |path| tes3.contains(path));
+    bench_normalized_case("tes3 pre-normalized hit", runs, &normalized_paths, |path| {
+        tes3.contains_normalized(path)
+    });
+    bench_normalized_case(
+        "tes3 pre-normalized mixed",
+        runs,
+        &normalized_mixed_paths,
+        |path| tes3.contains_normalized(path),
+    );
+    bench_normalized_case(
+        "tes3 pre-normalized miss",
+        runs,
+        &normalized_misses,
+        |path| tes3.contains_normalized(path),
+    );
     bench_case("tes4 normalized hit", runs, &paths, |path| {
         tes4.contains(path)
     });
@@ -100,4 +148,19 @@ fn main() {
         tes4.contains(path)
     });
     bench_case("tes4 miss", runs, &misses, |path| tes4.contains(path));
+    bench_normalized_case("tes4 pre-normalized hit", runs, &normalized_paths, |path| {
+        tes4.contains_normalized(path)
+    });
+    bench_normalized_case(
+        "tes4 pre-normalized mixed",
+        runs,
+        &normalized_mixed_paths,
+        |path| tes4.contains_normalized(path),
+    );
+    bench_normalized_case(
+        "tes4 pre-normalized miss",
+        runs,
+        &normalized_misses,
+        |path| tes4.contains_normalized(path),
+    );
 }
