@@ -59,10 +59,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 
 [[package]]
+name = "dream-path"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77da8fbd812784ce99f7b3f700189f06055ac6e1a9671fcf2cc15e348665ebf3"
+dependencies = [
+ "bstr",
+]
+
+[[package]]
 name = "dream_archive"
 version = "0.1.0"
 dependencies = [
  "bstr",
+ "dream-path",
  "encoding_rs",
  "flate2",
  "lz4_flex",

@@ -166,6 +166,34 @@ impl Chunk {
             }
         }
     }
+
+    pub(crate) fn extract_to_writer_streaming(
+        &self,
+        archive: &[u8],
+        compression: Ba2CompressionFormat,
+        out: &mut impl std::io::Write,
+    ) -> Result<u64> {
+        let stored = self.stored_bytes(archive)?;
+        if self.packed_size == 0 {
+            out.write_all(stored)?;
+            return Ok(stored.len().try_into()?);
+        }
+
+        let expected: usize = self.size.try_into()?;
+        match compression {
+            Ba2CompressionFormat::Zip => {
+                let mut decoder = ZlibDecoder::new(stored);
+                let actual = copy_decompressed(&mut decoder, expected, out, |error| {
+                    Error::Zlib(error.to_string())
+                })?;
+                if decoder.total_in() != u64::try_from(stored.len())? {
+                    return Err(Error::TrailingCompressedData);
+                }
+                Ok(actual.try_into()?)
+            }
+            Ba2CompressionFormat::LZ4 => self.extract_to_writer(archive, compression, out),
+        }
+    }
 }
 
 fn read_decompressed(
@@ -186,6 +214,23 @@ fn read_decompressed(
         Ok(())
     } else {
         out.truncate(before);
+        Err(Error::DecompressionSizeMismatch { expected, actual })
+    }
+}
+
+fn copy_decompressed(
+    decoder: &mut impl std::io::Read,
+    expected: usize,
+    out: &mut impl std::io::Write,
+    map_error: impl FnOnce(std::io::Error) -> Error,
+) -> Result<usize> {
+    let mut limited = decoder.take(expected as u64 + 1);
+    let actual = std::io::copy(&mut limited, out)
+        .map_err(map_error)
+        .and_then(|actual| usize::try_from(actual).map_err(Error::from))?;
+    if actual == expected {
+        Ok(actual)
+    } else {
         Err(Error::DecompressionSizeMismatch { expected, actual })
     }
 }

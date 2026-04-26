@@ -48,77 +48,13 @@ pub mod tes4;
 mod encoding;
 mod hash;
 
+pub use dream_path::NormalizedPath;
 pub use encoding::{FilenameEncodeError, FilenameEncoding, decode_filename_lossy, encode_filename};
 
-use bstr::{BStr, BString, ByteSlice as _};
+use dream_path::normalize_path as normalize_lookup_path;
+#[cfg(feature = "bsa-tes4")]
+use dream_path::normalize_path_into as normalize_lookup_path_into;
 use std::{collections::TryReserveError, fmt, io, num::TryFromIntError};
-
-/// BSA lookup path normalized once for repeated string-table lookups.
-///
-/// This applies the same byte-level path normalization used by TES3/TES4 BSA
-/// string lookups: `\` becomes `/`, ASCII letters are lower-cased, repeated
-/// separators collapse, and leading separators are discarded. It does not
-/// decode legacy code pages, perform Unicode normalization, or compute TES4
-/// hashes. Hash-only TES4 lookup remains [`tes4::Archive::get_by_hash`].
-#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct NormalizedPath(BString);
-
-impl NormalizedPath {
-    #[must_use]
-    pub fn new(path: impl AsRef<[u8]>) -> Self {
-        Self(BString::from(normalize_lookup_path(path.as_ref())))
-    }
-
-    #[must_use]
-    pub fn as_bstr(&self) -> &BStr {
-        self.0.as_bstr()
-    }
-
-    #[must_use]
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl AsRef<[u8]> for NormalizedPath {
-    fn as_ref(&self) -> &[u8] {
-        self.as_bytes()
-    }
-}
-
-impl From<&[u8]> for NormalizedPath {
-    fn from(path: &[u8]) -> Self {
-        Self::new(path)
-    }
-}
-
-impl From<&str> for NormalizedPath {
-    fn from(path: &str) -> Self {
-        Self::new(path)
-    }
-}
-
-pub(crate) fn normalize_lookup_path(path: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(path.len());
-    normalize_lookup_path_into(&mut out, path);
-    out
-}
-
-pub(crate) fn normalize_lookup_path_into(out: &mut Vec<u8>, path: &[u8]) {
-    out.clear();
-    out.reserve(path.len());
-    for byte in path.iter().copied() {
-        let byte = match byte {
-            b'\\' => b'/',
-            b'A'..=b'Z' => byte + 32,
-            _ => byte,
-        };
-        if byte == b'/' && (out.is_empty() || out.last() == Some(&b'/')) {
-            continue;
-        }
-        out.push(byte);
-    }
-}
 
 /// Result type for BSA operations.
 pub type Result<T> = std::result::Result<T, Error>;

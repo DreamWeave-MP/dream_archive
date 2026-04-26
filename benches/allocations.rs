@@ -1,6 +1,7 @@
 use dream_archive::{Ba2Builder, Tes3BsaBuilder, Tes4BsaBuilder, bsa::NormalizedPath};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[global_allocator]
@@ -182,7 +183,15 @@ fn bench_one_extraction(name: &str, mut extract: impl FnMut() -> u64) {
     report_delta(name, before, after, 1);
 }
 
-fn main() {
+fn output_dir(name: &str) -> PathBuf {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("target/bench-extract");
+    path.push(format!("{}-{}", name, std::process::id()));
+    let _ = std::fs::remove_dir_all(&path);
+    path
+}
+
+fn run_lookup_benchmarks() {
     let paths = build_lookup_paths();
     let mixed_paths = paths
         .iter()
@@ -237,7 +246,9 @@ fn main() {
     bench_normalized_lookup_allocations("tes4 pre-normalized miss", &normalized_misses, |path| {
         tes4.contains_normalized(path)
     });
+}
 
+fn run_extraction_benchmarks() {
     let payload = large_payload();
     let mut ba2_builder = Ba2Builder::new();
     ba2_builder.set_compression(Some(dream_archive::ba2::Ba2CompressionFormat::Zip));
@@ -262,6 +273,20 @@ fn main() {
         ba2.extract_entry(&ba2.entries()[0], std::io::sink())
             .unwrap()
     });
+    bench_one_extraction("ba2 extract_entry_to_path", || {
+        let out = output_dir("ba2-entry-allocations");
+        std::fs::create_dir_all(&out).unwrap();
+        let path = out.join("large.bin");
+        let written = ba2.extract_entry_to_path(&ba2.entries()[0], &path).unwrap();
+        std::fs::remove_dir_all(out).unwrap();
+        written
+    });
+    bench_one_extraction("ba2 extract_to", || {
+        let out = output_dir("ba2-allocations");
+        let written = ba2.extract_to(&out).unwrap();
+        std::fs::remove_dir_all(out).unwrap();
+        written
+    });
     bench_one_extraction("tes4 read_entry", || {
         u64::try_from(
             tes4_compressed
@@ -276,4 +301,25 @@ fn main() {
             .extract_entry(&tes4_compressed.entries()[0], std::io::sink())
             .unwrap()
     });
+    bench_one_extraction("tes4 extract_entry_to_path", || {
+        let out = output_dir("tes4-entry-allocations");
+        std::fs::create_dir_all(&out).unwrap();
+        let path = out.join("large.bin");
+        let written = tes4_compressed
+            .extract_entry_to_path(&tes4_compressed.entries()[0], &path)
+            .unwrap();
+        std::fs::remove_dir_all(out).unwrap();
+        written
+    });
+    bench_one_extraction("tes4 extract_to", || {
+        let out = output_dir("tes4-allocations");
+        let written = tes4_compressed.extract_to(&out).unwrap();
+        std::fs::remove_dir_all(out).unwrap();
+        written
+    });
+}
+
+fn main() {
+    run_lookup_benchmarks();
+    run_extraction_benchmarks();
 }

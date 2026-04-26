@@ -3,9 +3,13 @@ use std::borrow::Cow;
 #[cfg(feature = "parallel")]
 use std::collections::HashSet;
 use std::{
-    fs, io,
+    fs,
+    io::{self, Write as _},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
 };
+
+static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Convert an archive-internal path to a filesystem path below `root`.
 ///
@@ -101,6 +105,66 @@ pub(crate) fn ensure_parent_dir(path: &Path, last_parent: &mut PathBuf) -> io::R
         }
     }
     Ok(())
+}
+
+pub(crate) fn write_file_atomically<E>(
+    path: &Path,
+    write: impl FnOnce(&mut fs::File) -> std::result::Result<u64, E>,
+) -> std::result::Result<u64, E>
+where
+    E: From<io::Error>,
+{
+    let (temp_path, mut file) = create_temp_file(path)?;
+
+    let result = write(&mut file).and_then(|written| {
+        file.flush()?;
+        Ok(written)
+    });
+    drop(file);
+
+    match result {
+        Ok(written) => {
+            if let Err(error) = fs::rename(&temp_path, path) {
+                let _ = fs::remove_file(&temp_path);
+                return Err(error.into());
+            }
+            Ok(written)
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&temp_path);
+            Err(error)
+        }
+    }
+}
+
+fn create_temp_file(path: &Path) -> io::Result<(PathBuf, fs::File)> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path.file_name().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "output path has no file name")
+    })?;
+    for _ in 0..100 {
+        let counter = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let mut temp_name = std::ffi::OsString::from(".");
+        temp_name.push(file_name);
+        temp_name.push(format!(
+            ".dream-archive-tmp-{}-{counter}",
+            std::process::id()
+        ));
+        let temp_path = parent.join(temp_name);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+        {
+            Ok(file) => return Ok((temp_path, file)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "could not allocate temporary extraction path",
+    ))
 }
 
 #[cfg(feature = "parallel")]

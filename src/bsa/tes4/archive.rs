@@ -5,7 +5,9 @@ use crate::bsa::{
 };
 use crate::{
     Copied,
-    extract::{ensure_parent_dir, output_path_decoded_into, output_path_into},
+    extract::{
+        ensure_parent_dir, output_path_decoded_into, output_path_into, write_file_atomically,
+    },
     storage::Storage,
 };
 use bstr::{BStr, BString};
@@ -14,8 +16,6 @@ use lz4_flex::frame::FrameDecoder;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
-use std::io::BufWriter;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
@@ -318,6 +318,23 @@ impl Archive {
         }
     }
 
+    /// Extract an entry to a filesystem path atomically.
+    ///
+    /// The payload is written to a temporary file in the destination directory
+    /// and renamed into place only after extraction succeeds. For compressed
+    /// entries this avoids buffering the full decompressed payload while still
+    /// preserving the existing destination on failure.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::extract_entry`], plus filesystem
+    /// errors for creating, writing, or renaming the output file.
+    pub fn extract_entry_to_path(&self, entry: &Entry, path: impl AsRef<Path>) -> Result<u64> {
+        write_file_atomically(path.as_ref(), |file| {
+            self.extract_entry_streaming(entry, file)
+        })
+    }
+
     /// Extract an entry into a new vector.
     ///
     /// # Errors
@@ -416,8 +433,7 @@ impl Archive {
             }
             output_path_into(&mut output_path, target_dir, path)?;
             ensure_parent_dir(&output_path, &mut last_parent)?;
-            let file = File::create(&output_path)?;
-            written += self.extract_entry(&self.entries[index], BufWriter::new(file))?;
+            written += self.extract_entry_to_path(&self.entries[index], &output_path)?;
         }
         Ok(written)
     }
@@ -468,8 +484,7 @@ impl Archive {
                 decode_filename_lossy(component, encoding)
             })?;
             ensure_parent_dir(&path, &mut last_parent)?;
-            let file = File::create(&path)?;
-            written += self.extract_entry(entry, BufWriter::new(file))?;
+            written += self.extract_entry_to_path(entry, &path)?;
         }
         Ok(written)
     }
@@ -482,8 +497,7 @@ impl Archive {
             let path_bytes = entry.path().ok_or(Error::ArchivePathsUnavailable)?;
             output_path_into(&mut path, target_dir, path_bytes)?;
             ensure_parent_dir(&path, &mut last_parent)?;
-            let file = File::create(&path)?;
-            written += self.extract_entry(entry, BufWriter::new(file))?;
+            written += self.extract_entry_to_path(entry, &path)?;
         }
         Ok(written)
     }
@@ -498,10 +512,7 @@ impl Archive {
         self.entries
             .par_iter()
             .zip(paths.par_iter())
-            .map(|(entry, path)| {
-                let file = File::create(path)?;
-                self.extract_entry(entry, BufWriter::new(file))
-            })
+            .map(|(entry, path)| self.extract_entry_to_path(entry, path))
             .try_reduce(|| 0, |left, right| Ok(left + right))
     }
 
@@ -646,6 +657,46 @@ impl Archive {
             Err(Error::TrailingCompressedData)
         }
     }
+
+    fn extract_entry_streaming(&self, entry: &Entry, mut out: impl std::io::Write) -> Result<u64> {
+        let payload = self.entry_payload(entry)?;
+        if entry.record.is_compressed(self.info.archive_flags) {
+            self.decompress_entry_to_writer_streaming(payload, &mut out)
+        } else {
+            out.write_all(payload)?;
+            Ok(payload.len().try_into()?)
+        }
+    }
+
+    fn decompress_entry_to_writer_streaming(
+        &self,
+        payload: &[u8],
+        out: &mut impl std::io::Write,
+    ) -> Result<u64> {
+        if self
+            .info
+            .archive_flags
+            .contains(ArchiveFlags::XBOX_COMPRESSED)
+        {
+            return Err(Error::NotImplemented("TES4 XMem compression"));
+        }
+        if self.info.version == ArchiveVersion::v105 {
+            return decompress_lz4_frame_payload_to_writer_streaming(payload, out);
+        }
+        let Some((expected_bytes, compressed)) = payload.split_first_chunk::<4>() else {
+            return Err(Error::OutOfBounds);
+        };
+        let expected = u32::from_le_bytes(*expected_bytes).try_into()?;
+        let mut decoder = ZlibDecoder::new(compressed);
+        let actual = copy_decompressed(&mut decoder, expected, out, |error| {
+            Error::Zlib(error.to_string())
+        })?;
+        if decoder.total_in() == u64::try_from(compressed.len())? {
+            Ok(actual.try_into()?)
+        } else {
+            Err(Error::TrailingCompressedData)
+        }
+    }
 }
 
 fn decompress_lz4_frame_payload(payload: &[u8], out: &mut Vec<u8>) -> Result<()> {
@@ -693,6 +744,28 @@ fn decompress_lz4_frame_payload_to_writer(
     }
 }
 
+fn decompress_lz4_frame_payload_to_writer_streaming(
+    payload: &[u8],
+    out: &mut impl std::io::Write,
+) -> Result<u64> {
+    let Some((expected_bytes, compressed)) = payload.split_first_chunk::<4>() else {
+        return Err(Error::OutOfBounds);
+    };
+    if !compressed.starts_with(&LZ4_FRAME_MAGIC) {
+        return Err(Error::InvalidLz4Frame);
+    }
+    let expected = u32::from_le_bytes(*expected_bytes).try_into()?;
+    let mut decoder = FrameDecoder::new(compressed);
+    let actual = copy_decompressed(&mut decoder, expected, out, |error| {
+        Error::Lz4Frame(error.to_string())
+    })?;
+    if decoder.get_ref().is_empty() {
+        Ok(actual.try_into()?)
+    } else {
+        Err(Error::TrailingCompressedData)
+    }
+}
+
 fn read_decompressed(
     decoder: &mut impl std::io::Read,
     expected: usize,
@@ -711,6 +784,23 @@ fn read_decompressed(
         Ok(())
     } else {
         out.truncate(before);
+        Err(Error::DecompressionSizeMismatch { expected, actual })
+    }
+}
+
+fn copy_decompressed(
+    decoder: &mut impl std::io::Read,
+    expected: usize,
+    out: &mut impl std::io::Write,
+    map_error: impl FnOnce(std::io::Error) -> Error,
+) -> Result<usize> {
+    let mut limited = decoder.take(expected as u64 + 1);
+    let actual = std::io::copy(&mut limited, out)
+        .map_err(map_error)
+        .and_then(|actual| usize::try_from(actual).map_err(Error::from))?;
+    if actual == expected {
+        Ok(actual)
+    } else {
         Err(Error::DecompressionSizeMismatch { expected, actual })
     }
 }

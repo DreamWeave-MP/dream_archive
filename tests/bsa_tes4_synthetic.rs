@@ -53,6 +53,20 @@ fn output_dir(name: &str) -> PathBuf {
     path
 }
 
+fn assert_no_temp_extract_files(dir: &std::path::Path) {
+    if !dir.exists() {
+        return;
+    }
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name();
+        assert!(
+            !name.to_string_lossy().contains(".dream-archive-tmp-"),
+            "temporary extraction file was not cleaned up: {name:?}"
+        );
+    }
+}
+
 fn tiny_tes4_header(version: u32) -> Vec<u8> {
     let mut bytes = Vec::new();
     push_u32(&mut bytes, MAGIC);
@@ -1217,6 +1231,54 @@ fn failed_decompression_does_not_leave_partial_output() {
 }
 
 #[test]
+fn failed_extract_to_keeps_existing_tes4_file_and_removes_temp() {
+    let compressed = zlib_compress(b"payload larger than declared");
+    let mut payload = Vec::new();
+    push_u32(&mut payload, 7);
+    payload.extend_from_slice(&compressed);
+    let archive = Archive::from_slice(&tiny_tes4_index_with_payload(1 << 2, &payload)).unwrap();
+    let out = output_dir("tes4-atomic-failure");
+    let file_path = out.join("data").join("file.txt");
+    std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+    std::fs::write(&file_path, b"old contents").unwrap();
+
+    assert!(matches!(
+        archive.extract_to(&out),
+        Err(Error::DecompressionSizeMismatch {
+            expected: 7,
+            actual: 8
+        })
+    ));
+    assert_eq!(std::fs::read(&file_path).unwrap(), b"old contents");
+    assert_no_temp_extract_files(file_path.parent().unwrap());
+    std::fs::remove_dir_all(out).unwrap();
+}
+
+#[test]
+fn failed_extract_entry_to_path_keeps_existing_tes4_file_and_removes_temp() {
+    let compressed = zlib_compress(b"payload larger than declared");
+    let mut payload = Vec::new();
+    push_u32(&mut payload, 7);
+    payload.extend_from_slice(&compressed);
+    let archive = Archive::from_slice(&tiny_tes4_index_with_payload(1 << 2, &payload)).unwrap();
+    let out = output_dir("tes4-entry-atomic-failure");
+    std::fs::create_dir_all(&out).unwrap();
+    let file_path = out.join("file.txt");
+    std::fs::write(&file_path, b"old contents").unwrap();
+
+    assert!(matches!(
+        archive.extract_entry_to_path(&archive.entries()[0], &file_path),
+        Err(Error::DecompressionSizeMismatch {
+            expected: 7,
+            actual: 8
+        })
+    ));
+    assert_eq!(std::fs::read(&file_path).unwrap(), b"old contents");
+    assert_no_temp_extract_files(&out);
+    std::fs::remove_dir_all(out).unwrap();
+}
+
+#[test]
 fn extracts_synthetic_lz4_frame_tes4_file() {
     let compressed = lz4_frame_compress(b"compressed payload");
     let mut payload = Vec::new();
@@ -1342,4 +1404,33 @@ fn lz4_frame_writer_extraction_rejects_trailing_data_before_writing() {
         Err(Error::TrailingCompressedData)
     ));
     assert_eq!(out, b"prefix");
+}
+
+#[test]
+fn failed_lz4_extract_to_keeps_existing_tes4_file_and_removes_temp() {
+    let compressed = lz4_frame_compress(b"payload larger than declared");
+    let mut payload = Vec::new();
+    push_u32(&mut payload, 7);
+    payload.extend_from_slice(&compressed);
+    let archive = Archive::from_slice(&tiny_tes4_index_with_version_and_payload(
+        105,
+        1 << 2,
+        &payload,
+    ))
+    .unwrap();
+    let out = output_dir("tes4-lz4-atomic-failure");
+    let file_path = out.join("data").join("file.txt");
+    std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+    std::fs::write(&file_path, b"old contents").unwrap();
+
+    assert!(matches!(
+        archive.extract_to(&out),
+        Err(Error::DecompressionSizeMismatch {
+            expected: 7,
+            actual: 8
+        })
+    ));
+    assert_eq!(std::fs::read(&file_path).unwrap(), b"old contents");
+    assert_no_temp_extract_files(file_path.parent().unwrap());
+    std::fs::remove_dir_all(out).unwrap();
 }

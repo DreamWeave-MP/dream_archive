@@ -139,6 +139,20 @@ fn output_dir(name: &str) -> PathBuf {
     path
 }
 
+fn assert_no_temp_extract_files(dir: &std::path::Path) {
+    if !dir.exists() {
+        return;
+    }
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name();
+        assert!(
+            !name.to_string_lossy().contains(".dream-archive-tmp-"),
+            "temporary extraction file was not cleaned up: {name:?}"
+        );
+    }
+}
+
 #[test]
 fn writes_ba2_gnrl_archive_from_bytes() {
     let mut builder = Builder::new();
@@ -861,6 +875,66 @@ fn zlib_over_expansion_does_not_leave_partial_vec_output() {
         })
     ));
     assert_eq!(out, b"prefix");
+}
+
+#[test]
+fn failed_extract_to_keeps_existing_ba2_file_and_removes_temp() {
+    let payload = zlib_compress(b"payload larger than declared");
+    let name = b"textures/hello.txt";
+    let bytes = tiny_archive(TinyArchiveOptions {
+        name: Some(name),
+        chunk_offset: 60 + 2 + u64::try_from(name.len()).unwrap(),
+        chunk_packed_size: payload.len().try_into().unwrap(),
+        chunk_size: 7,
+        payload: &payload,
+        ..TinyArchiveOptions::default()
+    });
+    let archive = Archive::from_slice(&bytes).unwrap();
+    let out = output_dir("ba2-atomic-failure");
+    let file_path = out.join("textures").join("hello.txt");
+    std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+    std::fs::write(&file_path, b"old contents").unwrap();
+
+    assert!(matches!(
+        archive.extract_to(&out),
+        Err(Error::DecompressionSizeMismatch {
+            expected: 7,
+            actual: 8
+        })
+    ));
+    assert_eq!(std::fs::read(&file_path).unwrap(), b"old contents");
+    assert_no_temp_extract_files(file_path.parent().unwrap());
+    std::fs::remove_dir_all(out).unwrap();
+}
+
+#[test]
+fn failed_extract_entry_to_path_keeps_existing_ba2_file_and_removes_temp() {
+    let payload = zlib_compress(b"payload larger than declared");
+    let bytes = tiny_archive(TinyArchiveOptions {
+        string_table_offset: 0,
+        name: None,
+        chunk_offset: 60,
+        chunk_packed_size: payload.len().try_into().unwrap(),
+        chunk_size: 7,
+        payload: &payload,
+        ..TinyArchiveOptions::default()
+    });
+    let archive = Archive::from_slice(&bytes).unwrap();
+    let out = output_dir("ba2-entry-atomic-failure");
+    std::fs::create_dir_all(&out).unwrap();
+    let file_path = out.join("hello.txt");
+    std::fs::write(&file_path, b"old contents").unwrap();
+
+    assert!(matches!(
+        archive.extract_entry_to_path(&archive.entries()[0], &file_path),
+        Err(Error::DecompressionSizeMismatch {
+            expected: 7,
+            actual: 8
+        })
+    ));
+    assert_eq!(std::fs::read(&file_path).unwrap(), b"old contents");
+    assert_no_temp_extract_files(&out);
+    std::fs::remove_dir_all(out).unwrap();
 }
 
 #[test]

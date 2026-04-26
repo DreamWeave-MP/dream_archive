@@ -2,14 +2,15 @@ use super::{Error, Result, parser};
 use crate::bsa::{FilenameEncoding, NormalizedPath, decode_filename_lossy, normalize_lookup_path};
 use crate::{
     Copied,
-    extract::{ensure_parent_dir, output_path_decoded_into, output_path_into},
+    extract::{
+        ensure_parent_dir, output_path_decoded_into, output_path_into, write_file_atomically,
+    },
     storage::Storage,
 };
 use bstr::{BStr, BString};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use std::collections::HashMap;
-use std::fs::File;
 use std::path::{Path, PathBuf};
 
 /// Metadata read from a TES3 BSA archive header.
@@ -177,6 +178,19 @@ impl Archive {
         Ok(payload.len().try_into()?)
     }
 
+    /// Extract an entry to a filesystem path atomically.
+    ///
+    /// The payload is written to a temporary file in the destination directory
+    /// and renamed into place only after extraction succeeds.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::extract_entry`], plus filesystem
+    /// errors for creating, writing, or renaming the output file.
+    pub fn extract_entry_to_path(&self, entry: &Entry, path: impl AsRef<Path>) -> Result<u64> {
+        write_file_atomically(path.as_ref(), |file| self.extract_entry(entry, file))
+    }
+
     /// Extract an entry into a new vector.
     ///
     /// # Errors
@@ -282,7 +296,7 @@ impl Archive {
                 decode_filename_lossy(component, encoding)
             })?;
             ensure_parent_dir(&path, &mut last_parent)?;
-            written += self.extract_entry(entry, File::create(&path)?)?;
+            written += self.extract_entry_to_path(entry, &path)?;
         }
         Ok(written)
     }
@@ -294,7 +308,7 @@ impl Archive {
         for entry in &self.entries {
             output_path_into(&mut path, target_dir, entry.path())?;
             ensure_parent_dir(&path, &mut last_parent)?;
-            written += self.extract_entry(entry, File::create(&path)?)?;
+            written += self.extract_entry_to_path(entry, &path)?;
         }
         Ok(written)
     }
@@ -309,7 +323,7 @@ impl Archive {
         self.entries
             .par_iter()
             .zip(paths.par_iter())
-            .map(|(entry, path)| self.extract_entry(entry, File::create(path)?))
+            .map(|(entry, path)| self.extract_entry_to_path(entry, path))
             .try_reduce(|| 0, |left, right| Ok(left + right))
     }
 

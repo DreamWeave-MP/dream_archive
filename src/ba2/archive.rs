@@ -4,15 +4,13 @@ use super::{
 };
 use crate::{
     Copied,
-    extract::{ensure_parent_dir, output_path_into},
+    extract::{ensure_parent_dir, output_path_into, write_file_atomically},
     storage::Storage,
 };
 use bstr::{BStr, BString, ByteSlice as _};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 
 /// Metadata read from the archive header.
@@ -252,6 +250,23 @@ impl Archive {
         }
     }
 
+    /// Extract an entry to a filesystem path atomically.
+    ///
+    /// The payload is written to a temporary file in the destination directory
+    /// and renamed into place only after extraction succeeds. For compressed
+    /// entries this avoids buffering the full decompressed payload while still
+    /// preserving the existing destination on failure.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::extract_entry`], plus filesystem
+    /// errors for creating, writing, or renaming the output file.
+    pub fn extract_entry_to_path(&self, entry: &Entry, path: impl AsRef<Path>) -> Result<u64> {
+        write_file_atomically(path.as_ref(), |file| {
+            self.extract_entry_streaming(entry, file)
+        })
+    }
+
     /// Extract an entry into a new vector.
     ///
     /// # Errors
@@ -343,8 +358,7 @@ impl Archive {
         for entry in &self.entries {
             output_path_into(&mut path, target_dir, entry.name())?;
             ensure_parent_dir(&path, &mut last_parent)?;
-            let file = File::create(&path)?;
-            written += self.extract_entry(entry, BufWriter::new(file))?;
+            written += self.extract_entry_to_path(entry, &path)?;
         }
         Ok(written)
     }
@@ -359,10 +373,7 @@ impl Archive {
         self.entries
             .par_iter()
             .zip(paths.par_iter())
-            .map(|(entry, path)| {
-                let file = File::create(path)?;
-                self.extract_entry(entry, BufWriter::new(file))
-            })
+            .map(|(entry, path)| self.extract_entry_to_path(entry, path))
             .try_reduce(|| 0, |left, right| Ok(left + right))
     }
 
@@ -393,6 +404,36 @@ impl Archive {
         let mut written = 0u64;
         for chunk in &file.chunks {
             written += chunk.extract_to_writer(
+                self.storage.as_bytes(),
+                self.info.compression_format,
+                out,
+            )?;
+        }
+        Ok(written)
+    }
+
+    fn extract_entry_streaming(&self, entry: &Entry, mut out: impl std::io::Write) -> Result<u64> {
+        match entry.file.header {
+            FileHeader::GNRL => self.extract_chunks_to_writer_streaming(&entry.file, &mut out),
+            FileHeader::DX10(texture) => {
+                let mut header = Vec::new();
+                dds::write_dds_header(&mut header, texture.dds_header())?;
+                out.write_all(&header)?;
+                Ok(u64::try_from(header.len())?
+                    + self.extract_chunks_to_writer_streaming(&entry.file, &mut out)?)
+            }
+            FileHeader::GNMF(_) => Err(Error::NotImplemented("BA2 GNMF extraction")),
+        }
+    }
+
+    fn extract_chunks_to_writer_streaming(
+        &self,
+        file: &ArchiveFile,
+        out: &mut impl std::io::Write,
+    ) -> Result<u64> {
+        let mut written = 0u64;
+        for chunk in &file.chunks {
+            written += chunk.extract_to_writer_streaming(
                 self.storage.as_bytes(),
                 self.info.compression_format,
                 out,
