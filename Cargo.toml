@@ -93,3 +93,8 @@ required-features = ["bsa-tes3"]
 name = "lookup"
 harness = false
 required-features = ["ba2", "bsa-tes3", "bsa-tes4"]
+
+[[bench]]
+name = "synthetic_extract"
+harness = false
+required-features = ["ba2", "bsa-tes3", "bsa-tes4"]

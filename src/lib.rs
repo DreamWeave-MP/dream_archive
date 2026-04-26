@@ -43,6 +43,61 @@
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! # Building archives
+//!
+//! ```no_run
+//! # #[cfg(feature = "bsa-tes3")]
+//! # fn main() -> dream_archive::bsa::Result<()> {
+//! let mut builder = dream_archive::Tes3BsaBuilder::new();
+//! builder.add_dir("Data")?;
+//! builder.write_path("MyMod.bsa")?;
+//! # Ok(())
+//! # }
+//! # #[cfg(not(feature = "bsa-tes3"))]
+//! # fn main() {}
+//! ```
+//!
+//! ```no_run
+//! # #[cfg(feature = "bsa-tes4")]
+//! # fn main() -> dream_archive::bsa::Result<()> {
+//! let mut builder = dream_archive::Tes4BsaBuilder::skyrim_le();
+//! builder.add_dir("Data")?;
+//! builder.write_path("MyMod.bsa")?;
+//! # Ok(())
+//! # }
+//! # #[cfg(not(feature = "bsa-tes4"))]
+//! # fn main() {}
+//! ```
+//!
+//! ```no_run
+//! # #[cfg(feature = "ba2")]
+//! # fn main() -> dream_archive::ba2::Result<()> {
+//! let mut builder = dream_archive::Ba2Builder::new();
+//! builder.set_compression(Some(dream_archive::ba2::Ba2CompressionFormat::Zip));
+//! builder.add_dir("Data")?;
+//! builder.write_path("MyMod.ba2")?;
+//! # Ok(())
+//! # }
+//! # #[cfg(not(feature = "ba2"))]
+//! # fn main() {}
+//! ```
+//!
+//! # Legacy BSA filename encodings
+//!
+//! ```
+//! # #[cfg(any(feature = "bsa-tes3", feature = "bsa-tes4"))]
+//! # fn main() -> dream_archive::bsa::Result<()> {
+//! let encoded = dream_archive::bsa::encode_filename(
+//!     "textures/zażółć.dds",
+//!     dream_archive::bsa::FilenameEncoding::Windows1250,
+//! )?;
+//! assert_eq!(encoded.as_ref(), b"textures/za\xbf\xf3\xb3\xe6.dds");
+//! # Ok(())
+//! # }
+//! # #[cfg(not(any(feature = "bsa-tes3", feature = "bsa-tes4")))]
+//! # fn main() {}
+//! ```
 
 #[cfg(feature = "ba2")]
 pub mod ba2;

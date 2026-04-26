@@ -36,6 +36,15 @@ fn bsa_guess_respects_feature_gates() {
     );
 }
 
+#[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
+#[test]
+fn top_level_archive_rejects_unknown_format() {
+    assert!(matches!(
+        dream_archive::Archive::from_slice(b"NOPE and not an archive"),
+        Err(dream_archive::Error::UnknownFormat)
+    ));
+}
+
 #[cfg(feature = "ba2")]
 #[test]
 fn top_level_archive_reads_ba2_from_vec() {
@@ -100,6 +109,19 @@ fn top_level_required_read_reports_missing_member() {
 
     assert!(matches!(
         archive.read_file_required("missing.txt"),
+        Err(dream_archive::Error::FileNotFound(path)) if path.as_slice() == b"missing.txt"
+    ));
+}
+
+#[cfg(feature = "ba2")]
+#[test]
+fn top_level_required_extract_reports_missing_member() {
+    let mut builder = dream_archive::Ba2Builder::new();
+    builder.add_bytes("data/file.txt", b"payload").unwrap();
+    let archive = dream_archive::Archive::from_vec(builder.to_vec().unwrap()).unwrap();
+
+    assert!(matches!(
+        archive.extract_file_required("missing.txt", Vec::new()),
         Err(dream_archive::Error::FileNotFound(path)) if path.as_slice() == b"missing.txt"
     ));
 }

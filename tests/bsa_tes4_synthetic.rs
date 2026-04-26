@@ -326,6 +326,35 @@ fn extracts_hash_only_tes4_archive_with_path_dictionary() {
 }
 
 #[test]
+fn hash_only_tes4_path_dictionary_rejects_unsafe_matched_paths() {
+    for unsafe_path in [
+        b"../file.txt".as_slice(),
+        b"data/bad:name.txt".as_slice(),
+        b"data/bad\0name.txt".as_slice(),
+    ] {
+        let separator = unsafe_path
+            .iter()
+            .rposition(|byte| matches!(*byte, b'/' | b'\\'))
+            .unwrap();
+        let archive = Archive::from_slice(&tiny_hash_only_tes4_index_with_hashes(
+            &unsafe_path[..separator],
+            &unsafe_path[separator + 1..],
+            b"payload",
+        ))
+        .unwrap();
+        let out = output_dir("tes4-unsafe-hash-dictionary");
+
+        assert!(
+            matches!(archive.extract_to_with_paths(&out, [unsafe_path]), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::InvalidData)
+        );
+        assert!(!out.join("file.txt").exists());
+        assert!(!out.join("data").join("bad:name.txt").exists());
+        assert!(!out.join("data").join("bad\0name.txt").exists());
+        let _ = std::fs::remove_dir_all(out);
+    }
+}
+
+#[test]
 fn hash_only_tes4_path_dictionary_hashes_nested_basename() {
     let archive = Archive::from_slice(&tiny_hash_only_tes4_index_with_hashes(
         b"meshes/foo",
@@ -1136,6 +1165,42 @@ fn rejects_synthetic_zlib_trailing_data() {
 }
 
 #[test]
+fn zlib_writer_extraction_does_not_write_extra_probe_byte() {
+    let compressed = zlib_compress(b"payload larger than declared");
+    let mut payload = Vec::new();
+    push_u32(&mut payload, 7);
+    payload.extend_from_slice(&compressed);
+    let archive = Archive::from_slice(&tiny_tes4_index_with_payload(1 << 2, &payload)).unwrap();
+    let mut out = b"prefix".to_vec();
+
+    assert!(matches!(
+        archive.extract_file("data/file.txt", &mut out),
+        Err(Error::DecompressionSizeMismatch {
+            expected: 7,
+            actual: 8
+        })
+    ));
+    assert_eq!(out, b"prefix");
+}
+
+#[test]
+fn zlib_writer_extraction_rejects_trailing_data_before_writing() {
+    let compressed = zlib_compress(b"compressed payload");
+    let mut payload = Vec::new();
+    push_u32(&mut payload, 18);
+    payload.extend_from_slice(&compressed);
+    payload.push(0);
+    let archive = Archive::from_slice(&tiny_tes4_index_with_payload(1 << 2, &payload)).unwrap();
+    let mut out = b"prefix".to_vec();
+
+    assert!(matches!(
+        archive.extract_file("data/file.txt", &mut out),
+        Err(Error::TrailingCompressedData)
+    ));
+    assert_eq!(out, b"prefix");
+}
+
+#[test]
 fn failed_decompression_does_not_leave_partial_output() {
     let compressed = zlib_compress(b"short");
     let mut payload = Vec::new();
@@ -1231,4 +1296,50 @@ fn rejects_synthetic_lz4_frame_trailing_data() {
         archive.read_file("data/file.txt"),
         Err(Error::TrailingCompressedData)
     ));
+}
+
+#[test]
+fn lz4_frame_writer_extraction_does_not_write_extra_probe_byte() {
+    let compressed = lz4_frame_compress(b"payload larger than declared");
+    let mut payload = Vec::new();
+    push_u32(&mut payload, 7);
+    payload.extend_from_slice(&compressed);
+    let archive = Archive::from_slice(&tiny_tes4_index_with_version_and_payload(
+        105,
+        1 << 2,
+        &payload,
+    ))
+    .unwrap();
+    let mut out = b"prefix".to_vec();
+
+    assert!(matches!(
+        archive.extract_file("data/file.txt", &mut out),
+        Err(Error::DecompressionSizeMismatch {
+            expected: 7,
+            actual: 8
+        })
+    ));
+    assert_eq!(out, b"prefix");
+}
+
+#[test]
+fn lz4_frame_writer_extraction_rejects_trailing_data_before_writing() {
+    let compressed = lz4_frame_compress(b"compressed payload");
+    let mut payload = Vec::new();
+    push_u32(&mut payload, 18);
+    payload.extend_from_slice(&compressed);
+    payload.push(0);
+    let archive = Archive::from_slice(&tiny_tes4_index_with_version_and_payload(
+        105,
+        1 << 2,
+        &payload,
+    ))
+    .unwrap();
+    let mut out = b"prefix".to_vec();
+
+    assert!(matches!(
+        archive.extract_file("data/file.txt", &mut out),
+        Err(Error::TrailingCompressedData)
+    ));
+    assert_eq!(out, b"prefix");
 }

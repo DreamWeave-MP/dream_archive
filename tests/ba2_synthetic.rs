@@ -9,9 +9,11 @@ use std::path::PathBuf;
 const MAGIC: u32 = u32::from_le_bytes(*b"BTDX");
 const GNRL: u32 = u32::from_le_bytes(*b"GNRL");
 const DX10: u32 = u32::from_le_bytes(*b"DX10");
+const GNMF: u32 = u32::from_le_bytes(*b"GNMF");
 const CHUNK_SENTINEL: u32 = 0xBAAD_F00D;
 const FILE_HEADER_SIZE_GNRL: u16 = 0x10;
 const FILE_HEADER_SIZE_DX10: u16 = 0x18;
+const FILE_HEADER_SIZE_GNMF: u16 = 0x30;
 
 fn push_u16(out: &mut Vec<u8>, value: u16) {
     out.extend_from_slice(&value.to_le_bytes());
@@ -91,6 +93,35 @@ fn tiny_archive(options: TinyArchiveOptions<'_>) -> Vec<u8> {
         bytes.extend_from_slice(name);
     }
     bytes.extend_from_slice(options.payload);
+    bytes
+}
+
+fn tiny_gnmf_archive(metadata: [u32; 8], payload: &[u8]) -> Vec<u8> {
+    let payload_offset = 24 + 12 + 4 + 32 + 24;
+    let (hash, _) = dream_archive::ba2::hash_file(b"mesh.bin".as_bstr());
+    let mut bytes = Vec::new();
+    push_u32(&mut bytes, MAGIC);
+    push_u32(&mut bytes, 1);
+    push_u32(&mut bytes, GNMF);
+    push_u32(&mut bytes, 1);
+    push_u64(&mut bytes, 0);
+    push_u32(&mut bytes, hash.file);
+    push_u32(&mut bytes, hash.extension);
+    push_u32(&mut bytes, hash.directory);
+    bytes.push(0);
+    bytes.push(1);
+    push_u16(&mut bytes, FILE_HEADER_SIZE_GNMF);
+    for word in metadata {
+        push_u32(&mut bytes, word);
+    }
+    push_u64(&mut bytes, payload_offset);
+    push_u32(&mut bytes, 0);
+    push_u32(&mut bytes, payload.len().try_into().unwrap());
+    push_u16(&mut bytes, 2);
+    push_u16(&mut bytes, 5);
+    push_u32(&mut bytes, CHUNK_SENTINEL);
+    assert_eq!(bytes.len(), usize::try_from(payload_offset).unwrap());
+    bytes.extend_from_slice(payload);
     bytes
 }
 
@@ -585,6 +616,33 @@ fn rejects_unsupported_dxgi_format_without_partial_output() {
 }
 
 #[test]
+fn parses_gnmf_metadata_but_does_not_extract_payload() {
+    let metadata = [1, 2, 3, 5, 8, 13, 21, 34];
+    let bytes = tiny_gnmf_archive(metadata, b"gnmf-payload");
+    let archive = Archive::from_slice(&bytes).unwrap();
+    let entry = &archive.entries()[0];
+
+    assert_eq!(archive.info().format, PayloadFormat::GNMF);
+    assert_eq!(entry.name(), "");
+    assert_eq!(
+        entry.file().header,
+        dream_archive::ba2::FileHeader::GNMF(metadata)
+    );
+    assert_eq!(entry.file().chunks()[0].mips, Some(2..=5));
+    assert!(matches!(
+        archive.read_entry(entry),
+        Err(Error::NotImplemented("BA2 GNMF extraction"))
+    ));
+
+    let mut out = b"prefix".to_vec();
+    assert!(matches!(
+        archive.read_entry_into(entry, &mut out),
+        Err(Error::NotImplemented("BA2 GNMF extraction"))
+    ));
+    assert_eq!(out, b"prefix");
+}
+
+#[test]
 fn block_compressed_dds_size_uses_rounded_blocks() {
     let bytes = tiny_texture_archive(TinyTextureOptions {
         width: 5,
@@ -778,6 +836,79 @@ fn rejects_synthetic_zlib_trailing_data() {
         archive.read_entry(&archive.entries()[0]),
         Err(Error::TrailingCompressedData)
     ));
+}
+
+#[test]
+fn zlib_over_expansion_does_not_leave_partial_vec_output() {
+    let payload = zlib_compress(b"payload larger than declared");
+    let bytes = tiny_archive(TinyArchiveOptions {
+        string_table_offset: 0,
+        name: None,
+        chunk_offset: 60,
+        chunk_packed_size: payload.len().try_into().unwrap(),
+        chunk_size: 7,
+        payload: &payload,
+        ..TinyArchiveOptions::default()
+    });
+    let archive = Archive::from_slice(&bytes).unwrap();
+    let mut out = b"prefix".to_vec();
+
+    assert!(matches!(
+        archive.read_entry_into(&archive.entries()[0], &mut out),
+        Err(Error::DecompressionSizeMismatch {
+            expected: 7,
+            actual: 8
+        })
+    ));
+    assert_eq!(out, b"prefix");
+}
+
+#[test]
+fn zlib_writer_extraction_does_not_write_extra_probe_byte() {
+    let payload = zlib_compress(b"payload larger than declared");
+    let bytes = tiny_archive(TinyArchiveOptions {
+        string_table_offset: 0,
+        name: None,
+        chunk_offset: 60,
+        chunk_packed_size: payload.len().try_into().unwrap(),
+        chunk_size: 7,
+        payload: &payload,
+        ..TinyArchiveOptions::default()
+    });
+    let archive = Archive::from_slice(&bytes).unwrap();
+    let mut out = b"prefix".to_vec();
+
+    assert!(matches!(
+        archive.extract_entry(&archive.entries()[0], &mut out),
+        Err(Error::DecompressionSizeMismatch {
+            expected: 7,
+            actual: 8
+        })
+    ));
+    assert_eq!(out, b"prefix");
+}
+
+#[test]
+fn zlib_writer_extraction_rejects_trailing_data_before_writing() {
+    let mut payload = zlib_compress(b"compressed hello");
+    payload.push(0);
+    let bytes = tiny_archive(TinyArchiveOptions {
+        string_table_offset: 0,
+        name: None,
+        chunk_offset: 60,
+        chunk_packed_size: payload.len().try_into().unwrap(),
+        chunk_size: 16,
+        payload: &payload,
+        ..TinyArchiveOptions::default()
+    });
+    let archive = Archive::from_slice(&bytes).unwrap();
+    let mut out = b"prefix".to_vec();
+
+    assert!(matches!(
+        archive.extract_entry(&archive.entries()[0], &mut out),
+        Err(Error::TrailingCompressedData)
+    ));
+    assert_eq!(out, b"prefix");
 }
 
 #[test]

@@ -94,9 +94,8 @@ impl Chunk {
         match compression {
             Ba2CompressionFormat::Zip => {
                 let mut decoder = ZlibDecoder::new(stored);
-                decoder.read_to_end(out).map_err(|e| {
-                    out.truncate(before);
-                    Error::Zlib(e.to_string())
+                read_decompressed(&mut decoder, expected, out, |error| {
+                    Error::Zlib(error.to_string())
                 })?;
                 if decoder.total_in() != u64::try_from(stored.len())? {
                     out.truncate(before);
@@ -142,9 +141,13 @@ impl Chunk {
         match compression {
             Ba2CompressionFormat::Zip => {
                 let mut decoder = ZlibDecoder::new(stored);
-                let written = copy_decompressed_to_writer(&mut decoder, expected, out)?;
+                let mut buffer = Vec::new();
+                read_decompressed(&mut decoder, expected, &mut buffer, |error| {
+                    Error::Zlib(error.to_string())
+                })?;
                 if decoder.total_in() == u64::try_from(stored.len())? {
-                    Ok(written)
+                    out.write_all(&buffer)?;
+                    Ok(buffer.len().try_into()?)
                 } else {
                     Err(Error::TrailingCompressedData)
                 }
@@ -165,31 +168,24 @@ impl Chunk {
     }
 }
 
-fn copy_decompressed_to_writer(
+fn read_decompressed(
     decoder: &mut impl std::io::Read,
     expected: usize,
-    out: &mut impl std::io::Write,
-) -> Result<u64> {
-    let mut written = 0usize;
-    let mut buffer = [0; 8192];
-    while written <= expected {
-        let remaining = expected + 1 - written;
-        let read_len = remaining.min(buffer.len());
-        let count = decoder
-            .read(&mut buffer[..read_len])
-            .map_err(|error| Error::Zlib(error.to_string()))?;
-        if count == 0 {
-            break;
-        }
-        out.write_all(&buffer[..count])?;
-        written += count;
+    out: &mut Vec<u8>,
+    map_error: impl FnOnce(std::io::Error) -> Error,
+) -> Result<()> {
+    let before = out.len();
+    out.try_reserve_exact(expected)?;
+    let mut limited = decoder.take(expected as u64 + 1);
+    if let Err(error) = limited.read_to_end(out) {
+        out.truncate(before);
+        return Err(map_error(error));
     }
-    if written == expected {
-        Ok(written.try_into()?)
+    let actual = out.len() - before;
+    if actual == expected {
+        Ok(())
     } else {
-        Err(Error::DecompressionSizeMismatch {
-            expected,
-            actual: written,
-        })
+        out.truncate(before);
+        Err(Error::DecompressionSizeMismatch { expected, actual })
     }
 }

@@ -604,11 +604,13 @@ impl Archive {
         };
         let expected = u32::from_le_bytes(*expected_bytes).try_into()?;
         let mut decoder = ZlibDecoder::new(compressed);
-        let written = copy_decompressed_to_writer(&mut decoder, expected, out, |error| {
+        let mut buffer = Vec::new();
+        read_decompressed(&mut decoder, expected, &mut buffer, |error| {
             Error::Zlib(error.to_string())
         })?;
         if decoder.total_in() == u64::try_from(compressed.len())? {
-            Ok(written)
+            out.write_all(&buffer)?;
+            Ok(buffer.len().try_into()?)
         } else {
             Err(Error::TrailingCompressedData)
         }
@@ -648,41 +650,15 @@ fn decompress_lz4_frame_payload_to_writer(
     }
     let expected = u32::from_le_bytes(*expected_bytes).try_into()?;
     let mut decoder = FrameDecoder::new(compressed);
-    let written = copy_decompressed_to_writer(&mut decoder, expected, out, |error| {
+    let mut buffer = Vec::new();
+    read_decompressed(&mut decoder, expected, &mut buffer, |error| {
         Error::Lz4Frame(error.to_string())
     })?;
     if decoder.get_ref().is_empty() {
-        Ok(written)
+        out.write_all(&buffer)?;
+        Ok(buffer.len().try_into()?)
     } else {
         Err(Error::TrailingCompressedData)
-    }
-}
-
-fn copy_decompressed_to_writer(
-    decoder: &mut impl std::io::Read,
-    expected: usize,
-    out: &mut impl std::io::Write,
-    map_error: impl Fn(std::io::Error) -> Error,
-) -> Result<u64> {
-    let mut written = 0usize;
-    let mut buffer = [0; 8192];
-    while written <= expected {
-        let remaining = expected + 1 - written;
-        let read_len = remaining.min(buffer.len());
-        let count = decoder.read(&mut buffer[..read_len]).map_err(&map_error)?;
-        if count == 0 {
-            break;
-        }
-        out.write_all(&buffer[..count])?;
-        written += count;
-    }
-    if written == expected {
-        Ok(written.try_into()?)
-    } else {
-        Err(Error::DecompressionSizeMismatch {
-            expected,
-            actual: written,
-        })
     }
 }
 
