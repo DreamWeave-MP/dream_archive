@@ -2,7 +2,7 @@ mod common;
 
 use dream_archive::{
     BsaFormat, FileFormat,
-    ba2::{Archive, Ba2CompressionFormat, Error, FileHeader, Format, Version},
+    ba2::{Archive, ArchiveVersion, Ba2CompressionFormat, Error, FileHeader, PayloadFormat},
 };
 use std::{fs, io::Read as _};
 use walkdir::WalkDir;
@@ -36,7 +36,7 @@ fn invalid_headers_match_expected_errors() {
 fn missing_string_tables_are_accepted() {
     let root = common::ba2_fixture("missing_string_table");
     let archive = Archive::open_path(root.join("in.ba2")).unwrap();
-    assert_eq!(archive.info().format, Format::GNRL);
+    assert_eq!(archive.info().format, PayloadFormat::GNRL);
     let entry = archive.get("misc/example.txt").unwrap();
     assert!(entry.name().is_empty());
     assert_eq!(
@@ -65,8 +65,8 @@ fn parsed_general_metadata_matches_archive_index() {
 
     assert_eq!(archive.len(), 2);
     assert!(!archive.is_empty());
-    assert_eq!(archive.info().format, Format::GNRL);
-    assert_eq!(archive.info().version, Version::v8);
+    assert_eq!(archive.info().format, PayloadFormat::GNRL);
+    assert_eq!(archive.info().version, ArchiveVersion::v8);
     assert_eq!(archive.info().compression_format, Ba2CompressionFormat::Zip);
     assert!(archive.info().strings);
 
@@ -86,7 +86,7 @@ fn reads_compressed_general_archives() {
     let root = common::ba2_fixture("compression");
     for archive_name in ["normal.ba2", "xbox.ba2"] {
         let archive = Archive::open_path(root.join(archive_name)).unwrap();
-        assert_eq!(archive.info().format, Format::GNRL);
+        assert_eq!(archive.info().format, PayloadFormat::GNRL);
         for item in WalkDir::new(root.join("data"))
             .into_iter()
             .filter_map(Result::ok)
@@ -108,7 +108,7 @@ fn reads_compressed_general_archives() {
 fn reconstructs_dx10_dds() {
     let root = common::ba2_fixture("dds");
     let archive = Archive::open_path(root.join("in.ba2")).unwrap();
-    assert_eq!(archive.info().format, Format::DX10);
+    assert_eq!(archive.info().format, PayloadFormat::DX10);
     let data = archive
         .read_file("Fence006_1K_Roughness.dds")
         .unwrap()
@@ -128,8 +128,8 @@ fn reconstructs_dx10_dds() {
 fn parsed_dx10_metadata_matches_archive_index() {
     let archive = Archive::open_path(common::ba2_fixture("next_gen/dx10_v8.ba2")).unwrap();
 
-    assert_eq!(archive.info().format, Format::DX10);
-    assert_eq!(archive.info().version, Version::v8);
+    assert_eq!(archive.info().format, PayloadFormat::DX10);
+    assert_eq!(archive.info().version, ArchiveVersion::v8);
     let entry = archive.entries().first().unwrap();
     assert_eq!(entry.name(), "Fence006_1K_Roughness.dds");
     let FileHeader::DX10(texture) = entry.file().header else {
@@ -163,10 +163,10 @@ fn reconstructs_cubemap_dds() {
 fn next_gen_versions_are_accepted() {
     let root = common::ba2_fixture("next_gen");
     for (path, format, version) in [
-        ("gnrl_v7.ba2", Format::GNRL, Version::v7),
-        ("gnrl_v8.ba2", Format::GNRL, Version::v8),
-        ("dx10_v7.ba2", Format::DX10, Version::v7),
-        ("dx10_v8.ba2", Format::DX10, Version::v8),
+        ("gnrl_v7.ba2", PayloadFormat::GNRL, ArchiveVersion::v7),
+        ("gnrl_v8.ba2", PayloadFormat::GNRL, ArchiveVersion::v8),
+        ("dx10_v7.ba2", PayloadFormat::DX10, ArchiveVersion::v7),
+        ("dx10_v8.ba2", PayloadFormat::DX10, ArchiveVersion::v8),
     ] {
         let archive = Archive::open_path(root.join(path)).unwrap();
         assert_eq!(archive.info().format, format);
@@ -177,15 +177,50 @@ fn next_gen_versions_are_accepted() {
 #[test]
 fn valid_fixture_metadata_is_stable() {
     for (path, format, version, entries) in [
-        ("compression/normal.ba2", Format::GNRL, Version::v1, 19),
-        ("compression/xbox.ba2", Format::GNRL, Version::v1, 19),
-        ("cubemap/in.ba2", Format::DX10, Version::v1, 1),
-        ("dds/in.ba2", Format::DX10, Version::v1, 1),
-        ("missing_string_table/in.ba2", Format::GNRL, Version::v1, 1),
-        ("next_gen/dx10_v7.ba2", Format::DX10, Version::v7, 1),
-        ("next_gen/dx10_v8.ba2", Format::DX10, Version::v8, 1),
-        ("next_gen/gnrl_v7.ba2", Format::GNRL, Version::v7, 2),
-        ("next_gen/gnrl_v8.ba2", Format::GNRL, Version::v8, 2),
+        (
+            "compression/normal.ba2",
+            PayloadFormat::GNRL,
+            ArchiveVersion::v1,
+            19,
+        ),
+        (
+            "compression/xbox.ba2",
+            PayloadFormat::GNRL,
+            ArchiveVersion::v1,
+            19,
+        ),
+        ("cubemap/in.ba2", PayloadFormat::DX10, ArchiveVersion::v1, 1),
+        ("dds/in.ba2", PayloadFormat::DX10, ArchiveVersion::v1, 1),
+        (
+            "missing_string_table/in.ba2",
+            PayloadFormat::GNRL,
+            ArchiveVersion::v1,
+            1,
+        ),
+        (
+            "next_gen/dx10_v7.ba2",
+            PayloadFormat::DX10,
+            ArchiveVersion::v7,
+            1,
+        ),
+        (
+            "next_gen/dx10_v8.ba2",
+            PayloadFormat::DX10,
+            ArchiveVersion::v8,
+            1,
+        ),
+        (
+            "next_gen/gnrl_v7.ba2",
+            PayloadFormat::GNRL,
+            ArchiveVersion::v7,
+            2,
+        ),
+        (
+            "next_gen/gnrl_v8.ba2",
+            PayloadFormat::GNRL,
+            ArchiveVersion::v8,
+            2,
+        ),
     ] {
         let archive = Archive::open_path(common::ba2_fixture(path)).unwrap();
         assert_eq!(archive.info().format, format, "{path}");
@@ -247,4 +282,18 @@ fn guess_format_is_weak_and_consumes_magic() {
         Some(FileFormat::BA2)
     );
     assert_eq!(bytes, b" this is not a real archive");
+}
+
+#[test]
+fn guess_format_rejects_unknown_magic() {
+    let mut bytes = &b"NOPE and some payload"[..];
+    assert_eq!(dream_archive::guess_format(&mut bytes).unwrap(), None);
+    assert_eq!(bytes, b" and some payload");
+}
+
+#[test]
+fn guess_format_rejects_truncated_magic() {
+    let mut bytes = &b"BSA"[..];
+    let error = dream_archive::guess_format(&mut bytes).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::UnexpectedEof);
 }

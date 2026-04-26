@@ -1,5 +1,5 @@
 use bstr::ByteSlice as _;
-use dream_archive::ba2::{Archive, Ba2CompressionFormat, Error, Format, Version};
+use dream_archive::ba2::{Archive, ArchiveVersion, Ba2CompressionFormat, Error, PayloadFormat};
 use flate2::{Compression, write::ZlibEncoder};
 
 const MAGIC: u32 = u32::from_le_bytes(*b"BTDX");
@@ -266,7 +266,7 @@ fn accepts_v2_extra_header_field() {
         ..TinyArchiveOptions::default()
     });
     let archive = Archive::read(&bytes).unwrap();
-    assert_eq!(archive.info().version, Version::v2);
+    assert_eq!(archive.info().version, ArchiveVersion::v2);
     assert_eq!(archive.info().compression_format, Ba2CompressionFormat::Zip);
 }
 
@@ -274,7 +274,7 @@ fn accepts_v2_extra_header_field() {
 fn synthetic_texture_archive_reconstructs_dx10_dds_header() {
     let bytes = tiny_texture_archive(TinyTextureOptions::default());
     let archive = Archive::read(&bytes).unwrap();
-    assert_eq!(archive.info().format, Format::DX10);
+    assert_eq!(archive.info().format, PayloadFormat::DX10);
     let data = archive.read_file("tiny.dds").unwrap().unwrap();
 
     assert_eq!(&data[0..4], b"DDS ");
@@ -328,7 +328,7 @@ fn v3_unknown_compression_code_means_zip() {
         ..TinyArchiveOptions::default()
     });
     let archive = Archive::read(&bytes).unwrap();
-    assert_eq!(archive.info().version, Version::v3);
+    assert_eq!(archive.info().version, ArchiveVersion::v3);
     assert_eq!(archive.info().compression_format, Ba2CompressionFormat::Zip);
 }
 

@@ -1,6 +1,6 @@
 use super::{
-    Ba2CompressionFormat, Error, FileHash, Format, Result, Version, dds, dds::DdsHeader, hash_file,
-    parser,
+    ArchiveVersion, Ba2CompressionFormat, Error, FileHash, PayloadFormat, Result, dds,
+    dds::DdsHeader, hash_file, parser,
 };
 use crate::{Borrowed, Copied};
 use bstr::{BStr, BString, ByteSlice as _};
@@ -9,8 +9,8 @@ use std::{fs, path::Path, sync::Arc};
 /// Metadata read from the archive header.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ArchiveInfo {
-    pub format: Format,
-    pub version: Version,
+    pub format: PayloadFormat,
+    pub version: ArchiveVersion,
     pub compression_format: Ba2CompressionFormat,
     pub strings: bool,
 }
@@ -18,8 +18,8 @@ pub struct ArchiveInfo {
 impl Default for ArchiveInfo {
     fn default() -> Self {
         Self {
-            format: Format::GNRL,
-            version: Version::v1,
+            format: PayloadFormat::GNRL,
+            version: ArchiveVersion::v1,
             compression_format: Ba2CompressionFormat::Zip,
             strings: false,
         }
@@ -146,13 +146,6 @@ impl Archive {
     /// Metadata read from the archive header.
     #[must_use]
     pub fn info(&self) -> ArchiveInfo {
-        self.info
-    }
-
-    /// Metadata read from the archive header.
-    #[must_use]
-    #[deprecated(note = "use Archive::info")]
-    pub fn options(&self) -> ArchiveInfo {
         self.info
     }
 

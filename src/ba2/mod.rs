@@ -64,7 +64,7 @@ impl From<crate::read::Error> for Error {
 
 /// BA2 archive payload format.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum Format {
+pub enum PayloadFormat {
     #[default]
     GNRL,
     DX10,
@@ -74,7 +74,7 @@ pub enum Format {
 /// BA2 archive version.
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum Version {
+pub enum ArchiveVersion {
     #[default]
     v1 = 1,
     v2 = 2,

@@ -1,6 +1,6 @@
 use super::{
-    Archive, ArchiveFile, ArchiveInfo, Ba2CompressionFormat, Chunk, Entry, Error, FileHeader,
-    Format, Hash, Result, TextureHeader, Version,
+    Archive, ArchiveFile, ArchiveInfo, ArchiveVersion, Ba2CompressionFormat, Chunk, Entry, Error,
+    FileHeader, Hash, PayloadFormat, Result, TextureHeader,
 };
 use crate::read::Cursor;
 use bstr::BString;
@@ -39,8 +39,8 @@ pub(super) fn parse(bytes: Arc<[u8]>) -> Result<Archive> {
 }
 
 struct RawHeader {
-    format: Format,
-    version: Version,
+    format: PayloadFormat,
+    version: ArchiveVersion,
     file_count: usize,
     string_table_offset: u64,
     compression_format: Ba2CompressionFormat,
@@ -56,10 +56,10 @@ impl RawHeader {
         let format = read_format(cursor.u32()?)?;
         let file_count = cursor.u32()? as usize;
         let string_table_offset = cursor.u64()?;
-        if matches!(version, Version::v2 | Version::v3) {
+        if matches!(version, ArchiveVersion::v2 | ArchiveVersion::v3) {
             let _ = cursor.u64()?;
         }
-        let compression_format = if version == Version::v3 && cursor.u32()? == 3 {
+        let compression_format = if version == ArchiveVersion::v3 && cursor.u32()? == 3 {
             Ba2CompressionFormat::LZ4
         } else {
             Ba2CompressionFormat::Zip
@@ -74,27 +74,31 @@ impl RawHeader {
     }
 }
 
-fn read_version(raw: u32) -> Result<Version> {
+fn read_version(raw: u32) -> Result<ArchiveVersion> {
     match raw {
-        1 => Ok(Version::v1),
-        2 => Ok(Version::v2),
-        3 => Ok(Version::v3),
-        7 => Ok(Version::v7),
-        8 => Ok(Version::v8),
+        1 => Ok(ArchiveVersion::v1),
+        2 => Ok(ArchiveVersion::v2),
+        3 => Ok(ArchiveVersion::v3),
+        7 => Ok(ArchiveVersion::v7),
+        8 => Ok(ArchiveVersion::v8),
         _ => Err(Error::InvalidVersion(raw)),
     }
 }
 
-fn read_format(raw: u32) -> Result<Format> {
+fn read_format(raw: u32) -> Result<PayloadFormat> {
     match raw {
-        GNRL => Ok(Format::GNRL),
-        DX10 => Ok(Format::DX10),
-        GNMF => Ok(Format::GNMF),
+        GNRL => Ok(PayloadFormat::GNRL),
+        DX10 => Ok(PayloadFormat::DX10),
+        GNMF => Ok(PayloadFormat::GNMF),
         _ => Err(Error::InvalidFormat(raw)),
     }
 }
 
-fn read_entry_record(cursor: &mut Cursor<'_>, format: Format, bytes: &[u8]) -> Result<Entry> {
+fn read_entry_record(
+    cursor: &mut Cursor<'_>,
+    format: PayloadFormat,
+    bytes: &[u8],
+) -> Result<Entry> {
     let hash = Hash {
         file: cursor.u32()?,
         extension: cursor.u32()?,
@@ -113,12 +117,12 @@ fn read_entry_record(cursor: &mut Cursor<'_>, format: Format, bytes: &[u8]) -> R
     Ok(Entry::new(hash, ArchiveFile { header, chunks }))
 }
 
-fn validate_file_header_size(format: Format, size: u16) -> Result<()> {
+fn validate_file_header_size(format: PayloadFormat, size: u16) -> Result<()> {
     if matches!(
         (format, size),
-        (Format::GNRL, FILE_HEADER_SIZE_GNRL)
-            | (Format::DX10, FILE_HEADER_SIZE_DX10)
-            | (Format::GNMF, FILE_HEADER_SIZE_GNMF)
+        (PayloadFormat::GNRL, FILE_HEADER_SIZE_GNRL)
+            | (PayloadFormat::DX10, FILE_HEADER_SIZE_DX10)
+            | (PayloadFormat::GNMF, FILE_HEADER_SIZE_GNMF)
     ) {
         Ok(())
     } else {
@@ -126,10 +130,10 @@ fn validate_file_header_size(format: Format, size: u16) -> Result<()> {
     }
 }
 
-fn read_file_header(cursor: &mut Cursor<'_>, format: Format) -> Result<FileHeader> {
+fn read_file_header(cursor: &mut Cursor<'_>, format: PayloadFormat) -> Result<FileHeader> {
     Ok(match format {
-        Format::GNRL => FileHeader::GNRL,
-        Format::DX10 => FileHeader::DX10(TextureHeader {
+        PayloadFormat::GNRL => FileHeader::GNRL,
+        PayloadFormat::DX10 => FileHeader::DX10(TextureHeader {
             height: cursor.u16()?,
             width: cursor.u16()?,
             mip_count: cursor.u8()?,
@@ -137,7 +141,7 @@ fn read_file_header(cursor: &mut Cursor<'_>, format: Format) -> Result<FileHeade
             flags: cursor.u8()?,
             tile_mode: cursor.u8()?,
         }),
-        Format::GNMF => {
+        PayloadFormat::GNMF => {
             let mut metadata = [0u32; 8];
             for slot in &mut metadata {
                 *slot = cursor.u32()?;
@@ -147,13 +151,13 @@ fn read_file_header(cursor: &mut Cursor<'_>, format: Format) -> Result<FileHeade
     })
 }
 
-fn read_chunk(cursor: &mut Cursor<'_>, format: Format, bytes: &[u8]) -> Result<Chunk> {
+fn read_chunk(cursor: &mut Cursor<'_>, format: PayloadFormat, bytes: &[u8]) -> Result<Chunk> {
     let offset = cursor.u64()?;
     let packed = cursor.u32()?;
     let size = cursor.u32()?;
     let mips = match format {
-        Format::GNRL => None,
-        Format::DX10 | Format::GNMF => Some(cursor.u16()?..=cursor.u16()?),
+        PayloadFormat::GNRL => None,
+        PayloadFormat::DX10 | PayloadFormat::GNMF => Some(cursor.u16()?..=cursor.u16()?),
     };
     let sentinel = cursor.u32()?;
     if sentinel != CHUNK_SENTINEL {
