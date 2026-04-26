@@ -54,6 +54,13 @@ use std::{collections::TryReserveError, fmt, io, num::TryFromIntError};
 
 pub(crate) fn normalize_lookup_path(path: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(path.len());
+    normalize_lookup_path_into(&mut out, path);
+    out
+}
+
+pub(crate) fn normalize_lookup_path_into(out: &mut Vec<u8>, path: &[u8]) {
+    out.clear();
+    out.reserve(path.len());
     for byte in path.iter().copied() {
         let byte = match byte {
             b'\\' => b'/',
@@ -65,7 +72,6 @@ pub(crate) fn normalize_lookup_path(path: &[u8]) -> Vec<u8> {
         }
         out.push(byte);
     }
-    out
 }
 
 /// Result type for BSA operations.
