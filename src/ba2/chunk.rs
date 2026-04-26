@@ -98,11 +98,15 @@ impl Chunk {
                     .map_err(|e| Error::Zlib(e.to_string()))?;
             }
             Ba2CompressionFormat::LZ4 => {
-                let mut buf = vec![0; expected];
-                let actual = lz4_flex::block::decompress_into(stored, &mut buf)
-                    .map_err(|e| Error::Lz4(e.to_string()))?;
-                buf.truncate(actual);
-                out.extend_from_slice(&buf);
+                out.resize(before + expected, 0);
+                let actual = match lz4_flex::block::decompress_into(stored, &mut out[before..]) {
+                    Ok(actual) => actual,
+                    Err(error) => {
+                        out.truncate(before);
+                        return Err(Error::Lz4(error.to_string()));
+                    }
+                };
+                out.truncate(before + actual);
             }
         }
 
