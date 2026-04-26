@@ -19,6 +19,7 @@ const DDSCAPS2_POSITIVEY: u32 = 0x0000_1000;
 const DDSCAPS2_NEGATIVEY: u32 = 0x0000_2000;
 const DDSCAPS2_POSITIVEZ: u32 = 0x0000_4000;
 const DDSCAPS2_NEGATIVEZ: u32 = 0x0000_8000;
+const DDSCAPS2_VOLUME: u32 = 0x0020_0000;
 
 const DDPF_ALPHAPIXELS: u32 = 0x0000_0001;
 const DDPF_ALPHA: u32 = 0x0000_0002;
@@ -159,10 +160,14 @@ pub(crate) fn validate_texture_header(header: TextureHeader) -> Result<()> {
     )
 }
 
+pub(crate) fn validate_texture_payload_size(header: TextureHeader, actual: usize) -> Result<()> {
+    validate_payload_size(header, actual)
+}
+
 pub(crate) fn parse_dds_for_dx10(bytes: &[u8]) -> Result<DdsTexture<'_>> {
     let parsed = parse_header(bytes)?;
     let format = parse_format(bytes, parsed)?;
-    let flags = u8::from(parsed.caps2 & DDSCAPS2_CUBEMAP != 0);
+    let flags = u8::from(parsed.is_cubemap(bytes)?);
     let header = TextureHeader {
         height: parsed
             .height
@@ -202,6 +207,11 @@ fn parse_header(bytes: &[u8]) -> Result<ParsedHeader> {
     if read_u32_at(bytes, 76)? != 32 {
         return Err(Error::Dds("invalid DDS pixel format size"));
     }
+    let depth = read_u32_at(bytes, 24)?;
+    let caps2 = read_u32_at(bytes, 112)?;
+    if depth != 0 || caps2 & DDSCAPS2_VOLUME != 0 {
+        return Err(Error::Dds("unsupported DDS volume texture"));
+    }
 
     let pixel_format = PixelFormat {
         flags: read_u32_at(bytes, 80)?,
@@ -225,7 +235,7 @@ fn parse_header(bytes: &[u8]) -> Result<ParsedHeader> {
         width: read_u32_at(bytes, 16)?,
         mip_count: read_u32_at(bytes, 28)?.max(1),
         pixel_format,
-        caps2: read_u32_at(bytes, 112)?,
+        caps2,
         payload_offset,
     })
 }
@@ -260,12 +270,24 @@ fn parse_dx10_format(bytes: &[u8], payload_offset: usize) -> Result<u8> {
     if dimension != DDS_DIMENSION_TEXTURE2D {
         return Err(Error::Dds("unsupported DDS resource dimension"));
     }
-    if array_size != 1 {
+    let misc_flags = read_u32_at(bytes, 136)?;
+    let cube = misc_flags & DDS_RESOURCE_MISC_TEXTURECUBE != 0;
+    if (cube && array_size != 6) || (!cube && array_size != 1) {
         return Err(Error::Dds("unsupported DDS array size"));
     }
     let format = u8::try_from(format).map_err(|_| Error::Dds("unsupported DXGI format"))?;
     let _ = texture_layout(format)?;
     Ok(format)
+}
+
+impl ParsedHeader {
+    fn is_cubemap(self, bytes: &[u8]) -> Result<bool> {
+        if self.payload_offset == 148 {
+            Ok(read_u32_at(bytes, 136)? & DDS_RESOURCE_MISC_TEXTURECUBE != 0)
+        } else {
+            Ok(self.caps2 & DDSCAPS2_CUBEMAP != 0)
+        }
+    }
 }
 
 fn parse_plain_format(pixel_format: PixelFormat) -> Result<u8> {

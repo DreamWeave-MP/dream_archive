@@ -190,10 +190,12 @@ impl Archive {
     #[must_use]
     pub fn get(&self, path: impl AsRef<[u8]>) -> Option<&Entry> {
         let (hash, normalized) = hash_file(path.as_ref().as_bstr());
-        self.name_lookup
-            .get(&normalized)
-            .or_else(|| self.lookup.get(&hash))
-            .map(|&index| &self.entries[index])
+        let index = if self.name_lookup.is_empty() {
+            self.lookup.get(&hash)
+        } else {
+            self.name_lookup.get(&normalized)
+        }?;
+        Some(&self.entries[*index])
     }
 
     /// Get an entry by path, returning an error when it is absent.

@@ -115,7 +115,7 @@ fn two_entry_gnrl_archive_with_colliding_hashes() -> Vec<u8> {
     let payload_offset = table_size;
     let string_table_offset =
         payload_offset + payloads.iter().map(|payload| payload.len()).sum::<usize>();
-    let (hash, _) = dream_archive::ba2::hash_file(b"a.txt".as_bstr());
+    let (hash, _) = dream_archive::ba2::hash_file(b"ghost.txt".as_bstr());
 
     let mut bytes = Vec::new();
     push_u32(&mut bytes, MAGIC);
@@ -441,19 +441,40 @@ fn ba2_writer_rejects_unsafe_paths() {
 }
 
 #[test]
+fn ba2_dx10_writer_rejects_duplicate_and_unsafe_paths() {
+    let mut builder = Dx10Builder::new();
+    builder
+        .add_texture_bytes("Textures/Tiny.DDS", tiny_texture_header(), [0xab; 16])
+        .unwrap();
+    assert!(matches!(
+        builder.add_texture_bytes("textures\\tiny.dds", tiny_texture_header(), [0xcd; 16]),
+        Err(Error::DuplicatePath)
+    ));
+
+    for path in ["", ".", "../evil.dds", "bad:name.dds", "bad\0name.dds"] {
+        let mut builder = Dx10Builder::new();
+        assert!(matches!(
+            builder.add_texture_bytes(path.as_bytes(), tiny_texture_header(), [0xab; 16]),
+            Err(Error::InvalidArchivePath)
+        ));
+    }
+}
+
+#[test]
 fn ba2_named_lookup_prefers_string_table_over_hash_collision() {
     let bytes = two_entry_gnrl_archive_with_colliding_hashes();
     let archive = Archive::from_slice(&bytes).unwrap();
 
     assert_eq!(archive.read_file("a.txt").unwrap().unwrap(), b"first");
     assert_eq!(archive.read_file("b.txt").unwrap().unwrap(), b"second");
+    assert!(archive.read_file("ghost.txt").unwrap().is_none());
 }
 
 fn tiny_texture_header() -> TextureHeader {
     TextureHeader {
-        height: 8,
-        width: 16,
-        mip_count: 4,
+        height: 4,
+        width: 4,
+        mip_count: 1,
         format: 98,
         flags: 0,
         tile_mode: 0,
@@ -480,7 +501,7 @@ fn dx10_dds(width: u32, height: u32, mip_count: u32, format: u32, payload: &[u8]
     push_u32(&mut bytes, height);
     push_u32(&mut bytes, width);
     push_u32(&mut bytes, payload.len().try_into().unwrap());
-    push_u32(&mut bytes, 1);
+    push_u32(&mut bytes, 0);
     push_u32(&mut bytes, mip_count);
     push_zeros(&mut bytes, 44);
     push_u32(&mut bytes, 32);
@@ -496,6 +517,20 @@ fn dx10_dds(width: u32, height: u32, mip_count: u32, format: u32, payload: &[u8]
     push_u32(&mut bytes, 0);
     assert_eq!(bytes.len(), 148);
     bytes.extend_from_slice(payload);
+    bytes
+}
+
+fn dx10_cubemap_dds(
+    width: u32,
+    height: u32,
+    mip_count: u32,
+    format: u32,
+    payload: &[u8],
+) -> Vec<u8> {
+    let mut bytes = dx10_dds(width, height, mip_count, format, payload);
+    set_u32(&mut bytes, 112, 0xFE00);
+    set_u32(&mut bytes, 136, 4);
+    set_u32(&mut bytes, 140, 6);
     bytes
 }
 
@@ -539,11 +574,40 @@ fn legacy_fourcc_dds(
     bytes
 }
 
+fn plain_rgba_dds(width: u32, height: u32, payload: &[u8]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"DDS ");
+    push_u32(&mut bytes, 124);
+    push_u32(
+        &mut bytes,
+        DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT,
+    );
+    push_u32(&mut bytes, height);
+    push_u32(&mut bytes, width);
+    push_u32(&mut bytes, width * 4);
+    push_u32(&mut bytes, 0);
+    push_u32(&mut bytes, 1);
+    push_zeros(&mut bytes, 44);
+    push_u32(&mut bytes, 32);
+    push_u32(&mut bytes, 0x41);
+    push_u32(&mut bytes, 0);
+    push_u32(&mut bytes, 32);
+    push_u32(&mut bytes, 0x0000_00ff);
+    push_u32(&mut bytes, 0x0000_ff00);
+    push_u32(&mut bytes, 0x00ff_0000);
+    push_u32(&mut bytes, 0xff00_0000);
+    push_u32(&mut bytes, DDSCAPS_TEXTURE);
+    push_zeros(&mut bytes, 16);
+    assert_eq!(bytes.len(), 128);
+    bytes.extend_from_slice(payload);
+    bytes
+}
+
 #[test]
 fn writes_ba2_dx10_archive_from_texture_payload() {
     let mut builder = Dx10Builder::new();
     builder
-        .add_texture_bytes("Textures/Tiny.DDS", tiny_texture_header(), b"texture-bytes")
+        .add_texture_bytes("Textures/Tiny.DDS", tiny_texture_header(), [0xab; 16])
         .unwrap();
 
     let bytes = builder.to_vec().unwrap();
@@ -553,16 +617,16 @@ fn writes_ba2_dx10_archive_from_texture_payload() {
     assert_eq!(archive.info().version, ArchiveVersion::v1);
     assert_eq!(archive.info().compression_format, Ba2CompressionFormat::Zip);
     assert!(archive.info().strings);
-    assert_eq!(archive.entries()[0].file().chunks()[0].mips, Some(0..=3));
+    assert_eq!(archive.entries()[0].file().chunks()[0].mips, Some(0..=0));
 
     let data = archive.read_file("textures/tiny.dds").unwrap().unwrap();
     assert_eq!(&data[0..4], b"DDS ");
-    assert_eq!(u32::from_le_bytes(data[12..16].try_into().unwrap()), 8);
-    assert_eq!(u32::from_le_bytes(data[16..20].try_into().unwrap()), 16);
-    assert_eq!(u32::from_le_bytes(data[28..32].try_into().unwrap()), 4);
+    assert_eq!(u32::from_le_bytes(data[12..16].try_into().unwrap()), 4);
+    assert_eq!(u32::from_le_bytes(data[16..20].try_into().unwrap()), 4);
+    assert_eq!(u32::from_le_bytes(data[28..32].try_into().unwrap()), 1);
     assert_eq!(&data[84..88], b"DX10");
     assert_eq!(u32::from_le_bytes(data[128..132].try_into().unwrap()), 98);
-    assert_eq!(&data[148..], b"texture-bytes");
+    assert_eq!(&data[148..], &[0xab; 16]);
 }
 
 #[test]
@@ -573,7 +637,7 @@ fn ba2_dx10_writer_places_payloads_before_string_table() {
         .add_texture_bytes_with_compression(
             "textures/compressed.dds",
             tiny_texture_header(),
-            b"payload payload payload",
+            [0xcd; 16],
             CompressionOverride::Inherit,
         )
         .unwrap();
@@ -581,7 +645,7 @@ fn ba2_dx10_writer_places_payloads_before_string_table() {
         .add_texture_bytes_with_compression(
             "textures/plain.dds",
             tiny_texture_header(),
-            b"plain",
+            [0xef; 16],
             CompressionOverride::Store,
         )
         .unwrap();
@@ -604,7 +668,7 @@ fn ba2_dx10_writer_places_payloads_before_string_table() {
             .unwrap()
             .unwrap()
             .split_off(148),
-        b"payload payload payload"
+        [0xcd; 16]
     );
     assert_eq!(
         archive
@@ -612,7 +676,7 @@ fn ba2_dx10_writer_places_payloads_before_string_table() {
             .unwrap()
             .unwrap()
             .split_off(148),
-        b"plain"
+        [0xef; 16]
     );
 }
 
@@ -622,11 +686,7 @@ fn writes_lz4_compressed_ba2_v3_dx10_archive() {
     builder.set_version(ArchiveVersion::v3);
     builder.set_compression(Some(Ba2CompressionFormat::LZ4));
     builder
-        .add_texture_bytes(
-            "textures/tiny.dds",
-            tiny_texture_header(),
-            b"texture texture",
-        )
+        .add_texture_bytes("textures/tiny.dds", tiny_texture_header(), [0x12; 16])
         .unwrap();
 
     let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
@@ -640,7 +700,7 @@ fn writes_lz4_compressed_ba2_v3_dx10_archive() {
             .unwrap()
             .unwrap()
             .split_off(148),
-        b"texture texture"
+        [0x12; 16]
     );
 }
 
@@ -649,7 +709,7 @@ fn ba2_dx10_lz4_writer_requires_v3_header() {
     let mut builder = Dx10Builder::new();
     builder.set_compression(Some(Ba2CompressionFormat::LZ4));
     builder
-        .add_texture_bytes("textures/tiny.dds", tiny_texture_header(), b"texture")
+        .add_texture_bytes("textures/tiny.dds", tiny_texture_header(), [0xab; 16])
         .unwrap();
 
     assert!(matches!(
@@ -683,6 +743,10 @@ fn ba2_dx10_writer_rejects_invalid_texture_metadata() {
         ),
         Err(Error::Dds("unsupported DXGI format"))
     ));
+    assert!(matches!(
+        builder.add_texture_bytes("textures/tiny.dds", tiny_texture_header(), b"short"),
+        Err(Error::Dds("DDS payload size does not match metadata"))
+    ));
 }
 
 #[test]
@@ -712,7 +776,7 @@ fn ba2_dx10_writer_ingests_dx10_dds() {
 fn reconstructed_dx10_dds_uses_zero_depth_for_2d_textures() {
     let mut builder = Dx10Builder::new();
     builder
-        .add_texture_bytes("textures/tiny.dds", tiny_texture_header(), [0xab; 64])
+        .add_texture_bytes("textures/tiny.dds", tiny_texture_header(), [0xab; 16])
         .unwrap();
 
     let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
@@ -745,6 +809,43 @@ fn ba2_dx10_writer_ingests_legacy_dxt1_dds() {
 }
 
 #[test]
+fn ba2_dx10_writer_ingests_plain_rgba_dds() {
+    let payload = [0x34u8; 64];
+    let dds = plain_rgba_dds(4, 4, &payload);
+    let mut builder = Dx10Builder::new();
+    builder.add_dds_bytes("textures/rgba.dds", &dds).unwrap();
+
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
+    let entry = archive.get("textures/rgba.dds").unwrap();
+    assert_eq!(
+        entry.file().header,
+        dream_archive::ba2::FileHeader::DX10(TextureHeader {
+            height: 4,
+            width: 4,
+            mip_count: 1,
+            format: 28,
+            flags: 0,
+            tile_mode: 0,
+        })
+    );
+    assert_eq!(archive.read_entry(entry).unwrap().split_off(128), payload);
+}
+
+#[test]
+fn ba2_dx10_writer_ingests_dx10_cubemap_dds() {
+    let payload = [0x56u8; 96];
+    let dds = dx10_cubemap_dds(4, 4, 1, 98, &payload);
+    let mut builder = Dx10Builder::new();
+    builder.add_dds_bytes("textures/cube.dds", &dds).unwrap();
+
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
+    let data = archive.read_file("textures/cube.dds").unwrap().unwrap();
+    assert_eq!(u32::from_le_bytes(data[136..140].try_into().unwrap()), 4);
+    assert_eq!(u32::from_le_bytes(data[140..144].try_into().unwrap()), 6);
+    assert_eq!(&data[148..], payload);
+}
+
+#[test]
 fn ba2_dx10_writer_rejects_dds_payload_size_mismatch() {
     let dds = dx10_dds(4, 4, 1, 98, &[0; 15]);
     let mut builder = Dx10Builder::new();
@@ -770,6 +871,13 @@ fn ba2_dx10_writer_rejects_dds_arrays_and_volumes() {
     assert!(matches!(
         builder.add_dds_bytes("textures/volume.dds", &volume),
         Err(Error::Dds("unsupported DDS resource dimension"))
+    ));
+
+    let mut legacy_volume = legacy_fourcc_dds(4, 4, 1, u32::from_le_bytes(*b"DXT1"), &[0; 8]);
+    set_u32(&mut legacy_volume, 24, 1);
+    assert!(matches!(
+        builder.add_dds_bytes("textures/legacy-volume.dds", &legacy_volume),
+        Err(Error::Dds("unsupported DDS volume texture"))
     ));
 }
 
@@ -1196,6 +1304,28 @@ fn ba2_extract_to_rejects_parent_directory_paths() {
         matches!(archive.extract_to(&out), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::InvalidData)
     );
     assert!(!out.join("evil.txt").exists());
+}
+
+#[test]
+fn ba2_extract_to_rejects_mixed_separator_traversal_paths() {
+    for name in [
+        b"textures\\..\\evil.txt".as_slice(),
+        b"textures/../../evil.txt".as_slice(),
+    ] {
+        let archive = Archive::from_slice(&tiny_archive(TinyArchiveOptions {
+            name: Some(name),
+            chunk_offset: 60 + 2 + u64::try_from(name.len()).unwrap(),
+            ..TinyArchiveOptions::default()
+        }))
+        .unwrap();
+        let out = output_dir("ba2-mixed-traversal");
+
+        assert!(
+            matches!(archive.extract_to(&out), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::InvalidData)
+        );
+        assert!(!out.join("evil.txt").exists());
+        let _ = std::fs::remove_dir_all(out);
+    }
 }
 
 #[test]

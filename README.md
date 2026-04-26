@@ -146,8 +146,15 @@ header directly.
 
 DX10/DDS support here is archive plumbing, not a texture processing library. It
 does not decode pixels, preserve vendor/private DDS fields, handle texture
-arrays/volumes, or aim for DirectXTex parity. A broader DDS crate belongs with a
-renderer; this crate only does the pieces BA2 writing and extraction need today.
+arrays/volumes, transcode formats, repair payloads, or aim for DirectXTex parity.
+A broader DDS crate belongs with a renderer; this crate only does the pieces BA2
+writing and extraction need today.
+
+Supported DDS input for BA2 DX10 writing is deliberately narrow: tightly packed
+2D textures and cubemaps using the DXGI/FourCC/plain formats this crate can
+reconstruct on extraction. The payload byte count must exactly match the DDS
+dimensions, format, mip count, and cubemap face count. Texture arrays and 3D
+volume textures are rejected.
 
 ## Archive paths are not filesystem paths
 

@@ -6,7 +6,9 @@
 //! texture archives that are metadata-only here. DX10 extraction reconstructs a
 //! DDS header from BA2 metadata; DX10 writing can ingest supported DDS files or
 //! accept explicit [`TextureHeader`] metadata plus raw texture payload bytes.
-//! This module is archive plumbing, not a texture transcoder.
+//! This module is archive plumbing, not a texture transcoder. DDS ingestion is
+//! limited to tightly packed 2D textures and cubemaps; texture arrays, volumes,
+//! mip generation, and pixel conversion are intentionally out of scope.
 
 mod archive;
 mod builder;

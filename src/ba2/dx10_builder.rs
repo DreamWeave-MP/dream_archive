@@ -140,6 +140,7 @@ impl Dx10Builder {
         compression: CompressionOverride,
     ) -> Result<()> {
         validate_texture_header(header)?;
+        dds::validate_texture_payload_size(header, bytes.as_ref().len())?;
         let name = builder::normalize_stored_path(path.as_ref())?;
         let (hash, normalized) = hash_file(name.as_bstr());
         debug_assert_eq!(name, normalized);

@@ -33,6 +33,7 @@
 //! # Example
 //!
 //! ```no_run
+//! # #[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
 //! # fn main() -> dream_archive::Result<()> {
 //! let archive = dream_archive::Archive::open_path("Data/SomeArchive.bsa")?;
 //! for entry in archive.entries() {
@@ -45,6 +46,8 @@
 //! println!("extracted {} bytes", bytes.len());
 //! # Ok(())
 //! # }
+//! # #[cfg(not(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4")))]
+//! # fn main() {}
 //! ```
 //!
 //! # Building archives
