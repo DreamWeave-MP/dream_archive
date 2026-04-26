@@ -6,7 +6,7 @@ rust-version = "1.85"
 license = "GPL-3.0-only"
 
 [dependencies]
-bstr = "1.12"
+bstr = { version = "1.12", default-features = false, features = ["std"] }
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"], optional = true }
 lz4_flex = { version = "0.13", default-features = false, optional = true }
 memmap2 = { version = "0.9", optional = true }
