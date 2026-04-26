@@ -46,6 +46,18 @@ fn missing_string_tables_are_accepted() {
 }
 
 #[test]
+fn top_level_facade_reports_no_path_for_stringless_ba2_entries() {
+    let root = common::ba2_fixture("missing_string_table");
+    let archive = dream_archive::Archive::open_path(root.join("in.ba2")).unwrap();
+    let mut entries = archive.entries();
+
+    let entry = entries.next().unwrap();
+    assert_eq!(entry.format(), FileFormat::BA2);
+    assert_eq!(entry.path(), None);
+    assert!(entries.next().is_none());
+}
+
+#[test]
 fn lists_names_for_vfs_indexing() {
     let root = common::ba2_fixture("next_gen");
     let archive = Archive::open_path(root.join("gnrl_v8.ba2")).unwrap();

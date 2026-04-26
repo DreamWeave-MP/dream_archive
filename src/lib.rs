@@ -342,11 +342,16 @@ impl std::iter::FusedIterator for Entries<'_> {}
 
 #[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
 impl<'a> Entry<'a> {
+    /// Stored archive path, when the archive format provides one.
+    ///
+    /// Hash-only/stringless archives have entries but no recoverable path text.
+    /// Use the format-specific hash lookup APIs for those. An empty BA2 entry
+    /// name is treated as missing path text rather than as a real empty path.
     #[must_use]
     pub fn path(self) -> Option<&'a BStr> {
         match self {
             #[cfg(feature = "ba2")]
-            Self::BA2(entry) => Some(entry.name()),
+            Self::BA2(entry) => (!entry.name().is_empty()).then(|| entry.name()),
             #[cfg(feature = "bsa-tes3")]
             Self::Tes3Bsa(entry) => Some(entry.path()),
             #[cfg(feature = "bsa-tes4")]
