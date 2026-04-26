@@ -134,6 +134,17 @@ impl Archive {
         Ok(())
     }
 
+    /// Extract an entry into a writer without allocating a payload buffer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the entry points outside the archive or writing fails.
+    pub fn extract_entry(&self, entry: &Entry, mut out: impl std::io::Write) -> Result<u64> {
+        let payload = self.entry_payload(entry)?;
+        out.write_all(payload)?;
+        Ok(payload.len().try_into()?)
+    }
+
     /// Extract an entry into a new vector.
     ///
     /// # Errors
@@ -153,6 +164,21 @@ impl Archive {
     pub fn read_file(&self, path: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         self.get(path)
             .map(|entry| self.read_entry(entry))
+            .transpose()
+    }
+
+    /// Extract a path into a writer without allocating a payload buffer.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::extract_entry`] if the path exists.
+    pub fn extract_file(
+        &self,
+        path: impl AsRef<[u8]>,
+        out: impl std::io::Write,
+    ) -> Result<Option<u64>> {
+        self.get(path)
+            .map(|entry| self.extract_entry(entry, out))
             .transpose()
     }
 

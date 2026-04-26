@@ -212,6 +212,27 @@ impl Archive {
         result
     }
 
+    /// Extract an entry into a writer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if chunk offsets are invalid, decompression fails, the
+    /// declared decompressed size does not match, writing fails, or the file
+    /// format is not yet implemented.
+    pub fn extract_entry(&self, entry: &Entry, mut out: impl std::io::Write) -> Result<u64> {
+        match entry.file.header {
+            FileHeader::GNRL => self.extract_chunks_to_writer(&entry.file, &mut out),
+            FileHeader::DX10(texture) => {
+                let mut header = Vec::new();
+                dds::write_dds_header(&mut header, texture.dds_header())?;
+                out.write_all(&header)?;
+                Ok(u64::try_from(header.len())?
+                    + self.extract_chunks_to_writer(&entry.file, &mut out)?)
+            }
+            FileHeader::GNMF(_) => Err(Error::NotImplemented),
+        }
+    }
+
     /// Extract an entry into a new vector.
     ///
     /// # Errors
@@ -235,11 +256,42 @@ impl Archive {
             .transpose()
     }
 
+    /// Extract a path into a writer.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::extract_entry`] if the path exists.
+    pub fn extract_file(
+        &self,
+        path: impl AsRef<[u8]>,
+        out: impl std::io::Write,
+    ) -> Result<Option<u64>> {
+        self.get(path)
+            .map(|entry| self.extract_entry(entry, out))
+            .transpose()
+    }
+
     fn extract_chunks(&self, file: &ArchiveFile, out: &mut Vec<u8>) -> Result<()> {
         for chunk in &file.chunks {
             chunk.extract(self.storage.as_bytes(), self.info.compression_format, out)?;
         }
         Ok(())
+    }
+
+    fn extract_chunks_to_writer(
+        &self,
+        file: &ArchiveFile,
+        out: &mut impl std::io::Write,
+    ) -> Result<u64> {
+        let mut written = 0u64;
+        for chunk in &file.chunks {
+            written += chunk.extract_to_writer(
+                self.storage.as_bytes(),
+                self.info.compression_format,
+                out,
+            )?;
+        }
+        Ok(written)
     }
 
     pub(super) fn from_parts(storage: Storage, info: ArchiveInfo, entries: Vec<Entry>) -> Self {

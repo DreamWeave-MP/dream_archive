@@ -310,6 +310,12 @@ fn extracts_synthetic_zlib_tes4_file() {
         archive.read_file("data/file.txt").unwrap().unwrap(),
         b"compressed payload"
     );
+    let mut out = Vec::new();
+    assert_eq!(
+        archive.extract_file("data/file.txt", &mut out).unwrap(),
+        Some(18)
+    );
+    assert_eq!(out, b"compressed payload");
 }
 
 #[test]
@@ -374,6 +380,12 @@ fn extracts_synthetic_lz4_frame_tes4_file() {
         archive.read_file("data/file.txt").unwrap().unwrap(),
         b"compressed payload"
     );
+    let mut out = Vec::new();
+    assert_eq!(
+        archive.extract_file("data/file.txt", &mut out).unwrap(),
+        Some(18)
+    );
+    assert_eq!(out, b"compressed payload");
 }
 
 #[test]

@@ -244,6 +244,22 @@ impl Archive {
         }
     }
 
+    /// Extract an entry into a writer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the entry points outside the archive, uses an
+    /// unsupported compression mode, decompression fails, or writing fails.
+    pub fn extract_entry(&self, entry: &Entry, mut out: impl std::io::Write) -> Result<u64> {
+        let payload = self.entry_payload(entry)?;
+        if entry.record.is_compressed(self.info.archive_flags) {
+            self.decompress_entry_to_writer(payload, &mut out)
+        } else {
+            out.write_all(payload)?;
+            Ok(payload.len().try_into()?)
+        }
+    }
+
     /// Extract an entry into a new vector.
     ///
     /// # Errors
@@ -263,6 +279,21 @@ impl Archive {
     pub fn read_file(&self, path: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         self.get(path)
             .map(|entry| self.read_entry(entry))
+            .transpose()
+    }
+
+    /// Extract a path into a writer.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::extract_entry`] if the path exists.
+    pub fn extract_file(
+        &self,
+        path: impl AsRef<[u8]>,
+        out: impl std::io::Write,
+    ) -> Result<Option<u64>> {
+        self.get(path)
+            .map(|entry| self.extract_entry(entry, out))
             .transpose()
     }
 
@@ -337,6 +368,36 @@ impl Archive {
             Err(Error::TrailingCompressedData)
         }
     }
+
+    fn decompress_entry_to_writer(
+        &self,
+        payload: &[u8],
+        out: &mut impl std::io::Write,
+    ) -> Result<u64> {
+        if self
+            .info
+            .archive_flags
+            .contains(ArchiveFlags::XBOX_COMPRESSED)
+        {
+            return Err(Error::NotImplemented("TES4 XMem compression"));
+        }
+        if self.info.version == ArchiveVersion::v105 {
+            return decompress_lz4_frame_payload_to_writer(payload, out);
+        }
+        let Some((expected_bytes, compressed)) = payload.split_first_chunk::<4>() else {
+            return Err(Error::OutOfBounds);
+        };
+        let expected = u32::from_le_bytes(*expected_bytes).try_into()?;
+        let mut decoder = ZlibDecoder::new(compressed);
+        let written = copy_decompressed_to_writer(&mut decoder, expected, out, |error| {
+            Error::Zlib(error.to_string())
+        })?;
+        if decoder.total_in() == u64::try_from(compressed.len())? {
+            Ok(written)
+        } else {
+            Err(Error::TrailingCompressedData)
+        }
+    }
 }
 
 fn decompress_lz4_frame_payload(payload: &[u8], out: &mut Vec<u8>) -> Result<()> {
@@ -357,6 +418,56 @@ fn decompress_lz4_frame_payload(payload: &[u8], out: &mut Vec<u8>) -> Result<()>
     } else {
         out.truncate(before);
         Err(Error::TrailingCompressedData)
+    }
+}
+
+fn decompress_lz4_frame_payload_to_writer(
+    payload: &[u8],
+    out: &mut impl std::io::Write,
+) -> Result<u64> {
+    let Some((expected_bytes, compressed)) = payload.split_first_chunk::<4>() else {
+        return Err(Error::OutOfBounds);
+    };
+    if !compressed.starts_with(&LZ4_FRAME_MAGIC) {
+        return Err(Error::InvalidLz4Frame);
+    }
+    let expected = u32::from_le_bytes(*expected_bytes).try_into()?;
+    let mut decoder = FrameDecoder::new(compressed);
+    let written = copy_decompressed_to_writer(&mut decoder, expected, out, |error| {
+        Error::Lz4Frame(error.to_string())
+    })?;
+    if decoder.get_ref().is_empty() {
+        Ok(written)
+    } else {
+        Err(Error::TrailingCompressedData)
+    }
+}
+
+fn copy_decompressed_to_writer(
+    decoder: &mut impl std::io::Read,
+    expected: usize,
+    out: &mut impl std::io::Write,
+    map_error: impl Fn(std::io::Error) -> Error,
+) -> Result<u64> {
+    let mut written = 0usize;
+    let mut buffer = [0; 8192];
+    while written <= expected {
+        let remaining = expected + 1 - written;
+        let read_len = remaining.min(buffer.len());
+        let count = decoder.read(&mut buffer[..read_len]).map_err(&map_error)?;
+        if count == 0 {
+            break;
+        }
+        out.write_all(&buffer[..count])?;
+        written += count;
+    }
+    if written == expected {
+        Ok(written.try_into()?)
+    } else {
+        Err(Error::DecompressionSizeMismatch {
+            expected,
+            actual: written,
+        })
     }
 }
 

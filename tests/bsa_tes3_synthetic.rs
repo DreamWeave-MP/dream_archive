@@ -43,6 +43,12 @@ fn extracts_synthetic_tes3_file() {
         archive.read_file("meshes/foo.nif").unwrap().unwrap(),
         b"hello"
     );
+    let mut out = Vec::new();
+    assert_eq!(
+        archive.extract_file("meshes/foo.nif", &mut out).unwrap(),
+        Some(5)
+    );
+    assert_eq!(out, b"hello");
 }
 
 #[test]

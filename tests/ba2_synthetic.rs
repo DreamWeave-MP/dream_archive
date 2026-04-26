@@ -390,6 +390,14 @@ fn extracts_synthetic_zlib_chunk() {
         archive.read_entry(&archive.entries()[0]).unwrap(),
         b"compressed hello"
     );
+    let mut out = Vec::new();
+    assert_eq!(
+        archive
+            .extract_entry(&archive.entries()[0], &mut out)
+            .unwrap(),
+        16
+    );
+    assert_eq!(out, b"compressed hello");
 }
 
 #[test]
@@ -475,6 +483,14 @@ fn extracts_synthetic_lz4_chunk() {
         archive.read_entry(&archive.entries()[0]).unwrap(),
         b"lz4 says hello"
     );
+    let mut out = Vec::new();
+    assert_eq!(
+        archive
+            .extract_entry(&archive.entries()[0], &mut out)
+            .unwrap(),
+        14
+    );
+    assert_eq!(out, b"lz4 says hello");
 }
 
 #[test]

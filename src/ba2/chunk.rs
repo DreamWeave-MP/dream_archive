@@ -125,4 +125,71 @@ impl Chunk {
             Err(Error::DecompressionSizeMismatch { expected, actual })
         }
     }
+
+    pub(crate) fn extract_to_writer(
+        &self,
+        archive: &[u8],
+        compression: Ba2CompressionFormat,
+        out: &mut impl std::io::Write,
+    ) -> Result<u64> {
+        let stored = self.stored_bytes(archive)?;
+        if self.packed_size == 0 {
+            out.write_all(stored)?;
+            return Ok(stored.len().try_into()?);
+        }
+
+        let expected: usize = self.size.try_into()?;
+        match compression {
+            Ba2CompressionFormat::Zip => {
+                let mut decoder = ZlibDecoder::new(stored);
+                let written = copy_decompressed_to_writer(&mut decoder, expected, out)?;
+                if decoder.total_in() == u64::try_from(stored.len())? {
+                    Ok(written)
+                } else {
+                    Err(Error::TrailingCompressedData)
+                }
+            }
+            Ba2CompressionFormat::LZ4 => {
+                let mut buffer = Vec::new();
+                buffer.try_reserve_exact(expected)?;
+                buffer.resize(expected, 0);
+                let actual = lz4_flex::block::decompress_into(stored, &mut buffer)
+                    .map_err(|error| Error::Lz4(error.to_string()))?;
+                if actual != expected {
+                    return Err(Error::DecompressionSizeMismatch { expected, actual });
+                }
+                out.write_all(&buffer)?;
+                Ok(actual.try_into()?)
+            }
+        }
+    }
+}
+
+fn copy_decompressed_to_writer(
+    decoder: &mut impl std::io::Read,
+    expected: usize,
+    out: &mut impl std::io::Write,
+) -> Result<u64> {
+    let mut written = 0usize;
+    let mut buffer = [0; 8192];
+    while written <= expected {
+        let remaining = expected + 1 - written;
+        let read_len = remaining.min(buffer.len());
+        let count = decoder
+            .read(&mut buffer[..read_len])
+            .map_err(|error| Error::Zlib(error.to_string()))?;
+        if count == 0 {
+            break;
+        }
+        out.write_all(&buffer[..count])?;
+        written += count;
+    }
+    if written == expected {
+        Ok(written.try_into()?)
+    } else {
+        Err(Error::DecompressionSizeMismatch {
+            expected,
+            actual: written,
+        })
+    }
 }

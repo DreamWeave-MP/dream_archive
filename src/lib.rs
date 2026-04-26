@@ -26,7 +26,7 @@ pub mod ba2;
 pub mod bsa;
 #[cfg(any(feature = "ba2", feature = "bsa-tes4"))]
 mod read;
-#[cfg(any(feature = "ba2", feature = "bsa-tes4"))]
+#[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
 mod storage;
 
 use std::io::{self, Read};
