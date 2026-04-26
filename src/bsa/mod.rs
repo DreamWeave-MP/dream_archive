@@ -1,9 +1,5 @@
-mod archive;
-mod parser;
-
-pub use archive::{
-    Archive, ArchiveFlags, ArchiveInfo, ArchiveTypes, ArchiveVersion, Entry, FileRecord,
-};
+#[cfg(feature = "bsa-tes4")]
+pub mod tes4;
 
 use std::{collections::TryReserveError, fmt, io, num::TryFromIntError};
 

@@ -1,6 +1,6 @@
 #![cfg(feature = "bsa-tes4")]
 
-use dream_archive::bsa::{Archive, ArchiveFlags, ArchiveTypes, ArchiveVersion, Error};
+use dream_archive::bsa::tes4::{Archive, ArchiveFlags, ArchiveTypes, ArchiveVersion, Error};
 use std::path::PathBuf;
 
 fn fixture(path: &str) -> PathBuf {

@@ -1,6 +1,6 @@
 #![cfg(feature = "bsa-tes4")]
 
-use dream_archive::bsa::{Archive, ArchiveVersion, Error};
+use dream_archive::bsa::tes4::{Archive, ArchiveVersion, Error};
 use flate2::{Compression, write::ZlibEncoder};
 use lz4_flex::frame::FrameEncoder;
 

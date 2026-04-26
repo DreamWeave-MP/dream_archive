@@ -418,7 +418,7 @@ fn normalize_path(path: &[u8]) -> Vec<u8> {
 }
 
 impl TryFrom<Copied<'_>> for Archive {
-    type Error = super::Error;
+    type Error = Error;
     fn try_from(value: Copied<'_>) -> Result<Self> {
         Self::read(value.0)
     }
