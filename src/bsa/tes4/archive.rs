@@ -1,11 +1,17 @@
 use super::{Error, Result, parser};
-use crate::{Copied, storage::Storage};
+use crate::{
+    Copied,
+    extract::{ensure_parent_dir, output_path_into},
+    storage::Storage,
+};
 use bstr::{BStr, BString};
 use flate2::read::ZlibDecoder;
 use lz4_flex::frame::FrameDecoder;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::BufWriter;
 use std::io::Read as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const LZ4_FRAME_MAGIC: [u8; 4] = [0x04, 0x22, 0x4d, 0x18];
 
@@ -295,6 +301,28 @@ impl Archive {
         self.get(path)
             .map(|entry| self.extract_entry(entry, out))
             .transpose()
+    }
+
+    /// Extract every entry to `target_dir`, preserving archive paths.
+    ///
+    /// Returns the number of payload bytes written after decompression.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an archive entry has no safe output path, directory
+    /// or file creation fails, or entry extraction fails.
+    pub fn extract_to(&self, target_dir: impl AsRef<Path>) -> Result<u64> {
+        let target_dir = target_dir.as_ref();
+        let mut written = 0u64;
+        let mut path = PathBuf::new();
+        let mut last_parent = PathBuf::new();
+        for entry in &self.entries {
+            output_path_into(&mut path, target_dir, entry.path())?;
+            ensure_parent_dir(&path, &mut last_parent)?;
+            let file = File::create(&path)?;
+            written += self.extract_entry(entry, BufWriter::new(file))?;
+        }
+        Ok(written)
     }
 
     pub(super) fn from_parts(storage: Storage, info: ArchiveInfo, entries: Vec<Entry>) -> Self {

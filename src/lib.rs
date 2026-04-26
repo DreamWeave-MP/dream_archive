@@ -24,6 +24,8 @@
 pub mod ba2;
 #[cfg(feature = "bsa-tes4")]
 pub mod bsa;
+#[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
+mod extract;
 #[cfg(any(feature = "ba2", feature = "bsa-tes4"))]
 mod read;
 #[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]

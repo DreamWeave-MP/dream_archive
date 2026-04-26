@@ -1,8 +1,13 @@
 use super::{Error, Result, parser};
-use crate::{Copied, storage::Storage};
+use crate::{
+    Copied,
+    extract::{ensure_parent_dir, output_path_into},
+    storage::Storage,
+};
 use bstr::{BStr, BString};
 use std::collections::HashMap;
-use std::path::Path;
+use std::fs::File;
+use std::path::{Path, PathBuf};
 
 /// Metadata read from a TES3 BSA archive header.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -180,6 +185,27 @@ impl Archive {
         self.get(path)
             .map(|entry| self.extract_entry(entry, out))
             .transpose()
+    }
+
+    /// Extract every entry to `target_dir`, preserving archive paths.
+    ///
+    /// Returns the number of payload bytes written.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an archive entry has no safe output path, directory
+    /// or file creation fails, or entry extraction fails.
+    pub fn extract_to(&self, target_dir: impl AsRef<Path>) -> Result<u64> {
+        let target_dir = target_dir.as_ref();
+        let mut written = 0u64;
+        let mut path = PathBuf::new();
+        let mut last_parent = PathBuf::new();
+        for entry in &self.entries {
+            output_path_into(&mut path, target_dir, entry.path())?;
+            ensure_parent_dir(&path, &mut last_parent)?;
+            written += self.extract_entry(entry, File::create(&path)?)?;
+        }
+        Ok(written)
     }
 
     pub(super) fn from_parts(

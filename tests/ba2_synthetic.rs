@@ -1,6 +1,7 @@
 use bstr::ByteSlice as _;
 use dream_archive::ba2::{Archive, ArchiveVersion, Ba2CompressionFormat, Error, PayloadFormat};
 use flate2::{Compression, write::ZlibEncoder};
+use std::path::PathBuf;
 
 const MAGIC: u32 = u32::from_le_bytes(*b"BTDX");
 const GNRL: u32 = u32::from_le_bytes(*b"GNRL");
@@ -94,6 +95,14 @@ fn zlib_compress(bytes: &[u8]) -> Vec<u8> {
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
     std::io::Write::write_all(&mut encoder, bytes).unwrap();
     encoder.finish().unwrap()
+}
+
+fn output_dir(name: &str) -> PathBuf {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("target/test-extract");
+    path.push(format!("{}-{}", name, std::process::id()));
+    let _ = std::fs::remove_dir_all(&path);
+    path
 }
 
 #[derive(Clone, Copy)]
@@ -398,6 +407,40 @@ fn extracts_synthetic_zlib_chunk() {
         16
     );
     assert_eq!(out, b"compressed hello");
+}
+
+#[test]
+fn extracts_ba2_archive_to_directory() {
+    let archive = Archive::read(&tiny_archive(TinyArchiveOptions {
+        name: Some(b"textures/hello.txt"),
+        chunk_offset: 60 + 2 + u64::try_from(b"textures/hello.txt".len()).unwrap(),
+        ..TinyArchiveOptions::default()
+    }))
+    .unwrap();
+    let out = output_dir("ba2");
+
+    assert_eq!(archive.extract_to(&out).unwrap(), 5);
+    assert_eq!(
+        std::fs::read(out.join("textures").join("hello.txt")).unwrap(),
+        b"hello"
+    );
+    std::fs::remove_dir_all(out).unwrap();
+}
+
+#[test]
+fn ba2_extract_to_rejects_parent_directory_paths() {
+    let archive = Archive::read(&tiny_archive(TinyArchiveOptions {
+        name: Some(b"../evil.txt"),
+        chunk_offset: 60 + 2 + u64::try_from(b"../evil.txt".len()).unwrap(),
+        ..TinyArchiveOptions::default()
+    }))
+    .unwrap();
+    let out = output_dir("ba2-traversal");
+
+    assert!(
+        matches!(archive.extract_to(&out), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::InvalidData)
+    );
+    assert!(!out.join("evil.txt").exists());
 }
 
 #[test]

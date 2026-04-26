@@ -1,6 +1,7 @@
 #![cfg(feature = "bsa-tes3")]
 
 use dream_archive::bsa::tes3::{Archive, Error};
+use std::path::PathBuf;
 
 const VERSION: u32 = 0x0000_0100;
 fn push_u32(out: &mut Vec<u8>, value: u32) {
@@ -29,6 +30,14 @@ fn tiny_tes3_archive(name: &[u8], payload: &[u8]) -> Vec<u8> {
     bytes
 }
 
+fn output_dir(name: &str) -> PathBuf {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("target/test-extract");
+    path.push(format!("{}-{}", name, std::process::id()));
+    let _ = std::fs::remove_dir_all(&path);
+    path
+}
+
 #[test]
 fn extracts_synthetic_tes3_file() {
     let archive = Archive::read(&tiny_tes3_archive(b"Meshes/Foo.NIF", b"hello")).unwrap();
@@ -49,6 +58,30 @@ fn extracts_synthetic_tes3_file() {
         Some(5)
     );
     assert_eq!(out, b"hello");
+}
+
+#[test]
+fn extracts_tes3_archive_to_directory() {
+    let archive = Archive::read(&tiny_tes3_archive(b"Meshes/Foo.NIF", b"hello")).unwrap();
+    let out = output_dir("tes3");
+
+    assert_eq!(archive.extract_to(&out).unwrap(), 5);
+    assert_eq!(
+        std::fs::read(out.join("Meshes").join("Foo.NIF")).unwrap(),
+        b"hello"
+    );
+    std::fs::remove_dir_all(out).unwrap();
+}
+
+#[test]
+fn tes3_extract_to_rejects_parent_directory_paths() {
+    let archive = Archive::read(&tiny_tes3_archive(b"../evil.txt", b"hello")).unwrap();
+    let out = output_dir("tes3-traversal");
+
+    assert!(
+        matches!(archive.extract_to(&out), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::InvalidData)
+    );
+    assert!(!out.join("evil.txt").exists());
 }
 
 #[test]

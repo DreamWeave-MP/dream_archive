@@ -3,6 +3,7 @@
 use dream_archive::bsa::tes4::{Archive, ArchiveVersion, Error};
 use flate2::{Compression, write::ZlibEncoder};
 use lz4_flex::frame::FrameEncoder;
+use std::path::PathBuf;
 
 const MAGIC: u32 = u32::from_le_bytes(*b"BSA\0");
 const HEADER_SIZE: u32 = 0x24;
@@ -31,6 +32,14 @@ fn lz4_frame_compress(bytes: &[u8]) -> Vec<u8> {
     encoder.finish().unwrap()
 }
 
+fn output_dir(name: &str) -> PathBuf {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("target/test-extract");
+    path.push(format!("{}-{}", name, std::process::id()));
+    let _ = std::fs::remove_dir_all(&path);
+    path
+}
+
 fn tiny_tes4_header(version: u32) -> Vec<u8> {
     let mut bytes = Vec::new();
     push_u32(&mut bytes, MAGIC);
@@ -55,6 +64,21 @@ fn tiny_tes4_index_with_payload(flags: u32, payload: &[u8]) -> Vec<u8> {
 }
 
 fn tiny_tes4_index_with_version_and_payload(version: u32, flags: u32, payload: &[u8]) -> Vec<u8> {
+    tiny_tes4_index_with_version_names_and_payload(version, flags, b"data", b"file.txt", payload)
+}
+
+fn tiny_tes4_index_with_version_names_and_payload(
+    version: u32,
+    flags: u32,
+    folder: &[u8],
+    name: &[u8],
+    payload: &[u8],
+) -> Vec<u8> {
+    let folder_names_len: u32 = (folder.len() + 1).try_into().unwrap();
+    let file_names_len: u32 = (name.len() + 1).try_into().unwrap();
+    let folder_record_size = if version == 105 { 24 } else { 16 };
+    let folder_record_offset = HEADER_SIZE + folder_record_size;
+    let data_offset = folder_record_offset + 1 + folder_names_len + 16 + file_names_len;
     let mut bytes = Vec::new();
     push_u32(&mut bytes, MAGIC);
     push_u32(&mut bytes, version);
@@ -62,25 +86,27 @@ fn tiny_tes4_index_with_version_and_payload(version: u32, flags: u32, payload: &
     push_u32(&mut bytes, 3 | flags);
     push_u32(&mut bytes, 1);
     push_u32(&mut bytes, 1);
-    push_u32(&mut bytes, 5);
-    push_u32(&mut bytes, 9);
+    push_u32(&mut bytes, folder_names_len);
+    push_u32(&mut bytes, file_names_len);
     push_u16(&mut bytes, 1 << 8);
     push_u16(&mut bytes, 0);
     bytes.extend_from_slice(&[0; 8]);
     push_u32(&mut bytes, 1);
     if version == 105 {
         push_u32(&mut bytes, 0);
-        push_u32(&mut bytes, 60);
+        push_u32(&mut bytes, folder_record_offset);
         push_u32(&mut bytes, 0);
     } else {
-        push_u32(&mut bytes, 52);
+        push_u32(&mut bytes, folder_record_offset);
     }
-    bytes.push(5);
-    bytes.extend_from_slice(b"data\0");
+    bytes.push(folder_names_len.try_into().unwrap());
+    bytes.extend_from_slice(folder);
+    bytes.push(0);
     bytes.extend_from_slice(&[0; 8]);
     push_u32(&mut bytes, payload.len().try_into().unwrap());
-    push_u32(&mut bytes, if version == 105 { 91 } else { 83 });
-    bytes.extend_from_slice(b"file.txt\0");
+    push_u32(&mut bytes, data_offset);
+    bytes.extend_from_slice(name);
+    bytes.push(0);
     bytes.extend_from_slice(payload);
     bytes
 }
@@ -134,6 +160,37 @@ fn parses_synthetic_tes4_index() {
     assert_eq!(entry.file().stored_size, 7);
     assert_eq!(entry.file().data_offset, 83);
     assert!(archive.get("DATA/file.TXT").is_some());
+}
+
+#[test]
+fn extracts_tes4_archive_to_directory() {
+    let archive = Archive::read(&tiny_tes4_index()).unwrap();
+    let out = output_dir("tes4");
+
+    assert_eq!(archive.extract_to(&out).unwrap(), 7);
+    assert_eq!(
+        std::fs::read(out.join("data").join("file.txt")).unwrap(),
+        b"payload"
+    );
+    std::fs::remove_dir_all(out).unwrap();
+}
+
+#[test]
+fn tes4_extract_to_rejects_parent_directory_paths() {
+    let archive = Archive::read(&tiny_tes4_index_with_version_names_and_payload(
+        104,
+        0,
+        b"data",
+        b"../evil.txt",
+        b"payload",
+    ))
+    .unwrap();
+    let out = output_dir("tes4-traversal");
+
+    assert!(
+        matches!(archive.extract_to(&out), Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::InvalidData)
+    );
+    assert!(!out.join("evil.txt").exists());
 }
 
 #[test]
