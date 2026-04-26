@@ -2,7 +2,7 @@ use super::{
     Archive, ArchiveFile, ArchiveInfo, ArchiveVersion, Ba2CompressionFormat, Chunk, Entry, Error,
     FileHeader, Hash, PayloadFormat, Result, TextureHeader,
 };
-use crate::{read::Cursor, storage::Storage};
+use crate::{dds, read::Cursor, storage::Storage};
 use bstr::BString;
 
 const MAGIC: u32 = u32::from_le_bytes(*b"BTDX");
@@ -116,7 +116,39 @@ fn read_entry_record(
     for _ in 0..chunk_count {
         chunks.push(read_chunk(cursor, format, bytes)?);
     }
+    validate_entry_chunks(&header, &chunks)?;
     Ok(Entry::new(hash, ArchiveFile { header, chunks }))
+}
+
+fn validate_entry_chunks(header: &FileHeader, chunks: &[Chunk]) -> Result<()> {
+    let FileHeader::DX10(texture) = *header else {
+        return Ok(());
+    };
+    dds::validate_texture_header(texture)?;
+    let mut seen_mips = vec![false; texture.mip_count.into()];
+    for chunk in chunks {
+        let Some(mips) = &chunk.mips else {
+            return Err(Error::Dds("missing BA2 texture mip range"));
+        };
+        let first = *mips.start();
+        let last = *mips.end();
+        if first > last || last >= u16::from(texture.mip_count) {
+            return Err(Error::Dds("invalid BA2 texture mip range"));
+        }
+        for mip in first..=last {
+            let seen = &mut seen_mips[usize::from(mip)];
+            if *seen {
+                return Err(Error::Dds("duplicate BA2 texture mip range"));
+            }
+            *seen = true;
+        }
+        dds::validate_texture_mip_payload_size(texture, first, last, chunk.size().try_into()?)?;
+    }
+    if seen_mips.into_iter().all(|seen| seen) {
+        Ok(())
+    } else {
+        Err(Error::Dds("missing BA2 texture mip range"))
+    }
 }
 
 fn validate_file_header_size(format: PayloadFormat, size: u16) -> Result<()> {

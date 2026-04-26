@@ -809,6 +809,61 @@ fn ba2_dx10_writer_ingests_legacy_dxt1_dds() {
 }
 
 #[test]
+fn ba2_dx10_writer_ingests_legacy_block_format_matrix() {
+    for (fourcc, expected_format, payload_len) in [
+        (*b"DXT3", 74, 16),
+        (*b"DXT5", 77, 16),
+        (*b"BC4U", 80, 8),
+        (*b"BC4S", 81, 8),
+        (*b"BC5U", 83, 16),
+        (*b"BC5S", 84, 16),
+    ] {
+        let payload = vec![expected_format; payload_len];
+        let dds = legacy_fourcc_dds(4, 4, 1, u32::from_le_bytes(fourcc), &payload);
+        let mut builder = Dx10Builder::new();
+        builder.add_dds_bytes("textures/block.dds", &dds).unwrap();
+
+        let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
+        let dream_archive::ba2::FileHeader::DX10(header) = archive.entries()[0].file().header
+        else {
+            panic!("expected DX10 texture header");
+        };
+        assert_eq!(header.format, expected_format);
+        assert_eq!(
+            archive
+                .read_entry(&archive.entries()[0])
+                .unwrap()
+                .split_off(128),
+            payload
+        );
+    }
+}
+
+#[test]
+fn ba2_dx10_writer_ingests_non_square_multimip_dx10_dds() {
+    let payload = [0x98u8; 80];
+    let dds = dx10_dds(8, 4, 4, 98, &payload);
+    let mut builder = Dx10Builder::new();
+    builder
+        .add_dds_bytes("textures/non-square.dds", &dds)
+        .unwrap();
+
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
+    let entry = archive.get("textures/non-square.dds").unwrap();
+    assert_eq!(archive.read_entry(entry).unwrap().split_off(148), payload);
+}
+
+#[test]
+fn ba2_dx10_writer_rejects_unsupported_legacy_fourcc() {
+    let dds = legacy_fourcc_dds(4, 4, 1, u32::from_le_bytes(*b"NOPE"), &[0; 8]);
+    let mut builder = Dx10Builder::new();
+    assert!(matches!(
+        builder.add_dds_bytes("textures/nope.dds", &dds),
+        Err(Error::Dds("unsupported DDS FourCC"))
+    ));
+}
+
+#[test]
 fn ba2_dx10_writer_ingests_plain_rgba_dds() {
     let payload = [0x34u8; 64];
     let dds = plain_rgba_dds(4, 4, &payload);
@@ -949,6 +1004,9 @@ struct TinyTextureOptions<'a> {
     payload: &'a [u8],
 }
 
+const TINY_TEXTURE_PAYLOAD: [u8; 192] = [0xab; 192];
+const TINY_CUBEMAP_PAYLOAD: [u8; 1152] = [0xcd; 1152];
+
 impl Default for TinyTextureOptions<'_> {
     fn default() -> Self {
         Self {
@@ -961,7 +1019,7 @@ impl Default for TinyTextureOptions<'_> {
             first_mip: 0,
             last_mip: 3,
             name: b"tiny.dds",
-            payload: b"texture-bytes",
+            payload: &TINY_TEXTURE_PAYLOAD,
         }
     }
 }
@@ -1130,13 +1188,14 @@ fn synthetic_texture_archive_reconstructs_dx10_dds_header() {
     assert_eq!(u32::from_le_bytes(data[128..132].try_into().unwrap()), 98);
     assert_eq!(u32::from_le_bytes(data[132..136].try_into().unwrap()), 3);
     assert_eq!(u32::from_le_bytes(data[140..144].try_into().unwrap()), 1);
-    assert_eq!(&data[148..], b"texture-bytes");
+    assert_eq!(&data[148..], TINY_TEXTURE_PAYLOAD);
 }
 
 #[test]
 fn synthetic_cubemap_sets_dds_cube_metadata() {
     let bytes = tiny_texture_archive(TinyTextureOptions {
         flags: 1,
+        payload: &TINY_CUBEMAP_PAYLOAD,
         ..TinyTextureOptions::default()
     });
     let archive = Archive::from_slice(&bytes).unwrap();
@@ -1156,10 +1215,63 @@ fn rejects_zero_sized_texture_during_extraction() {
         width: 0,
         ..TinyTextureOptions::default()
     });
-    let archive = Archive::from_slice(&bytes).unwrap();
     assert!(matches!(
-        archive.read_file("tiny.dds"),
+        Archive::from_slice(&bytes),
         Err(Error::Dds("zero-sized texture"))
+    ));
+}
+
+#[test]
+fn rejects_zero_mip_count_texture_during_parse() {
+    let bytes = tiny_texture_archive(TinyTextureOptions {
+        mip_count: 0,
+        ..TinyTextureOptions::default()
+    });
+    assert!(matches!(
+        Archive::from_slice(&bytes),
+        Err(Error::Dds("zero mip count"))
+    ));
+}
+
+#[test]
+fn rejects_dx10_texture_payload_size_mismatch_during_parse() {
+    let bytes = tiny_texture_archive(TinyTextureOptions {
+        payload: b"short",
+        ..TinyTextureOptions::default()
+    });
+    assert!(matches!(
+        Archive::from_slice(&bytes),
+        Err(Error::Dds("DDS payload size does not match metadata"))
+    ));
+}
+
+#[test]
+fn rejects_invalid_dx10_texture_mip_ranges_during_parse() {
+    for (first_mip, last_mip) in [(3, 0), (0, 4)] {
+        let bytes = tiny_texture_archive(TinyTextureOptions {
+            first_mip,
+            last_mip,
+            ..TinyTextureOptions::default()
+        });
+        assert!(matches!(
+            Archive::from_slice(&bytes),
+            Err(Error::Dds("invalid BA2 texture mip range"))
+        ));
+    }
+}
+
+#[test]
+fn rejects_missing_dx10_texture_mip_range_during_parse() {
+    let payload = [0xef; 176];
+    let bytes = tiny_texture_archive(TinyTextureOptions {
+        first_mip: 0,
+        last_mip: 2,
+        payload: &payload,
+        ..TinyTextureOptions::default()
+    });
+    assert!(matches!(
+        Archive::from_slice(&bytes),
+        Err(Error::Dds("missing BA2 texture mip range"))
     ));
 }
 
@@ -1169,13 +1281,10 @@ fn rejects_unsupported_dxgi_format_without_partial_output() {
         format: 255,
         ..TinyTextureOptions::default()
     });
-    let archive = Archive::from_slice(&bytes).unwrap();
-    let mut out = b"prefix".to_vec();
     assert!(matches!(
-        archive.read_entry_into(&archive.entries()[0], &mut out),
+        Archive::from_slice(&bytes),
         Err(Error::Dds("unsupported DXGI format"))
     ));
-    assert_eq!(out, b"prefix");
 }
 
 #[test]
@@ -1207,10 +1316,12 @@ fn parses_gnmf_metadata_but_does_not_extract_payload() {
 
 #[test]
 fn block_compressed_dds_size_uses_rounded_blocks() {
+    let payload = [0x71; 56];
     let bytes = tiny_texture_archive(TinyTextureOptions {
         width: 5,
         height: 5,
         format: 71,
+        payload: &payload,
         ..TinyTextureOptions::default()
     });
     let archive = Archive::from_slice(&bytes).unwrap();

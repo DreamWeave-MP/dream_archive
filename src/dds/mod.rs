@@ -139,6 +139,9 @@ pub(crate) fn write_dds_header(out: &mut Vec<u8>, header: DdsHeader) -> Result<(
     if width == 0 || height == 0 {
         return Err(Error::Dds("zero-sized texture"));
     }
+    if header.mip_count == 0 {
+        return Err(Error::Dds("zero mip count"));
+    }
 
     let mut fields = base_fields(header);
     apply_format(&mut fields, header.format, width, height)?;
@@ -162,6 +165,20 @@ pub(crate) fn validate_texture_header(header: TextureHeader) -> Result<()> {
 
 pub(crate) fn validate_texture_payload_size(header: TextureHeader, actual: usize) -> Result<()> {
     validate_payload_size(header, actual)
+}
+
+pub(crate) fn validate_texture_mip_payload_size(
+    header: TextureHeader,
+    first_mip: u16,
+    last_mip: u16,
+    actual: usize,
+) -> Result<()> {
+    let expected = texture_mip_payload_size(header, first_mip, last_mip)?;
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(Error::Dds("DDS payload size does not match metadata"))
+    }
 }
 
 pub(crate) fn parse_dds_for_dx10(bytes: &[u8]) -> Result<DdsTexture<'_>> {
@@ -378,6 +395,13 @@ fn validate_payload_size(header: TextureHeader, actual: usize) -> Result<()> {
 }
 
 fn texture_payload_size(header: TextureHeader) -> Result<usize> {
+    if header.mip_count == 0 {
+        return Err(Error::Dds("zero mip count"));
+    }
+    texture_mip_payload_size(header, 0, u16::from(header.mip_count.saturating_sub(1)))
+}
+
+fn texture_mip_payload_size(header: TextureHeader, first_mip: u16, last_mip: u16) -> Result<usize> {
     let layout = texture_layout(header.format)?;
     let faces = if header.flags & 1 != 0 {
         6usize
@@ -385,9 +409,13 @@ fn texture_payload_size(header: TextureHeader) -> Result<usize> {
         1usize
     };
     let mut size = 0usize;
-    for mip in 0..header.mip_count {
-        let width: usize = (u32::from(header.width) >> mip).max(1).try_into()?;
-        let height: usize = (u32::from(header.height) >> mip).max(1).try_into()?;
+    for mip in first_mip..=last_mip {
+        let width: usize = (u32::from(header.width) >> u32::from(mip))
+            .max(1)
+            .try_into()?;
+        let height: usize = (u32::from(header.height) >> u32::from(mip))
+            .max(1)
+            .try_into()?;
         let face_size = match layout {
             TextureLayout::Block { bytes_per_block } => width
                 .div_ceil(4)
