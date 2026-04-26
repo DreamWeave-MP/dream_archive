@@ -465,6 +465,7 @@ impl<'a> Cursor<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flate2::{Compression, write::ZlibEncoder};
     use std::{io::Read as _, path::PathBuf};
     use walkdir::WalkDir;
 
@@ -495,6 +496,7 @@ mod tests {
         chunk_packed_size: u32,
         chunk_size: u32,
         sentinel: u32,
+        payload: &'a [u8],
     }
 
     impl Default for TinyArchiveOptions<'_> {
@@ -509,6 +511,7 @@ mod tests {
                 chunk_packed_size: 0,
                 chunk_size: 5,
                 sentinel: CHUNK_SENTINEL,
+                payload: b"hello",
             }
         }
     }
@@ -547,8 +550,14 @@ mod tests {
             push_u16(&mut bytes, name.len().try_into().unwrap());
             bytes.extend_from_slice(name);
         }
-        bytes.extend_from_slice(b"hello");
+        bytes.extend_from_slice(options.payload);
         bytes
+    }
+
+    fn zlib_compress(bytes: &[u8]) -> Vec<u8> {
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        std::io::Write::write_all(&mut encoder, bytes).unwrap();
+        encoder.finish().unwrap()
     }
 
     #[test]
@@ -839,5 +848,87 @@ mod tests {
         });
         let archive = Archive::read(&bytes).unwrap();
         assert_eq!(archive.options().compression_format, CompressionFormat::LZ4);
+    }
+
+    #[test]
+    fn extracts_synthetic_zlib_chunk() {
+        let payload = zlib_compress(b"compressed hello");
+        let bytes = tiny_archive(TinyArchiveOptions {
+            string_table_offset: 0,
+            name: None,
+            chunk_offset: 60,
+            chunk_packed_size: payload.len().try_into().unwrap(),
+            chunk_size: 16,
+            payload: &payload,
+            ..TinyArchiveOptions::default()
+        });
+        let archive = Archive::read(&bytes).unwrap();
+        let data = archive.read_entry(&archive.entries()[0]).unwrap();
+        assert_eq!(data, b"compressed hello");
+    }
+
+    #[test]
+    fn detects_zlib_decompression_size_mismatch() {
+        let payload = zlib_compress(b"short");
+        let bytes = tiny_archive(TinyArchiveOptions {
+            string_table_offset: 0,
+            name: None,
+            chunk_offset: 60,
+            chunk_packed_size: payload.len().try_into().unwrap(),
+            chunk_size: 99,
+            payload: &payload,
+            ..TinyArchiveOptions::default()
+        });
+        let archive = Archive::read(&bytes).unwrap();
+        assert!(matches!(
+            archive.read_entry(&archive.entries()[0]),
+            Err(Error::DecompressionSizeMismatch {
+                expected: 99,
+                actual: 5
+            })
+        ));
+    }
+
+    #[test]
+    fn extracts_synthetic_lz4_chunk() {
+        let payload = lz4_flex::block::compress(b"lz4 says hello");
+        let bytes = tiny_archive(TinyArchiveOptions {
+            version: 3,
+            compression_code: Some(3),
+            string_table_offset: 0,
+            name: None,
+            chunk_offset: 72,
+            chunk_packed_size: payload.len().try_into().unwrap(),
+            chunk_size: 14,
+            payload: &payload,
+            ..TinyArchiveOptions::default()
+        });
+        let archive = Archive::read(&bytes).unwrap();
+        let data = archive.read_entry(&archive.entries()[0]).unwrap();
+        assert_eq!(data, b"lz4 says hello");
+    }
+
+    #[test]
+    fn detects_lz4_decompression_size_mismatch() {
+        let payload = lz4_flex::block::compress(b"lz4 short");
+        let bytes = tiny_archive(TinyArchiveOptions {
+            version: 3,
+            compression_code: Some(3),
+            string_table_offset: 0,
+            name: None,
+            chunk_offset: 72,
+            chunk_packed_size: payload.len().try_into().unwrap(),
+            chunk_size: 99,
+            payload: &payload,
+            ..TinyArchiveOptions::default()
+        });
+        let archive = Archive::read(&bytes).unwrap();
+        assert!(matches!(
+            archive.read_entry(&archive.entries()[0]),
+            Err(Error::DecompressionSizeMismatch {
+                expected: 99,
+                actual: 9
+            })
+        ));
     }
 }
