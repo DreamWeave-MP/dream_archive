@@ -2,7 +2,7 @@
 
 use dream_archive::bsa::{
     FilenameEncoding,
-    tes4::{Archive, ArchiveVersion, Error, hash_directory, hash_file},
+    tes4::{Archive, ArchiveFlags, ArchiveVersion, Builder, Error, hash_directory, hash_file},
 };
 use flate2::{Compression, write::ZlibEncoder};
 use lz4_flex::frame::FrameEncoder;
@@ -398,6 +398,122 @@ fn extracts_tes4_archive_to_decoded_filesystem_paths() {
         b"payload"
     );
     std::fs::remove_dir_all(out).unwrap();
+}
+
+#[test]
+fn writes_tes4_archive_from_bytes() {
+    let mut builder = Builder::new();
+    builder.add_bytes("Meshes/Foo.NIF", b"mesh").unwrap();
+    builder.add_bytes("textures/bar.dds", b"texture").unwrap();
+
+    let bytes = builder.into_vec().unwrap();
+    let archive = Archive::read(&bytes).unwrap();
+
+    assert_eq!(archive.info().version, ArchiveVersion::v104);
+    assert_eq!(archive.len(), 2);
+    assert_eq!(
+        archive.read_file("meshes/foo.nif").unwrap().unwrap(),
+        b"mesh"
+    );
+    assert_eq!(
+        archive.read_file("textures/bar.dds").unwrap().unwrap(),
+        b"texture"
+    );
+    assert!(
+        archive
+            .info()
+            .archive_flags
+            .contains(ArchiveFlags::DIRECTORY_STRINGS)
+    );
+    assert!(
+        archive
+            .info()
+            .archive_flags
+            .contains(ArchiveFlags::FILE_STRINGS)
+    );
+}
+
+#[test]
+fn writes_tes4_v103_archive_from_bytes() {
+    let mut builder = Builder::new();
+    builder.set_version(ArchiveVersion::v103);
+    builder.add_bytes("data/file.txt", b"payload").unwrap();
+
+    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+
+    assert_eq!(archive.info().version, ArchiveVersion::v103);
+    assert_eq!(
+        archive.read_file("data/file.txt").unwrap().unwrap(),
+        b"payload"
+    );
+}
+
+#[test]
+fn writes_tes4_v105_archive_from_bytes() {
+    let mut builder = Builder::new();
+    builder.set_version(ArchiveVersion::v105);
+    builder.add_bytes("data/file.txt", b"payload").unwrap();
+
+    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+
+    assert_eq!(archive.info().version, ArchiveVersion::v105);
+    assert_eq!(
+        archive.read_file("data/file.txt").unwrap().unwrap(),
+        b"payload"
+    );
+    assert!(
+        !archive
+            .info()
+            .archive_flags
+            .contains(ArchiveFlags::COMPRESSED)
+    );
+}
+
+#[test]
+fn writes_tes4_root_folder_archive() {
+    let mut builder = Builder::new();
+    builder.add_bytes("file.txt", b"hello").unwrap();
+
+    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+
+    assert_eq!(archive.entries()[0].folder().unwrap(), "");
+    assert_eq!(archive.entries()[0].name().unwrap(), "file.txt");
+    assert_eq!(archive.read_file("file.txt").unwrap().unwrap(), b"hello");
+}
+
+#[test]
+fn tes4_writer_output_is_deterministic() {
+    let mut first = Builder::new();
+    first.add_bytes("b.txt", b"b").unwrap();
+    first.add_bytes("a.txt", b"a").unwrap();
+
+    let mut second = Builder::new();
+    second.add_bytes("a.txt", b"a").unwrap();
+    second.add_bytes("b.txt", b"b").unwrap();
+
+    assert_eq!(first.into_vec().unwrap(), second.into_vec().unwrap());
+}
+
+#[test]
+fn tes4_writer_rejects_duplicate_normalized_paths() {
+    let mut builder = Builder::new();
+    builder.add_bytes("Meshes/Foo.NIF", b"mesh").unwrap();
+
+    assert!(matches!(
+        builder.add_bytes("meshes\\foo.nif", b"other"),
+        Err(Error::DuplicatePath)
+    ));
+}
+
+#[test]
+fn tes4_writer_rejects_unsafe_paths() {
+    for path in ["", ".", "../evil.txt", "bad:name.txt", "bad\0name.txt"] {
+        let mut builder = Builder::new();
+        assert!(matches!(
+            builder.add_bytes(path.as_bytes(), b"payload"),
+            Err(Error::InvalidArchivePath)
+        ));
+    }
 }
 
 #[test]

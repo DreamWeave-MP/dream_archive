@@ -1,0 +1,396 @@
+use super::{
+    ArchiveFlags, ArchiveTypes, ArchiveVersion, Error, HashFields, Result, hash_directory,
+    hash_file,
+};
+use bstr::BString;
+use std::{
+    fs::File,
+    io::{BufWriter, Write},
+    path::Path,
+};
+
+const MAGIC: u32 = u32::from_le_bytes(*b"BSA\0");
+const HEADER_SIZE: u32 = 0x24;
+const FOLDER_RECORD_SIZE_V104: usize = 16;
+const FOLDER_RECORD_SIZE_V105: usize = 24;
+const FILE_RECORD_SIZE: usize = 16;
+
+/// Builder for uncompressed, string-backed TES4-family BSA archives.
+///
+/// This intentionally writes the boring shape first: directory strings and file
+/// strings are present, file data is uncompressed, and output order is
+/// deterministic by TES4 hashes. Compression, embedded names, and hash-only
+/// output are separate features, not flags to accidentally trip over.
+#[derive(Clone, Debug)]
+pub struct Builder {
+    version: ArchiveVersion,
+    archive_types: ArchiveTypes,
+    entries: Vec<BuilderEntry>,
+}
+
+#[derive(Clone, Debug)]
+struct BuilderEntry {
+    folder: BString,
+    name: BString,
+    folder_hash: HashFields,
+    file_hash: HashFields,
+    bytes: Vec<u8>,
+}
+
+#[derive(Clone, Copy)]
+struct SortedFolder<'a> {
+    name: &'a [u8],
+    hash: HashFields,
+    files_start: usize,
+    files_end: usize,
+}
+
+impl Default for Builder {
+    fn default() -> Self {
+        Self {
+            version: ArchiveVersion::v104,
+            archive_types: ArchiveTypes::MISC,
+            entries: Vec::new(),
+        }
+    }
+}
+
+impl Builder {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn version(&self) -> ArchiveVersion {
+        self.version
+    }
+
+    pub fn set_version(&mut self, version: ArchiveVersion) -> &mut Self {
+        self.version = version;
+        self
+    }
+
+    #[must_use]
+    pub fn archive_types(&self) -> ArchiveTypes {
+        self.archive_types
+    }
+
+    pub fn set_archive_types(&mut self, archive_types: ArchiveTypes) -> &mut Self {
+        self.archive_types = archive_types;
+        self
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Add an owned copy of one uncompressed file payload.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path can not be represented safely, is a
+    /// duplicate after TES4 archive normalization, or allocation fails.
+    pub fn add_bytes(&mut self, path: impl AsRef<[u8]>, bytes: impl AsRef<[u8]>) -> Result<()> {
+        let (folder, name) = normalize_stored_path(path.as_ref())?;
+        if self
+            .entries
+            .iter()
+            .any(|entry| entry.folder == folder && entry.name == name)
+        {
+            return Err(Error::DuplicatePath);
+        }
+        let mut owned = Vec::new();
+        owned.try_reserve_exact(bytes.as_ref().len())?;
+        owned.extend_from_slice(bytes.as_ref());
+        let folder_hash = hash_directory(&folder).0;
+        let file_hash = hash_file(&name).0;
+        self.entries.push(BuilderEntry {
+            folder,
+            name,
+            folder_hash,
+            file_hash,
+            bytes: owned,
+        });
+        Ok(())
+    }
+
+    /// Write the archive to a filesystem path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if creating/writing the file fails or archive integer
+    /// fields overflow their TES4 on-disk sizes.
+    pub fn write_path(&self, path: impl AsRef<Path>) -> Result<()> {
+        let file = File::create(path)?;
+        self.write_to(BufWriter::new(file))
+    }
+
+    /// Write the archive to a byte vector.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if archive integer fields overflow their TES4 on-disk
+    /// sizes or output allocation fails.
+    pub fn into_vec(&self) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        out.try_reserve_exact(self.archive_size_hint()?)?;
+        self.write_to(&mut out)?;
+        Ok(out)
+    }
+
+    /// Write the archive to `out`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing fails or archive integer fields overflow
+    /// their TES4 on-disk sizes.
+    pub fn write_to(&self, mut out: impl Write) -> Result<()> {
+        let entries = self.sorted_entries();
+        let folders = sorted_folders(&entries);
+        let folder_names_len = folder_names_len(&folders)?;
+        let file_names_len = file_names_len(&entries)?;
+        let data_offset = data_offset(
+            entries.len(),
+            folders.len(),
+            folder_names_len,
+            file_names_len,
+            self.version,
+        )?;
+
+        write_u32(&mut out, MAGIC)?;
+        write_u32(&mut out, self.version as u32)?;
+        write_u32(&mut out, HEADER_SIZE)?;
+        write_u32(
+            &mut out,
+            ArchiveFlags::DIRECTORY_STRINGS.bits() | ArchiveFlags::FILE_STRINGS.bits(),
+        )?;
+        write_u32(&mut out, folders.len().try_into()?)?;
+        write_u32(&mut out, entries.len().try_into()?)?;
+        write_u32(&mut out, folder_names_len.try_into()?)?;
+        write_u32(&mut out, file_names_len.try_into()?)?;
+        write_u16(&mut out, self.archive_types.bits())?;
+        write_u16(&mut out, 0)?;
+
+        let mut folder_block_offset = usize::try_from(HEADER_SIZE)?
+            .checked_add(folder_record_size(self.version) * folders.len())
+            .ok_or(Error::OutOfBounds)?;
+        for folder in &folders {
+            write_folder_record(&mut out, self.version, folder, folder_block_offset)?;
+            folder_block_offset = folder_block_offset
+                .checked_add(1 + folder.name.len() + 1)
+                .and_then(|offset| {
+                    offset.checked_add(FILE_RECORD_SIZE * (folder.files_end - folder.files_start))
+                })
+                .ok_or(Error::OutOfBounds)?;
+        }
+
+        let mut payload_offset: u32 = data_offset.try_into()?;
+        for folder in &folders {
+            write_bzstring(&mut out, folder.name)?;
+            for entry in &entries[folder.files_start..folder.files_end] {
+                write_hash(&mut out, entry.file_hash)?;
+                write_u32(&mut out, entry.bytes.len().try_into()?)?;
+                write_u32(&mut out, payload_offset)?;
+                payload_offset = payload_offset
+                    .checked_add(entry.bytes.len().try_into()?)
+                    .ok_or(Error::OutOfBounds)?;
+            }
+        }
+
+        for entry in &entries {
+            out.write_all(&entry.name)?;
+            out.write_all(&[0])?;
+        }
+        for entry in &entries {
+            out.write_all(&entry.bytes)?;
+        }
+        Ok(())
+    }
+
+    fn sorted_entries(&self) -> Vec<&BuilderEntry> {
+        let mut entries: Vec<_> = self.entries.iter().collect();
+        entries.sort_by(|left, right| {
+            left.folder_hash
+                .numeric()
+                .cmp(&right.folder_hash.numeric())
+                .then_with(|| left.folder.cmp(&right.folder))
+                .then_with(|| left.file_hash.numeric().cmp(&right.file_hash.numeric()))
+                .then_with(|| left.name.cmp(&right.name))
+        });
+        entries
+    }
+
+    fn archive_size_hint(&self) -> Result<usize> {
+        let entries = self.sorted_entries();
+        let folders = sorted_folders(&entries);
+        let folder_names_len = folder_names_len(&folders)?;
+        let file_names_len = file_names_len(&entries)?;
+        data_offset(
+            entries.len(),
+            folders.len(),
+            folder_names_len,
+            file_names_len,
+            self.version,
+        )?
+        .checked_add(
+            entries
+                .iter()
+                .try_fold(0usize, |sum, entry| sum.checked_add(entry.bytes.len()))
+                .ok_or(Error::OutOfBounds)?,
+        )
+        .ok_or(Error::OutOfBounds)
+    }
+}
+
+fn sorted_folders<'a>(entries: &[&'a BuilderEntry]) -> Vec<SortedFolder<'a>> {
+    let mut folders = Vec::new();
+    let mut start = 0;
+    while start < entries.len() {
+        let folder = entries[start].folder.as_slice();
+        let hash = entries[start].folder_hash;
+        let mut end = start + 1;
+        while end < entries.len() && entries[end].folder.as_slice() == folder {
+            end += 1;
+        }
+        folders.push(SortedFolder {
+            name: folder,
+            hash,
+            files_start: start,
+            files_end: end,
+        });
+        start = end;
+    }
+    folders
+}
+
+fn folder_names_len(folders: &[SortedFolder<'_>]) -> Result<usize> {
+    folders.iter().try_fold(0usize, |sum, folder| {
+        sum.checked_add(folder.name.len() + 1)
+            .ok_or(Error::OutOfBounds)
+    })
+}
+
+fn file_names_len(entries: &[&BuilderEntry]) -> Result<usize> {
+    entries.iter().try_fold(0usize, |sum, entry| {
+        sum.checked_add(entry.name.len() + 1)
+            .ok_or(Error::OutOfBounds)
+    })
+}
+
+fn data_offset(
+    file_count: usize,
+    folder_count: usize,
+    folder_names_len: usize,
+    file_names_len: usize,
+    version: ArchiveVersion,
+) -> Result<usize> {
+    usize::try_from(HEADER_SIZE)?
+        .checked_add(folder_record_size(version) * folder_count)
+        .and_then(|offset| offset.checked_add(folder_count + folder_names_len))
+        .and_then(|offset| offset.checked_add(FILE_RECORD_SIZE * file_count))
+        .and_then(|offset| offset.checked_add(file_names_len))
+        .ok_or(Error::OutOfBounds)
+}
+
+fn folder_record_size(version: ArchiveVersion) -> usize {
+    match version {
+        ArchiveVersion::v103 | ArchiveVersion::v104 => FOLDER_RECORD_SIZE_V104,
+        ArchiveVersion::v105 => FOLDER_RECORD_SIZE_V105,
+    }
+}
+
+fn write_folder_record(
+    out: &mut impl Write,
+    version: ArchiveVersion,
+    folder: &SortedFolder<'_>,
+    file_records_offset: usize,
+) -> Result<()> {
+    write_hash(out, folder.hash)?;
+    write_u32(out, (folder.files_end - folder.files_start).try_into()?)?;
+    match version {
+        ArchiveVersion::v103 | ArchiveVersion::v104 => {
+            write_u32(out, file_records_offset.try_into()?)?;
+        }
+        ArchiveVersion::v105 => {
+            write_u32(out, 0)?;
+            write_u64(out, file_records_offset.try_into()?)?;
+        }
+    }
+    Ok(())
+}
+
+fn normalize_stored_path(path: &[u8]) -> Result<(BString, BString)> {
+    if path.is_empty() {
+        return Err(Error::InvalidArchivePath);
+    }
+    let mut components = Vec::new();
+    for component in path.split(|byte| matches!(*byte, b'/' | b'\\')) {
+        if component.is_empty() || component == b"." {
+            continue;
+        }
+        if component == b".." || component.contains(&0) || component.contains(&b':') {
+            return Err(Error::InvalidArchivePath);
+        }
+        components.push(component);
+    }
+    let Some(name) = components.pop() else {
+        return Err(Error::InvalidArchivePath);
+    };
+    if name.is_empty() {
+        return Err(Error::InvalidArchivePath);
+    }
+    let mut folder = Vec::new();
+    folder.try_reserve_exact(path.len())?;
+    for (index, component) in components.iter().enumerate() {
+        if index != 0 {
+            folder.push(b'\\');
+        }
+        extend_lowercase(&mut folder, component);
+    }
+    let mut name_out = Vec::new();
+    name_out.try_reserve_exact(name.len())?;
+    extend_lowercase(&mut name_out, name);
+    Ok((BString::from(folder), BString::from(name_out)))
+}
+
+fn extend_lowercase(out: &mut Vec<u8>, bytes: &[u8]) {
+    out.extend(bytes.iter().copied().map(|byte| match byte {
+        b'A'..=b'Z' => byte + 32,
+        _ => byte,
+    }));
+}
+
+fn write_bzstring(out: &mut impl Write, bytes: &[u8]) -> Result<()> {
+    let len = bytes.len().checked_add(1).ok_or(Error::OutOfBounds)?;
+    out.write_all(&[len.try_into()?])?;
+    out.write_all(bytes)?;
+    out.write_all(&[0])?;
+    Ok(())
+}
+
+fn write_hash(out: &mut impl Write, hash: HashFields) -> Result<()> {
+    out.write_all(&hash.numeric().to_le_bytes())?;
+    Ok(())
+}
+
+fn write_u16(out: &mut impl Write, value: u16) -> Result<()> {
+    out.write_all(&value.to_le_bytes())?;
+    Ok(())
+}
+
+fn write_u32(out: &mut impl Write, value: u32) -> Result<()> {
+    out.write_all(&value.to_le_bytes())?;
+    Ok(())
+}
+
+fn write_u64(out: &mut impl Write, value: u64) -> Result<()> {
+    out.write_all(&value.to_le_bytes())?;
+    Ok(())
+}
