@@ -18,7 +18,7 @@ fn parses_tes4_v105_index_shape() {
     let paths: Vec<_> = archive
         .entries()
         .iter()
-        .map(|entry| entry.path().to_string())
+        .map(|entry| entry.path().unwrap().to_string())
         .collect();
     assert_eq!(paths, ["preview.png", "license.txt"]);
 }
@@ -32,7 +32,7 @@ fn extracts_uncompressed_tes4_file() {
 
     assert_eq!(archive.info().version, ArchiveVersion::v103);
     assert_eq!(archive.len(), 1);
-    assert_eq!(archive.entries()[0].path(), "misc\\example.txt");
+    assert_eq!(archive.entries()[0].path().unwrap(), "misc\\example.txt");
     assert_eq!(
         archive.read_file("MISC/example.TXT").unwrap().unwrap(),
         b"hello world!\r\n"
@@ -96,12 +96,12 @@ fn parses_tes4_header_metadata() {
     let paths: Vec<_> = archive
         .entries()
         .iter()
-        .map(|entry| entry.path().to_string())
+        .map(|entry| entry.path().unwrap().to_string())
         .collect();
     assert_eq!(paths, ["preview.png", "license.txt"]);
     let preview = archive.get("PREVIEW.PNG").unwrap();
-    assert_eq!(preview.name(), "preview.png");
-    assert_eq!(preview.folder(), "");
+    assert_eq!(preview.name().unwrap(), "preview.png");
+    assert_eq!(preview.folder().unwrap(), "");
     assert!(preview.file().is_compressed(info.archive_flags));
     assert_eq!(preview.file().data_offset, 111);
 }

@@ -1,4 +1,4 @@
-use super::{Error, Result, parser};
+use super::{Error, HashFields, Result, hash_directory, hash_file, parser};
 use crate::bsa::normalize_lookup_path;
 use crate::{
     Copied,
@@ -37,27 +37,39 @@ pub struct ArchiveInfo {
 /// [`Archive::read_file`] is case-insensitive for ASCII and treats `/` as `\`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Entry {
-    path: BString,
-    folder: BString,
-    name: BString,
-    lookup_path: BString,
+    path: Option<BString>,
+    folder: Option<BString>,
+    name: Option<BString>,
+    lookup_path: Option<BString>,
+    folder_hash: HashFields,
+    file_hash: HashFields,
     record: FileRecord,
 }
 
 impl Entry {
     #[must_use]
-    pub fn path(&self) -> &BStr {
-        self.path.as_ref()
+    pub fn path(&self) -> Option<&BStr> {
+        self.path.as_ref().map(AsRef::as_ref)
     }
 
     #[must_use]
-    pub fn folder(&self) -> &BStr {
-        self.folder.as_ref()
+    pub fn folder(&self) -> Option<&BStr> {
+        self.folder.as_ref().map(AsRef::as_ref)
     }
 
     #[must_use]
-    pub fn name(&self) -> &BStr {
-        self.name.as_ref()
+    pub fn name(&self) -> Option<&BStr> {
+        self.name.as_ref().map(AsRef::as_ref)
+    }
+
+    #[must_use]
+    pub fn folder_hash(&self) -> HashFields {
+        self.folder_hash
+    }
+
+    #[must_use]
+    pub fn file_hash(&self) -> HashFields {
+        self.file_hash
     }
 
     #[must_use]
@@ -160,6 +172,7 @@ pub struct Archive {
     info: ArchiveInfo,
     entries: Vec<Entry>,
     lookup: HashMap<BString, usize>,
+    hash_lookup: HashMap<(u64, u64), usize>,
 }
 
 impl Archive {
@@ -220,6 +233,15 @@ impl Archive {
         let normalized = normalize_lookup_path(path.as_ref());
         self.lookup
             .get(normalized.as_slice())
+            .or_else(|| self.hash_lookup.get(&path_hash(path.as_ref())))
+            .map(|&index| &self.entries[index])
+    }
+
+    /// Get an entry by TES4 folder and file hashes.
+    #[must_use]
+    pub fn get_by_hash(&self, folder_hash: HashFields, file_hash: HashFields) -> Option<&Entry> {
+        self.hash_lookup
+            .get(&(folder_hash.numeric(), file_hash.numeric()))
             .map(|&index| &self.entries[index])
     }
 
@@ -331,7 +353,8 @@ impl Archive {
         let mut path = PathBuf::new();
         let mut last_parent = PathBuf::new();
         for entry in &self.entries {
-            output_path_into(&mut path, target_dir, entry.path())?;
+            let path_bytes = entry.path().ok_or(Error::ArchivePathsUnavailable)?;
+            output_path_into(&mut path, target_dir, path_bytes)?;
             ensure_parent_dir(&path, &mut last_parent)?;
             let file = File::create(&path)?;
             written += self.extract_entry(entry, BufWriter::new(file))?;
@@ -362,7 +385,8 @@ impl Archive {
         paths.try_reserve_exact(self.entries.len())?;
         for entry in &self.entries {
             let mut path = PathBuf::new();
-            output_path_into(&mut path, target_dir, entry.path())?;
+            let path_bytes = entry.path().ok_or(Error::ArchivePathsUnavailable)?;
+            output_path_into(&mut path, target_dir, path_bytes)?;
             paths.push(path);
         }
         Ok(paths)
@@ -370,14 +394,21 @@ impl Archive {
 
     pub(super) fn from_parts(storage: Storage, info: ArchiveInfo, entries: Vec<Entry>) -> Self {
         let mut lookup = HashMap::new();
+        let mut hash_lookup = HashMap::new();
         for (index, entry) in entries.iter().enumerate() {
-            lookup.entry(entry.lookup_path.clone()).or_insert(index);
+            if let Some(lookup_path) = &entry.lookup_path {
+                lookup.entry(lookup_path.clone()).or_insert(index);
+            }
+            hash_lookup
+                .entry((entry.folder_hash.numeric(), entry.file_hash.numeric()))
+                .or_insert(index);
         }
         Self {
             storage,
             info,
             entries,
             lookup,
+            hash_lookup,
         }
     }
 
@@ -565,17 +596,46 @@ fn read_decompressed(
 }
 
 impl Entry {
-    pub(super) fn new(folder: BString, name: BString, record: FileRecord) -> Self {
-        let path = join_path(&folder, &name);
-        let lookup_path = BString::from(normalize_lookup_path(&path));
+    pub(super) fn new(
+        folder: Option<BString>,
+        name: Option<BString>,
+        folder_hash: HashFields,
+        file_hash: HashFields,
+        record: FileRecord,
+    ) -> Self {
+        let path = folder
+            .as_ref()
+            .zip(name.as_ref())
+            .map(|(folder, name)| join_path(folder, name));
+        let lookup_path = path
+            .as_ref()
+            .map(|path| BString::from(normalize_lookup_path(path)));
         Self {
             path,
             folder,
             name,
             lookup_path,
+            folder_hash,
+            file_hash,
             record,
         }
     }
+}
+
+fn path_hash(path: &[u8]) -> (u64, u64) {
+    let folder_end = path
+        .iter()
+        .rposition(|byte| matches!(*byte, b'/' | b'\\'))
+        .unwrap_or(0);
+    let folder = if folder_end == 0 {
+        &[][..]
+    } else {
+        &path[..folder_end]
+    };
+    (
+        hash_directory(folder).0.numeric(),
+        hash_file(path).0.numeric(),
+    )
 }
 
 fn join_path(folder: &[u8], name: &[u8]) -> BString {

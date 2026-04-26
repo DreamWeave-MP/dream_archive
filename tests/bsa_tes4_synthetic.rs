@@ -1,6 +1,6 @@
 #![cfg(feature = "bsa-tes4")]
 
-use dream_archive::bsa::tes4::{Archive, ArchiveVersion, Error};
+use dream_archive::bsa::tes4::{Archive, ArchiveVersion, Error, hash_directory, hash_file};
 use flate2::{Compression, write::ZlibEncoder};
 use lz4_flex::frame::FrameEncoder;
 use std::path::PathBuf;
@@ -13,6 +13,10 @@ fn push_u16(out: &mut Vec<u8>, value: u16) {
 }
 
 fn push_u32(out: &mut Vec<u8>, value: u32) {
+    out.extend_from_slice(&value.to_le_bytes());
+}
+
+fn push_u64(out: &mut Vec<u8>, value: u64) {
     out.extend_from_slice(&value.to_le_bytes());
 }
 
@@ -90,7 +94,7 @@ fn tiny_tes4_index_with_version_names_and_payload(
     push_u32(&mut bytes, file_names_len);
     push_u16(&mut bytes, 1 << 8);
     push_u16(&mut bytes, 0);
-    bytes.extend_from_slice(&[0; 8]);
+    push_u64(&mut bytes, hash_directory(folder).0.numeric());
     push_u32(&mut bytes, 1);
     if version == 105 {
         push_u32(&mut bytes, 0);
@@ -102,11 +106,36 @@ fn tiny_tes4_index_with_version_names_and_payload(
     bytes.push(folder_names_len.try_into().unwrap());
     bytes.extend_from_slice(folder);
     bytes.push(0);
-    bytes.extend_from_slice(&[0; 8]);
+    push_u64(&mut bytes, hash_file(name).0.numeric());
     push_u32(&mut bytes, payload.len().try_into().unwrap());
     push_u32(&mut bytes, data_offset);
     bytes.extend_from_slice(name);
     bytes.push(0);
+    bytes.extend_from_slice(payload);
+    bytes
+}
+
+fn tiny_hash_only_tes4_index() -> Vec<u8> {
+    let payload = b"payload";
+    let folder_record_offset = HEADER_SIZE + 16;
+    let data_offset = folder_record_offset + 16;
+    let mut bytes = Vec::new();
+    push_u32(&mut bytes, MAGIC);
+    push_u32(&mut bytes, 104);
+    push_u32(&mut bytes, HEADER_SIZE);
+    push_u32(&mut bytes, 0);
+    push_u32(&mut bytes, 1);
+    push_u32(&mut bytes, 1);
+    push_u32(&mut bytes, 0);
+    push_u32(&mut bytes, 0);
+    push_u16(&mut bytes, 1 << 8);
+    push_u16(&mut bytes, 0);
+    push_u64(&mut bytes, hash_directory(b"data").0.numeric());
+    push_u32(&mut bytes, 1);
+    push_u32(&mut bytes, folder_record_offset);
+    push_u64(&mut bytes, hash_file(b"file.txt").0.numeric());
+    push_u32(&mut bytes, payload.len().try_into().unwrap());
+    push_u32(&mut bytes, data_offset);
     bytes.extend_from_slice(payload);
     bytes
 }
@@ -176,13 +205,47 @@ fn rejects_tes4_xmem_compression_flag_at_parse_time() {
 fn parses_synthetic_tes4_index() {
     let archive = Archive::read(&tiny_tes4_index()).unwrap();
     let entry = &archive.entries()[0];
-    assert_eq!(entry.path(), "data\\file.txt");
-    assert_eq!(entry.folder(), "data");
-    assert_eq!(entry.name(), "file.txt");
+    assert_eq!(entry.path().unwrap(), "data\\file.txt");
+    assert_eq!(entry.folder().unwrap(), "data");
+    assert_eq!(entry.name().unwrap(), "file.txt");
     assert_eq!(entry.file().stored_size, 7);
     assert_eq!(entry.file().data_offset, 83);
     assert!(archive.get("DATA/file.TXT").is_some());
     assert!(archive.get("/DATA//file.TXT").is_some());
+}
+
+#[test]
+fn parses_hash_only_tes4_index_for_hash_lookup() {
+    let archive = Archive::read(&tiny_hash_only_tes4_index()).unwrap();
+    let entry = &archive.entries()[0];
+
+    assert_eq!(entry.path(), None);
+    assert_eq!(entry.folder(), None);
+    assert_eq!(entry.name(), None);
+    assert_eq!(entry.folder_hash(), hash_directory(b"data").0);
+    assert_eq!(entry.file_hash(), hash_file(b"file.txt").0);
+    assert!(archive.get("data/file.txt").is_some());
+    assert!(
+        archive
+            .get_by_hash(hash_directory(b"data").0, hash_file(b"file.txt").0)
+            .is_some()
+    );
+    assert_eq!(
+        archive.read_file("data/file.txt").unwrap().unwrap(),
+        b"payload"
+    );
+}
+
+#[test]
+fn hash_only_tes4_extract_to_reports_missing_paths() {
+    let archive = Archive::read(&tiny_hash_only_tes4_index()).unwrap();
+    let out = output_dir("tes4-hash-only");
+
+    assert!(matches!(
+        archive.extract_to(&out),
+        Err(Error::ArchivePathsUnavailable)
+    ));
+    assert!(!out.exists());
 }
 
 #[test]
@@ -196,7 +259,10 @@ fn tes4_lookup_uses_openmw_style_path_normalization() {
     ))
     .unwrap();
 
-    assert_eq!(archive.entries()[0].path(), "\\Data//Meshes\\Foo.NIF");
+    assert_eq!(
+        archive.entries()[0].path().unwrap(),
+        "\\Data//Meshes\\Foo.NIF"
+    );
     assert!(archive.contains("data/meshes/foo.nif"));
     assert!(archive.contains("/DATA\\\\MESHES//FOO.NIF"));
     assert_eq!(
@@ -313,30 +379,6 @@ fn rejects_folder_file_count_that_disagrees_with_header() {
 }
 
 #[test]
-fn rejects_archives_without_file_name_strings() {
-    let mut bytes = tiny_tes4_index();
-    write_u32(&mut bytes, 12, 1);
-    assert!(matches!(
-        Archive::read(&bytes),
-        Err(Error::NotImplemented(
-            "TES4 hash-only archives without file name strings"
-        ))
-    ));
-}
-
-#[test]
-fn rejects_archives_without_directory_name_strings() {
-    let mut bytes = tiny_tes4_index();
-    write_u32(&mut bytes, 12, 2);
-    assert!(matches!(
-        Archive::read(&bytes),
-        Err(Error::NotImplemented(
-            "TES4 hash-only archives without directory name strings"
-        ))
-    ));
-}
-
-#[test]
 fn rejects_folder_name_without_trailing_nul() {
     let mut bytes = tiny_tes4_index();
     bytes[57] = b'X';
@@ -375,7 +417,7 @@ fn entry_path_preserves_archive_spelling_while_lookup_normalizes() {
     bytes[53..58].copy_from_slice(b"Data\0");
     bytes[74..83].copy_from_slice(b"File.TXT\0");
     let archive = Archive::read(&bytes).unwrap();
-    assert_eq!(archive.entries()[0].path(), "Data\\File.TXT");
+    assert_eq!(archive.entries()[0].path().unwrap(), "Data\\File.TXT");
     assert!(archive.get("data/file.txt").is_some());
 }
 

@@ -38,6 +38,7 @@ pub enum Error {
     InvalidHeaderSize(u32),
     OutOfBounds,
     InvalidArchivePath,
+    ArchivePathsUnavailable,
     DuplicatePath,
     InvalidFileRecordFlags(u32),
     IntegralTruncation,
@@ -65,6 +66,9 @@ impl fmt::Display for Error {
             }
             Self::OutOfBounds => f.write_str("archive offset or size is out of bounds"),
             Self::InvalidArchivePath => f.write_str("archive path can not be stored safely"),
+            Self::ArchivePathsUnavailable => {
+                f.write_str("archive does not contain filenames required for path-based extraction")
+            }
             Self::DuplicatePath => f.write_str("archive contains duplicate normalized paths"),
             Self::InvalidFileRecordFlags(value) => {
                 write!(f, "invalid or unsupported file record flags: {value:#010x}")

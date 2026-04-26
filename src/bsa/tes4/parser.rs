@@ -1,6 +1,6 @@
 use super::{
     Archive, ArchiveFlags, ArchiveInfo, ArchiveTypes, ArchiveVersion, Entry, Error, FileRecord,
-    Result,
+    HashFields, Result,
 };
 use crate::{read::Cursor, storage::Storage};
 use bstr::BString;
@@ -43,16 +43,6 @@ fn read_header(bytes: &[u8]) -> Result<ArchiveInfo> {
     {
         return Err(Error::NotImplemented("TES4 XMem compression"));
     }
-    if !archive_flags.contains(ArchiveFlags::DIRECTORY_STRINGS) {
-        return Err(Error::NotImplemented(
-            "TES4 hash-only archives without directory name strings",
-        ));
-    }
-    if !archive_flags.contains(ArchiveFlags::FILE_STRINGS) {
-        return Err(Error::NotImplemented(
-            "TES4 hash-only archives without file name strings",
-        ));
-    }
     let folder_count = cursor.u32()?;
     let file_count = cursor.u32()?;
     let folder_names_len = cursor.u32()?;
@@ -74,8 +64,15 @@ fn read_header(bytes: &[u8]) -> Result<ArchiveInfo> {
 
 #[derive(Clone, Copy)]
 struct FolderRecord {
+    hash: HashFields,
     file_count: u32,
     file_records_offset: u64,
+}
+
+#[derive(Clone, Copy)]
+struct ParsedFileRecord {
+    hash: HashFields,
+    record: FileRecord,
 }
 
 fn read_entries(bytes: &[u8], info: ArchiveInfo) -> Result<Vec<Entry>> {
@@ -103,7 +100,11 @@ fn read_entries(bytes: &[u8], info: ArchiveInfo) -> Result<Vec<Entry>> {
         if file_records_offset < cursor.position() || file_records_offset > bytes.len() {
             return Err(Error::OutOfBounds);
         }
-        let folder_name = normalize_folder_name(read_bzstring(&mut cursor)?);
+        let folder_name = if info.archive_flags.contains(ArchiveFlags::DIRECTORY_STRINGS) {
+            Some(normalize_folder_name(read_bzstring(&mut cursor)?))
+        } else {
+            None
+        };
         let mut records = Vec::new();
         records.try_reserve_exact(folder.file_count.try_into()?)?;
         for _ in 0..folder.file_count {
@@ -112,7 +113,7 @@ fn read_entries(bytes: &[u8], info: ArchiveInfo) -> Result<Vec<Entry>> {
         entries.extend(
             records
                 .into_iter()
-                .map(|record| (folder_name.clone(), record)),
+                .map(|record| (folder_name.clone(), folder.hash, record)),
         );
     }
 
@@ -131,7 +132,20 @@ fn read_entries(bytes: &[u8], info: ArchiveInfo) -> Result<Vec<Entry>> {
     );
     let entries = entries
         .into_iter()
-        .map(|(folder, record)| Ok(Entry::new(folder, read_zstring(&mut names)?, record)))
+        .map(|(folder, folder_hash, record)| {
+            let name = if info.archive_flags.contains(ArchiveFlags::FILE_STRINGS) {
+                Some(read_zstring(&mut names)?)
+            } else {
+                None
+            };
+            Ok(Entry::new(
+                folder,
+                name,
+                folder_hash,
+                record.hash,
+                record.record,
+            ))
+        })
         .collect::<Result<Vec<_>>>()?;
     if names.position() != file_names_len {
         return Err(Error::OutOfBounds);
@@ -143,7 +157,7 @@ fn read_entries(bytes: &[u8], info: ArchiveInfo) -> Result<Vec<Entry>> {
 }
 
 fn read_folder_record(cursor: &mut Cursor<'_>, version: ArchiveVersion) -> Result<FolderRecord> {
-    let _hash = cursor.bytes(8)?;
+    let hash = read_hash(cursor)?;
     let file_count = cursor.u32()?;
     let file_records_offset = match version {
         ArchiveVersion::v103 | ArchiveVersion::v104 => u64::from(cursor.u32()?),
@@ -153,20 +167,34 @@ fn read_folder_record(cursor: &mut Cursor<'_>, version: ArchiveVersion) -> Resul
         }
     };
     Ok(FolderRecord {
+        hash,
         file_count,
         file_records_offset,
     })
 }
 
-fn read_file_record(cursor: &mut Cursor<'_>) -> Result<FileRecord> {
-    let _hash = cursor.bytes(8)?;
+fn read_file_record(cursor: &mut Cursor<'_>) -> Result<ParsedFileRecord> {
+    let hash = read_hash(cursor)?;
     let size = cursor.u32()?;
     let offset = cursor.u32()?;
-    Ok(FileRecord {
-        stored_size: size & !(1 << 30 | 1 << 31),
-        data_offset: offset & !(1 << 31),
-        compression_toggled: size & (1 << 30) != 0,
-        checked: size & (1 << 31) != 0,
+    Ok(ParsedFileRecord {
+        hash,
+        record: FileRecord {
+            stored_size: size & !(1 << 30 | 1 << 31),
+            data_offset: offset & !(1 << 31),
+            compression_toggled: size & (1 << 30) != 0,
+            checked: size & (1 << 31) != 0,
+        },
+    })
+}
+
+fn read_hash(cursor: &mut Cursor<'_>) -> Result<HashFields> {
+    Ok(HashFields {
+        last: cursor.u8()?,
+        last2: cursor.u8()?,
+        length: cursor.u8()?,
+        first: cursor.u8()?,
+        crc: cursor.u32()?,
     })
 }
 
