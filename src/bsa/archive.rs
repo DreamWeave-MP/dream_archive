@@ -1,6 +1,8 @@
-use super::{Result, parser};
+use super::{Error, Result, parser};
 use crate::{Copied, storage::Storage};
 use bstr::{BStr, BString};
+use flate2::read::ZlibDecoder;
+use std::io::Read as _;
 use std::path::Path;
 
 /// Metadata read from a TES4-family BSA archive header.
@@ -206,11 +208,109 @@ impl Archive {
         self.storage.as_bytes().len()
     }
 
+    /// Extract an entry into `out`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the entry points outside the archive, uses a
+    /// compressed storage mode that is not implemented yet, or has malformed
+    /// embedded-name metadata.
+    pub fn read_entry_into(&self, entry: &Entry, out: &mut Vec<u8>) -> Result<()> {
+        let payload = self.entry_payload(entry)?;
+        if entry.record.is_compressed(self.info.archive_flags) {
+            self.decompress_entry(payload, out)
+        } else {
+            out.extend_from_slice(payload);
+            Ok(())
+        }
+    }
+
+    /// Extract an entry into a new vector.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::read_entry_into`].
+    pub fn read_entry(&self, entry: &Entry) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        self.read_entry_into(entry, &mut out)?;
+        Ok(out)
+    }
+
+    /// Extract a path into a new vector.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::read_entry_into`] if the path exists.
+    pub fn read_file(&self, path: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
+        self.get(path)
+            .map(|entry| self.read_entry(entry))
+            .transpose()
+    }
+
     pub(super) fn from_parts(storage: Storage, info: ArchiveInfo, entries: Vec<Entry>) -> Self {
         Self {
             storage,
             info,
             entries,
+        }
+    }
+
+    fn entry_payload<'a>(&'a self, entry: &Entry) -> Result<&'a [u8]> {
+        let mut start: usize = entry.record.data_offset.try_into()?;
+        let mut len: usize = entry.record.stored_size.try_into()?;
+        let stored = self.slice(start, len)?;
+        if matches!(
+            self.info.version,
+            ArchiveVersion::v104 | ArchiveVersion::v105
+        ) && self
+            .info
+            .archive_flags
+            .contains(ArchiveFlags::EMBEDDED_FILE_NAMES)
+        {
+            let embedded_name_len = stored.first().copied().ok_or(Error::OutOfBounds)? as usize + 1;
+            if embedded_name_len > len {
+                return Err(Error::OutOfBounds);
+            }
+            start = start
+                .checked_add(embedded_name_len)
+                .ok_or(Error::OutOfBounds)?;
+            len -= embedded_name_len;
+        }
+        self.slice(start, len)
+    }
+
+    fn slice(&self, start: usize, len: usize) -> Result<&[u8]> {
+        self.storage
+            .as_bytes()
+            .get(start..start.checked_add(len).ok_or(Error::OutOfBounds)?)
+            .ok_or(Error::OutOfBounds)
+    }
+
+    fn decompress_entry(&self, payload: &[u8], out: &mut Vec<u8>) -> Result<()> {
+        if self
+            .info
+            .archive_flags
+            .contains(ArchiveFlags::XBOX_COMPRESSED)
+        {
+            return Err(Error::NotImplemented("TES4 XMem compression"));
+        }
+        if self.info.version == ArchiveVersion::v105 {
+            return Err(Error::NotImplemented("TES4 LZ4 compressed files"));
+        }
+        let Some((expected_bytes, compressed)) = payload.split_first_chunk::<4>() else {
+            return Err(Error::OutOfBounds);
+        };
+        let expected = u32::from_le_bytes(*expected_bytes).try_into()?;
+        let before = out.len();
+        let mut decoder = ZlibDecoder::new(compressed);
+        decoder
+            .read_to_end(out)
+            .map_err(|error| Error::Zlib(error.to_string()))?;
+        let actual = out.len() - before;
+        if actual == expected {
+            Ok(())
+        } else {
+            Err(Error::DecompressionSizeMismatch { expected, actual })
         }
     }
 }

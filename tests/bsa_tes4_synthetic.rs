@@ -1,6 +1,7 @@
 #![cfg(feature = "bsa-tes4")]
 
 use dream_archive::bsa::{Archive, ArchiveVersion, Error};
+use flate2::{Compression, write::ZlibEncoder};
 
 const MAGIC: u32 = u32::from_le_bytes(*b"BSA\0");
 const HEADER_SIZE: u32 = 0x24;
@@ -11,6 +12,12 @@ fn push_u16(out: &mut Vec<u8>, value: u16) {
 
 fn push_u32(out: &mut Vec<u8>, value: u32) {
     out.extend_from_slice(&value.to_le_bytes());
+}
+
+fn zlib_compress(bytes: &[u8]) -> Vec<u8> {
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    std::io::Write::write_all(&mut encoder, bytes).unwrap();
+    encoder.finish().unwrap()
 }
 
 fn tiny_tes4_header(version: u32) -> Vec<u8> {
@@ -29,11 +36,15 @@ fn tiny_tes4_header(version: u32) -> Vec<u8> {
 }
 
 fn tiny_tes4_index() -> Vec<u8> {
+    tiny_tes4_index_with_payload(0, b"payload")
+}
+
+fn tiny_tes4_index_with_payload(flags: u32, payload: &[u8]) -> Vec<u8> {
     let mut bytes = Vec::new();
     push_u32(&mut bytes, MAGIC);
     push_u32(&mut bytes, 104);
     push_u32(&mut bytes, HEADER_SIZE);
-    push_u32(&mut bytes, 3);
+    push_u32(&mut bytes, 3 | flags);
     push_u32(&mut bytes, 1);
     push_u32(&mut bytes, 1);
     push_u32(&mut bytes, 5);
@@ -46,10 +57,10 @@ fn tiny_tes4_index() -> Vec<u8> {
     bytes.push(5);
     bytes.extend_from_slice(b"data\0");
     bytes.extend_from_slice(&[0; 8]);
-    push_u32(&mut bytes, 7);
-    push_u32(&mut bytes, 77);
+    push_u32(&mut bytes, payload.len().try_into().unwrap());
+    push_u32(&mut bytes, 83);
     bytes.extend_from_slice(b"file.txt\0");
-    bytes.extend_from_slice(b"payload");
+    bytes.extend_from_slice(payload);
     bytes
 }
 
@@ -100,7 +111,7 @@ fn parses_synthetic_tes4_index() {
     assert_eq!(entry.folder(), "data");
     assert_eq!(entry.name(), "file.txt");
     assert_eq!(entry.file().stored_size, 7);
-    assert_eq!(entry.file().data_offset, 77);
+    assert_eq!(entry.file().data_offset, 83);
     assert!(archive.get("DATA/file.TXT").is_some());
 }
 
@@ -120,5 +131,34 @@ fn rejects_truncated_tes4_file_name_block() {
     assert!(matches!(
         Archive::read(&bytes),
         Err(Error::OutOfBounds | Error::Io(_))
+    ));
+}
+
+#[test]
+fn extracts_synthetic_zlib_tes4_file() {
+    let compressed = zlib_compress(b"compressed payload");
+    let mut payload = Vec::new();
+    push_u32(&mut payload, 18);
+    payload.extend_from_slice(&compressed);
+    let archive = Archive::read(&tiny_tes4_index_with_payload(1 << 2, &payload)).unwrap();
+    assert_eq!(
+        archive.read_file("data/file.txt").unwrap().unwrap(),
+        b"compressed payload"
+    );
+}
+
+#[test]
+fn detects_synthetic_zlib_size_mismatch() {
+    let compressed = zlib_compress(b"short");
+    let mut payload = Vec::new();
+    push_u32(&mut payload, 99);
+    payload.extend_from_slice(&compressed);
+    let archive = Archive::read(&tiny_tes4_index_with_payload(1 << 2, &payload)).unwrap();
+    assert!(matches!(
+        archive.read_file("data/file.txt"),
+        Err(Error::DecompressionSizeMismatch {
+            expected: 99,
+            actual: 5
+        })
     ));
 }

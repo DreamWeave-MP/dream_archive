@@ -24,8 +24,16 @@ pub enum Error {
     OutOfBounds,
     #[error("archive integer field can not fit on this platform")]
     IntegralTruncation,
+    #[error(
+        "buffer failed to decompress to the expected size: expected {expected} bytes, got {actual} bytes"
+    )]
+    DecompressionSizeMismatch { expected: usize, actual: usize },
+    #[error("support for this feature is not implemented: {0}")]
+    NotImplemented(&'static str),
     #[error(transparent)]
     Io(#[from] io::Error),
+    #[error("zlib decompression failed: {0}")]
+    Zlib(String),
 }
 
 impl From<TryFromIntError> for Error {

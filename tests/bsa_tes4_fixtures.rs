@@ -8,6 +8,64 @@ fn fixture(path: &str) -> PathBuf {
 }
 
 #[test]
+fn parses_tes4_v105_index_shape() {
+    let archive =
+        Archive::open_path(fixture("tests/fixtures/bsa/tes4/valid/test_105.bsa")).unwrap();
+    let info = archive.info();
+
+    assert_eq!(info.version, ArchiveVersion::v105);
+    assert_eq!(archive.len(), 2);
+    let paths: Vec<_> = archive
+        .entries()
+        .iter()
+        .map(|entry| entry.path().to_string())
+        .collect();
+    assert_eq!(paths, ["preview.png", "license.txt"]);
+}
+
+#[test]
+fn extracts_uncompressed_tes4_file() {
+    let archive = Archive::open_path(fixture(
+        "tests/fixtures/bsa/tes4/valid/simple_uncompressed.bsa",
+    ))
+    .unwrap();
+
+    assert_eq!(archive.info().version, ArchiveVersion::v103);
+    assert_eq!(archive.len(), 1);
+    assert_eq!(archive.entries()[0].path(), "misc\\example.txt");
+    assert_eq!(
+        archive.read_file("MISC/example.TXT").unwrap().unwrap(),
+        b"hello world!\r\n"
+    );
+}
+
+#[test]
+fn compressed_tes4_extraction_is_explicitly_unsupported() {
+    let archive =
+        Archive::open_path(fixture("tests/fixtures/bsa/tes4/valid/test_105.bsa")).unwrap();
+
+    assert!(matches!(
+        archive.read_entry(&archive.entries()[0]),
+        Err(Error::NotImplemented("TES4 LZ4 compressed files"))
+    ));
+}
+
+#[test]
+fn extracts_zlib_compressed_tes4_files() {
+    let archive =
+        Archive::open_path(fixture("tests/fixtures/bsa/tes4/valid/test_104.bsa")).unwrap();
+
+    assert_eq!(
+        archive.read_file("preview.png").unwrap().unwrap(),
+        std::fs::read(fixture("tests/fixtures/bsa/tes4/valid/Preview.png")).unwrap()
+    );
+    assert_eq!(
+        archive.read_file("license.txt").unwrap().unwrap(),
+        std::fs::read(fixture("tests/fixtures/bsa/tes4/valid/License.txt")).unwrap()
+    );
+}
+
+#[test]
 fn parses_tes4_header_metadata() {
     let archive =
         Archive::open_path(fixture("tests/fixtures/bsa/tes4/valid/test_104.bsa")).unwrap();
