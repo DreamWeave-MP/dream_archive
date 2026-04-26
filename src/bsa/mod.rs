@@ -89,6 +89,7 @@ pub enum Error {
     TrailingCompressedData,
     NotImplemented(&'static str),
     Io(io::Error),
+    FilenameEncoding(FilenameEncodeError),
     Zlib(String),
     InvalidLz4Frame,
     Lz4Frame(String),
@@ -130,6 +131,7 @@ impl fmt::Display for Error {
                 write!(f, "support for this feature is not implemented: {feature}")
             }
             Self::Io(error) => error.fmt(f),
+            Self::FilenameEncoding(error) => error.fmt(f),
             Self::Zlib(error) => write!(f, "zlib decompression failed: {error}"),
             Self::InvalidLz4Frame => f.write_str("expected TES4 v105 LZ4 frame data"),
             Self::Lz4Frame(error) => write!(f, "LZ4 frame decompression failed: {error}"),
@@ -141,8 +143,15 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(error) => Some(error),
+            Self::FilenameEncoding(error) => Some(error),
             _ => None,
         }
+    }
+}
+
+impl From<FilenameEncodeError> for Error {
+    fn from(error: FilenameEncodeError) -> Self {
+        Self::FilenameEncoding(error)
     }
 }
 

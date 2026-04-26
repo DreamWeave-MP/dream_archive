@@ -470,6 +470,67 @@ fn writes_tes4_v105_archive_from_bytes() {
 }
 
 #[test]
+fn writes_compressed_tes4_v104_archive_from_bytes() {
+    let mut builder = Builder::new();
+    builder.set_compressed(true);
+    builder
+        .add_bytes("data/file.txt", b"payload payload payload")
+        .unwrap();
+
+    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+
+    assert!(
+        archive
+            .info()
+            .archive_flags
+            .contains(ArchiveFlags::COMPRESSED)
+    );
+    assert_eq!(
+        archive.read_file("data/file.txt").unwrap().unwrap(),
+        b"payload payload payload"
+    );
+}
+
+#[test]
+fn writes_compressed_tes4_v105_archive_from_bytes() {
+    let mut builder = Builder::new();
+    builder.set_version(ArchiveVersion::v105);
+    builder.set_compressed(true);
+    builder
+        .add_bytes("data/file.txt", b"payload payload payload")
+        .unwrap();
+
+    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+
+    assert_eq!(archive.info().version, ArchiveVersion::v105);
+    assert!(
+        archive
+            .info()
+            .archive_flags
+            .contains(ArchiveFlags::COMPRESSED)
+    );
+    assert_eq!(
+        archive.read_file("data/file.txt").unwrap().unwrap(),
+        b"payload payload payload"
+    );
+}
+
+#[test]
+fn tes4_writer_encodes_legacy_text_paths() {
+    let mut builder = Builder::new();
+    builder
+        .add_encoded_path("texts/María.txt", FilenameEncoding::Windows1252, b"hola")
+        .unwrap();
+
+    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+
+    assert_eq!(
+        archive.read_file(b"texts/mar\xeda.txt").unwrap().unwrap(),
+        b"hola"
+    );
+}
+
+#[test]
 fn writes_tes4_root_folder_archive() {
     let mut builder = Builder::new();
     builder.add_bytes("file.txt", b"hello").unwrap();

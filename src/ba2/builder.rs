@@ -1,5 +1,6 @@
 use super::{ArchiveVersion, Error, FileHash, Result, hash_file};
 use bstr::{BString, ByteSlice as _};
+use flate2::{Compression, write::ZlibEncoder};
 use std::{
     fs::File,
     io::{BufWriter, Write},
@@ -13,14 +14,15 @@ const FILE_RECORD_SIZE_GNRL: usize = 36;
 const FILE_HEADER_SIZE_GNRL: u16 = 0x10;
 const CHUNK_SENTINEL: u32 = 0xBAAD_F00D;
 
-/// Builder for uncompressed, string-backed BA2 GNRL archives.
+/// Builder for string-backed BA2 GNRL archives.
 ///
 /// This deliberately writes one boring GNRL chunk per file. DX10 has texture
-/// metadata semantics, and compression changes the validation surface. Those
-/// are separate features, not checkboxes on a constructor pretending to be done.
+/// metadata semantics. That is a separate feature, not a checkbox on a
+/// constructor pretending to be done.
 #[derive(Clone, Debug)]
 pub struct Builder {
     version: ArchiveVersion,
+    compression: Option<super::Ba2CompressionFormat>,
     entries: Vec<BuilderEntry>,
 }
 
@@ -31,10 +33,16 @@ struct BuilderEntry {
     bytes: Vec<u8>,
 }
 
+struct PreparedEntry<'a> {
+    entry: &'a BuilderEntry,
+    stored: Vec<u8>,
+}
+
 impl Default for Builder {
     fn default() -> Self {
         Self {
             version: ArchiveVersion::v1,
+            compression: None,
             entries: Vec::new(),
         }
     }
@@ -53,6 +61,19 @@ impl Builder {
 
     pub fn set_version(&mut self, version: ArchiveVersion) -> &mut Self {
         self.version = version;
+        self
+    }
+
+    #[must_use]
+    pub fn compression(&self) -> Option<super::Ba2CompressionFormat> {
+        self.compression
+    }
+
+    pub fn set_compression(
+        &mut self,
+        compression: Option<super::Ba2CompressionFormat>,
+    ) -> &mut Self {
+        self.compression = compression;
         self
     }
 
@@ -123,6 +144,7 @@ impl Builder {
     /// their BA2 on-disk sizes.
     pub fn write_to(&self, mut out: impl Write) -> Result<()> {
         let entries = self.sorted_entries();
+        let prepared = self.prepare_entries(&entries)?;
         let string_table_offset = string_table_offset(entries.len(), self.version)?;
         let payload_offset = string_table_offset
             .checked_add(string_table_len(&entries)?)
@@ -137,21 +159,35 @@ impl Builder {
             write_u64(&mut out, 1)?;
         }
         if self.version == ArchiveVersion::v3 {
-            write_u32(&mut out, 0)?;
+            write_u32(
+                &mut out,
+                if self.compression == Some(super::Ba2CompressionFormat::LZ4) {
+                    3
+                } else {
+                    0
+                },
+            )?;
         }
 
         let mut next_payload_offset: u64 = payload_offset.try_into()?;
-        for entry in &entries {
-            write_hash(&mut out, entry.hash)?;
+        for entry in &prepared {
+            write_hash(&mut out, entry.entry.hash)?;
             out.write_all(&[0])?;
             out.write_all(&[1])?;
             write_u16(&mut out, FILE_HEADER_SIZE_GNRL)?;
             write_u64(&mut out, next_payload_offset)?;
-            write_u32(&mut out, 0)?;
-            write_u32(&mut out, entry.bytes.len().try_into()?)?;
+            write_u32(
+                &mut out,
+                if self.compression.is_some() {
+                    entry.stored.len().try_into()?
+                } else {
+                    0
+                },
+            )?;
+            write_u32(&mut out, entry.entry.bytes.len().try_into()?)?;
             write_u32(&mut out, CHUNK_SENTINEL)?;
             next_payload_offset = next_payload_offset
-                .checked_add(entry.bytes.len().try_into()?)
+                .checked_add(entry.stored.len().try_into()?)
                 .ok_or(Error::OutOfBounds)?;
         }
 
@@ -159,10 +195,29 @@ impl Builder {
             write_u16(&mut out, entry.name.len().try_into()?)?;
             out.write_all(&entry.name)?;
         }
-        for entry in &entries {
-            out.write_all(&entry.bytes)?;
+        for entry in &prepared {
+            out.write_all(&entry.stored)?;
         }
         Ok(())
+    }
+
+    fn prepare_entries<'a>(&self, entries: &[&'a BuilderEntry]) -> Result<Vec<PreparedEntry<'a>>> {
+        if self.compression == Some(super::Ba2CompressionFormat::LZ4)
+            && self.version != ArchiveVersion::v3
+        {
+            return Err(Error::NotImplemented);
+        }
+        let mut prepared = Vec::new();
+        prepared.try_reserve_exact(entries.len())?;
+        for entry in entries {
+            let stored = match self.compression {
+                None => entry.bytes.clone(),
+                Some(super::Ba2CompressionFormat::Zip) => zlib_compress(&entry.bytes)?,
+                Some(super::Ba2CompressionFormat::LZ4) => lz4_flex::block::compress(&entry.bytes),
+            };
+            prepared.push(PreparedEntry { entry, stored });
+        }
+        Ok(prepared)
     }
 
     fn sorted_entries(&self) -> Vec<&BuilderEntry> {
@@ -177,13 +232,14 @@ impl Builder {
 
     fn archive_size_hint(&self) -> Result<usize> {
         let entries = self.sorted_entries();
+        let prepared = self.prepare_entries(&entries)?;
         string_table_offset(entries.len(), self.version)?
             .checked_add(string_table_len(&entries)?)
             .and_then(|offset| {
                 offset.checked_add(
-                    entries
+                    prepared
                         .iter()
-                        .try_fold(0usize, |sum, entry| sum.checked_add(entry.bytes.len()))?,
+                        .try_fold(0usize, |sum, entry| sum.checked_add(entry.stored.len()))?,
                 )
             })
             .ok_or(Error::OutOfBounds)
@@ -244,6 +300,12 @@ fn normalize_stored_path(path: &[u8]) -> Result<BString> {
         return Err(Error::InvalidArchivePath);
     }
     Ok(BString::from(out))
+}
+
+fn zlib_compress(bytes: &[u8]) -> Result<Vec<u8>> {
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(bytes)?;
+    Ok(encoder.finish()?)
 }
 
 fn write_hash(out: &mut impl Write, hash: FileHash) -> Result<()> {

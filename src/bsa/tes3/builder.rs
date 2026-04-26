@@ -1,4 +1,5 @@
 use super::{Error, Result, hash::FileHash, hash::hash_normalized_file};
+use crate::bsa::{FilenameEncoding, encode_filename};
 use bstr::{BString, ByteSlice as _};
 use std::{
     fs::File,
@@ -66,6 +67,23 @@ impl Builder {
             bytes: owned,
         });
         Ok(())
+    }
+
+    /// Encode a Unicode archive path with an explicit legacy filename encoding,
+    /// then add the payload.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `path` can not be encoded losslessly, the encoded
+    /// path is invalid for a TES3 archive, is a duplicate, or allocation fails.
+    pub fn add_encoded_path(
+        &mut self,
+        path: &str,
+        encoding: FilenameEncoding,
+        bytes: impl AsRef<[u8]>,
+    ) -> Result<()> {
+        let encoded = encode_filename(path, encoding)?;
+        self.add_bytes(encoded.as_ref(), bytes)
     }
 
     /// Write the archive to a filesystem path.

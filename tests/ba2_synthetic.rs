@@ -148,6 +148,55 @@ fn writes_ba2_v3_archive_from_bytes() {
 }
 
 #[test]
+fn writes_zlib_compressed_ba2_gnrl_archive() {
+    let mut builder = Builder::new();
+    builder.set_compression(Some(Ba2CompressionFormat::Zip));
+    builder
+        .add_bytes("data/file.txt", b"payload payload payload")
+        .unwrap();
+
+    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+
+    assert_eq!(archive.info().compression_format, Ba2CompressionFormat::Zip);
+    let entry = &archive.entries()[0];
+    assert!(entry.file().chunks()[0].is_compressed());
+    assert_eq!(
+        archive.read_file("data/file.txt").unwrap().unwrap(),
+        b"payload payload payload"
+    );
+}
+
+#[test]
+fn writes_lz4_compressed_ba2_v3_gnrl_archive() {
+    let mut builder = Builder::new();
+    builder.set_version(ArchiveVersion::v3);
+    builder.set_compression(Some(Ba2CompressionFormat::LZ4));
+    builder
+        .add_bytes("data/file.txt", b"payload payload payload")
+        .unwrap();
+
+    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+
+    assert_eq!(archive.info().version, ArchiveVersion::v3);
+    assert_eq!(archive.info().compression_format, Ba2CompressionFormat::LZ4);
+    let entry = &archive.entries()[0];
+    assert!(entry.file().chunks()[0].is_compressed());
+    assert_eq!(
+        archive.read_file("data/file.txt").unwrap().unwrap(),
+        b"payload payload payload"
+    );
+}
+
+#[test]
+fn ba2_lz4_writer_requires_v3_header() {
+    let mut builder = Builder::new();
+    builder.set_compression(Some(Ba2CompressionFormat::LZ4));
+    builder.add_bytes("data/file.txt", b"payload").unwrap();
+
+    assert!(matches!(builder.into_vec(), Err(Error::NotImplemented)));
+}
+
+#[test]
 fn ba2_writer_output_is_deterministic() {
     let mut first = Builder::new();
     first.add_bytes("b.txt", b"b").unwrap();

@@ -88,6 +88,21 @@ fn writes_tes3_archive_from_bytes() {
 }
 
 #[test]
+fn tes3_writer_encodes_legacy_text_paths() {
+    let mut builder = Builder::new();
+    builder
+        .add_encoded_path("texts/María.txt", FilenameEncoding::Windows1252, b"hola")
+        .unwrap();
+
+    let archive = Archive::read(&builder.into_vec().unwrap()).unwrap();
+
+    assert_eq!(
+        archive.read_file(b"texts/mar\xeda.txt").unwrap().unwrap(),
+        b"hola"
+    );
+}
+
+#[test]
 fn tes3_lookup_uses_openmw_style_path_normalization() {
     let archive = Archive::read(&tiny_tes3_archive(b"\\Meshes//Foo.NIF", b"hello")).unwrap();
 

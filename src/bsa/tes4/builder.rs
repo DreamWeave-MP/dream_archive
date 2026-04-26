@@ -2,7 +2,9 @@ use super::{
     ArchiveFlags, ArchiveTypes, ArchiveVersion, Error, HashFields, Result, hash_directory,
     hash_file,
 };
+use crate::bsa::{FilenameEncoding, encode_filename};
 use bstr::BString;
+use flate2::{Compression, write::ZlibEncoder};
 use std::{
     fs::File,
     io::{BufWriter, Write},
@@ -15,16 +17,16 @@ const FOLDER_RECORD_SIZE_V104: usize = 16;
 const FOLDER_RECORD_SIZE_V105: usize = 24;
 const FILE_RECORD_SIZE: usize = 16;
 
-/// Builder for uncompressed, string-backed TES4-family BSA archives.
+/// Builder for string-backed TES4-family BSA archives.
 ///
-/// This intentionally writes the boring shape first: directory strings and file
-/// strings are present, file data is uncompressed, and output order is
-/// deterministic by TES4 hashes. Compression, embedded names, and hash-only
-/// output are separate features, not flags to accidentally trip over.
+/// Directory strings and file strings are present, and output order is
+/// deterministic by TES4 hashes. Embedded names and hash-only output remain
+/// separate features, not flags to accidentally trip over.
 #[derive(Clone, Debug)]
 pub struct Builder {
     version: ArchiveVersion,
     archive_types: ArchiveTypes,
+    compressed: bool,
     entries: Vec<BuilderEntry>,
 }
 
@@ -35,6 +37,11 @@ struct BuilderEntry {
     folder_hash: HashFields,
     file_hash: HashFields,
     bytes: Vec<u8>,
+}
+
+struct PreparedEntry<'a> {
+    entry: &'a BuilderEntry,
+    stored: Vec<u8>,
 }
 
 #[derive(Clone, Copy)]
@@ -50,6 +57,7 @@ impl Default for Builder {
         Self {
             version: ArchiveVersion::v104,
             archive_types: ArchiveTypes::MISC,
+            compressed: false,
             entries: Vec::new(),
         }
     }
@@ -78,6 +86,16 @@ impl Builder {
 
     pub fn set_archive_types(&mut self, archive_types: ArchiveTypes) -> &mut Self {
         self.archive_types = archive_types;
+        self
+    }
+
+    #[must_use]
+    pub fn compressed(&self) -> bool {
+        self.compressed
+    }
+
+    pub fn set_compressed(&mut self, compressed: bool) -> &mut Self {
+        self.compressed = compressed;
         self
     }
 
@@ -121,6 +139,23 @@ impl Builder {
         Ok(())
     }
 
+    /// Encode a Unicode archive path with an explicit legacy filename encoding,
+    /// then add the payload.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `path` can not be encoded losslessly, the encoded
+    /// path is invalid for a TES4 archive, is a duplicate, or allocation fails.
+    pub fn add_encoded_path(
+        &mut self,
+        path: &str,
+        encoding: FilenameEncoding,
+        bytes: impl AsRef<[u8]>,
+    ) -> Result<()> {
+        let encoded = encode_filename(path, encoding)?;
+        self.add_bytes(encoded.as_ref(), bytes)
+    }
+
     /// Write the archive to a filesystem path.
     ///
     /// # Errors
@@ -153,6 +188,7 @@ impl Builder {
     /// their TES4 on-disk sizes.
     pub fn write_to(&self, mut out: impl Write) -> Result<()> {
         let entries = self.sorted_entries();
+        let prepared = self.prepare_entries(&entries)?;
         let folders = sorted_folders(&entries);
         let folder_names_len = folder_names_len(&folders)?;
         let file_names_len = file_names_len(&entries)?;
@@ -169,7 +205,13 @@ impl Builder {
         write_u32(&mut out, HEADER_SIZE)?;
         write_u32(
             &mut out,
-            ArchiveFlags::DIRECTORY_STRINGS.bits() | ArchiveFlags::FILE_STRINGS.bits(),
+            ArchiveFlags::DIRECTORY_STRINGS.bits()
+                | ArchiveFlags::FILE_STRINGS.bits()
+                | if self.compressed {
+                    ArchiveFlags::COMPRESSED.bits()
+                } else {
+                    0
+                },
         )?;
         write_u32(&mut out, folders.len().try_into()?)?;
         write_u32(&mut out, entries.len().try_into()?)?;
@@ -194,12 +236,12 @@ impl Builder {
         let mut payload_offset: u32 = data_offset.try_into()?;
         for folder in &folders {
             write_bzstring(&mut out, folder.name)?;
-            for entry in &entries[folder.files_start..folder.files_end] {
-                write_hash(&mut out, entry.file_hash)?;
-                write_u32(&mut out, entry.bytes.len().try_into()?)?;
+            for entry in &prepared[folder.files_start..folder.files_end] {
+                write_hash(&mut out, entry.entry.file_hash)?;
+                write_u32(&mut out, entry.stored.len().try_into()?)?;
                 write_u32(&mut out, payload_offset)?;
                 payload_offset = payload_offset
-                    .checked_add(entry.bytes.len().try_into()?)
+                    .checked_add(entry.stored.len().try_into()?)
                     .ok_or(Error::OutOfBounds)?;
             }
         }
@@ -208,10 +250,24 @@ impl Builder {
             out.write_all(&entry.name)?;
             out.write_all(&[0])?;
         }
-        for entry in &entries {
-            out.write_all(&entry.bytes)?;
+        for entry in &prepared {
+            out.write_all(&entry.stored)?;
         }
         Ok(())
+    }
+
+    fn prepare_entries<'a>(&self, entries: &[&'a BuilderEntry]) -> Result<Vec<PreparedEntry<'a>>> {
+        let mut prepared = Vec::new();
+        prepared.try_reserve_exact(entries.len())?;
+        for entry in entries {
+            let stored = if self.compressed {
+                compressed_payload(self.version, &entry.bytes)?
+            } else {
+                entry.bytes.clone()
+            };
+            prepared.push(PreparedEntry { entry, stored });
+        }
+        Ok(prepared)
     }
 
     fn sorted_entries(&self) -> Vec<&BuilderEntry> {
@@ -229,6 +285,7 @@ impl Builder {
 
     fn archive_size_hint(&self) -> Result<usize> {
         let entries = self.sorted_entries();
+        let prepared = self.prepare_entries(&entries)?;
         let folders = sorted_folders(&entries);
         let folder_names_len = folder_names_len(&folders)?;
         let file_names_len = file_names_len(&entries)?;
@@ -240,9 +297,9 @@ impl Builder {
             self.version,
         )?
         .checked_add(
-            entries
+            prepared
                 .iter()
-                .try_fold(0usize, |sum, entry| sum.checked_add(entry.bytes.len()))
+                .try_fold(0usize, |sum, entry| sum.checked_add(entry.stored.len()))
                 .ok_or(Error::OutOfBounds)?,
         )
         .ok_or(Error::OutOfBounds)
@@ -324,6 +381,29 @@ fn write_folder_record(
         }
     }
     Ok(())
+}
+
+fn compressed_payload(version: ArchiveVersion, bytes: &[u8]) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    out.try_reserve_exact(bytes.len().saturating_add(4))?;
+    out.extend_from_slice(&u32::try_from(bytes.len())?.to_le_bytes());
+    match version {
+        ArchiveVersion::v103 | ArchiveVersion::v104 => {
+            let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(bytes)?;
+            out.extend_from_slice(&encoder.finish()?);
+        }
+        ArchiveVersion::v105 => {
+            let mut encoder = lz4_flex::frame::FrameEncoder::new(Vec::new());
+            encoder.write_all(bytes)?;
+            out.extend_from_slice(
+                &encoder
+                    .finish()
+                    .map_err(|error| Error::Lz4Frame(error.to_string()))?,
+            );
+        }
+    }
+    Ok(out)
 }
 
 fn normalize_stored_path(path: &[u8]) -> Result<(BString, BString)> {
