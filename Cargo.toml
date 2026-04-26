@@ -32,6 +32,26 @@ required-features = ["ba2"]
 name = "extract_ba2"
 required-features = ["ba2"]
 
+[[example]]
+name = "list_archive"
+required-features = ["ba2", "bsa-tes3", "bsa-tes4"]
+
+[[example]]
+name = "extract_archive"
+required-features = ["ba2", "bsa-tes3", "bsa-tes4"]
+
+[[example]]
+name = "build_ba2"
+required-features = ["ba2"]
+
+[[example]]
+name = "build_tes3_bsa"
+required-features = ["bsa-tes3"]
+
+[[example]]
+name = "build_tes4_bsa"
+required-features = ["bsa-tes4"]
+
 [[test]]
 name = "ba2_fixtures"
 required-features = ["ba2"]

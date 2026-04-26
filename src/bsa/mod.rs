@@ -82,6 +82,7 @@ pub enum Error {
     InvalidArchivePath,
     ArchivePathsUnavailable,
     DuplicatePath,
+    FileNotFound(bstr::BString),
     InvalidFileRecordFlags(u32),
     IntegralTruncation,
     Capacity,
@@ -113,6 +114,7 @@ impl fmt::Display for Error {
                 f.write_str("archive does not contain filenames required for path-based extraction")
             }
             Self::DuplicatePath => f.write_str("duplicate normalized archive path"),
+            Self::FileNotFound(path) => write!(f, "archive member not found: {path}"),
             Self::InvalidFileRecordFlags(value) => {
                 write!(f, "invalid or unsupported file record flags: {value:#010x}")
             }

@@ -35,3 +35,70 @@ fn bsa_guess_respects_feature_gates() {
         expected_tes4
     );
 }
+
+#[cfg(feature = "ba2")]
+#[test]
+fn top_level_archive_reads_ba2_from_vec() {
+    let mut builder = dream_archive::Ba2Builder::new();
+    builder.add_bytes("data/file.txt", b"payload").unwrap();
+
+    let archive = dream_archive::Archive::from_vec(builder.to_vec().unwrap()).unwrap();
+
+    assert_eq!(archive.format(), FileFormat::BA2);
+    assert_eq!(archive.len(), 1);
+    assert_eq!(
+        archive.read_file_required("DATA/FILE.TXT").unwrap(),
+        b"payload"
+    );
+}
+
+#[cfg(feature = "bsa-tes3")]
+#[test]
+fn top_level_archive_reads_tes3_bsa_from_vec() {
+    let mut builder = dream_archive::Tes3BsaBuilder::new();
+    builder.add_bytes("data/file.txt", b"payload").unwrap();
+
+    let archive = dream_archive::Archive::from_vec(builder.to_vec().unwrap()).unwrap();
+
+    assert_eq!(
+        archive.format(),
+        FileFormat::BSA(dream_archive::BsaFormat::TES3)
+    );
+    assert_eq!(archive.len(), 1);
+    assert_eq!(
+        archive.read_file_required("DATA/FILE.TXT").unwrap(),
+        b"payload"
+    );
+}
+
+#[cfg(feature = "bsa-tes4")]
+#[test]
+fn top_level_archive_reads_tes4_bsa_from_vec() {
+    let mut builder = dream_archive::Tes4BsaBuilder::new();
+    builder.add_bytes("data/file.txt", b"payload").unwrap();
+
+    let archive = dream_archive::Archive::from_vec(builder.to_vec().unwrap()).unwrap();
+
+    assert_eq!(
+        archive.format(),
+        FileFormat::BSA(dream_archive::BsaFormat::TES4)
+    );
+    assert_eq!(archive.len(), 1);
+    assert_eq!(
+        archive.read_file_required("DATA/FILE.TXT").unwrap(),
+        b"payload"
+    );
+}
+
+#[cfg(feature = "ba2")]
+#[test]
+fn top_level_required_read_reports_missing_member() {
+    let mut builder = dream_archive::Ba2Builder::new();
+    builder.add_bytes("data/file.txt", b"payload").unwrap();
+    let archive = dream_archive::Archive::from_vec(builder.to_vec().unwrap()).unwrap();
+
+    assert!(matches!(
+        archive.read_file_required("missing.txt"),
+        Err(dream_archive::Error::FileNotFound(path)) if path.as_slice() == b"missing.txt"
+    ));
+}

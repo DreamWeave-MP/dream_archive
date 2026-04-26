@@ -122,7 +122,10 @@ fn tiny_tes4_index_with_version_names_and_payload(
 }
 
 fn tiny_hash_only_tes4_index() -> Vec<u8> {
-    let payload = b"payload";
+    tiny_hash_only_tes4_index_with_hashes(b"data", b"file.txt", b"payload")
+}
+
+fn tiny_hash_only_tes4_index_with_hashes(folder: &[u8], name: &[u8], payload: &[u8]) -> Vec<u8> {
     let folder_record_offset = HEADER_SIZE + 16;
     let data_offset = folder_record_offset + 16;
     let mut bytes = Vec::new();
@@ -136,10 +139,10 @@ fn tiny_hash_only_tes4_index() -> Vec<u8> {
     push_u32(&mut bytes, 0);
     push_u16(&mut bytes, 1 << 8);
     push_u16(&mut bytes, 0);
-    push_u64(&mut bytes, hash_directory(b"data").0.numeric());
+    push_u64(&mut bytes, hash_directory(folder).0.numeric());
     push_u32(&mut bytes, 1);
     push_u32(&mut bytes, folder_record_offset);
-    push_u64(&mut bytes, hash_file(b"file.txt").0.numeric());
+    push_u64(&mut bytes, hash_file(name).0.numeric());
     push_u32(&mut bytes, payload.len().try_into().unwrap());
     push_u32(&mut bytes, data_offset);
     bytes.extend_from_slice(payload);
@@ -315,6 +318,29 @@ fn extracts_hash_only_tes4_archive_with_path_dictionary() {
     assert_eq!(
         std::fs::read(out.join("data").join("file.txt")).unwrap(),
         b"payload"
+    );
+    std::fs::remove_dir_all(out).unwrap();
+}
+
+#[test]
+fn hash_only_tes4_path_dictionary_hashes_nested_basename() {
+    let archive = Archive::from_slice(&tiny_hash_only_tes4_index_with_hashes(
+        b"meshes/foo",
+        b"bar.nif",
+        b"nested payload",
+    ))
+    .unwrap();
+    let out = output_dir("tes4-nested-hash-dictionary");
+
+    assert_eq!(
+        archive
+            .extract_to_with_paths(&out, [b"meshes/foo/bar.nif".as_slice()])
+            .unwrap(),
+        14
+    );
+    assert_eq!(
+        std::fs::read(out.join("meshes").join("foo").join("bar.nif")).unwrap(),
+        b"nested payload"
     );
     std::fs::remove_dir_all(out).unwrap();
 }

@@ -187,6 +187,17 @@ impl Archive {
         self.get_by_hash(hash_file(path.as_ref().as_bstr()).0)
     }
 
+    /// Get an entry by path, returning an error when it is absent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::FileNotFound`] when the normalized path is not present.
+    pub fn get_required(&self, path: impl AsRef<[u8]>) -> Result<&Entry> {
+        let path = path.as_ref();
+        self.get(path)
+            .ok_or_else(|| Error::FileNotFound(BString::from(path)))
+    }
+
     /// Whether a path exists in this archive.
     #[must_use]
     pub fn contains(&self, path: impl AsRef<[u8]>) -> bool {
@@ -264,6 +275,16 @@ impl Archive {
             .transpose()
     }
 
+    /// Extract a required path into a new vector.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::FileNotFound`] if the path does not exist, or the same
+    /// errors as [`Self::read_entry`] when it does.
+    pub fn read_file_required(&self, path: impl AsRef<[u8]>) -> Result<Vec<u8>> {
+        self.read_entry(self.get_required(path)?)
+    }
+
     /// Extract a path into a writer.
     ///
     /// # Errors
@@ -277,6 +298,20 @@ impl Archive {
         self.get(path)
             .map(|entry| self.extract_entry(entry, out))
             .transpose()
+    }
+
+    /// Extract a required path into a writer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::FileNotFound`] if the path does not exist, or the same
+    /// errors as [`Self::extract_entry`] when it does.
+    pub fn extract_file_required(
+        &self,
+        path: impl AsRef<[u8]>,
+        out: impl std::io::Write,
+    ) -> Result<u64> {
+        self.extract_entry(self.get_required(path)?, out)
     }
 
     /// Extract every named entry to `target_dir`, preserving archive paths.

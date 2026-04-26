@@ -234,6 +234,17 @@ impl Archive {
             .map(|&index| &self.entries[index])
     }
 
+    /// Get an entry by path, returning an error when it is absent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::FileNotFound`] when the normalized path/hash is not present.
+    pub fn get_required(&self, path: impl AsRef<[u8]>) -> Result<&Entry> {
+        let path = path.as_ref();
+        self.get(path)
+            .ok_or_else(|| Error::FileNotFound(BString::from(path)))
+    }
+
     /// Get an entry by TES4 folder and file hashes.
     #[must_use]
     pub fn get_by_hash(&self, folder_hash: HashFields, file_hash: HashFields) -> Option<&Entry> {
@@ -310,6 +321,16 @@ impl Archive {
             .transpose()
     }
 
+    /// Extract a required path into a new vector.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::FileNotFound`] if the path does not exist, or the same
+    /// errors as [`Self::read_entry`] when it does.
+    pub fn read_file_required(&self, path: impl AsRef<[u8]>) -> Result<Vec<u8>> {
+        self.read_entry(self.get_required(path)?)
+    }
+
     /// Extract a path into a writer.
     ///
     /// # Errors
@@ -323,6 +344,20 @@ impl Archive {
         self.get(path)
             .map(|entry| self.extract_entry(entry, out))
             .transpose()
+    }
+
+    /// Extract a required path into a writer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::FileNotFound`] if the path does not exist, or the same
+    /// errors as [`Self::extract_entry`] when it does.
+    pub fn extract_file_required(
+        &self,
+        path: impl AsRef<[u8]>,
+        out: impl std::io::Write,
+    ) -> Result<u64> {
+        self.extract_entry(self.get_required(path)?, out)
     }
 
     /// Extract entries whose names are supplied by an external path dictionary.
@@ -701,18 +736,12 @@ impl Entry {
 }
 
 fn path_hash(path: &[u8]) -> (u64, u64) {
-    let folder_end = path
-        .iter()
-        .rposition(|byte| matches!(*byte, b'/' | b'\\'))
-        .unwrap_or(0);
-    let folder = if folder_end == 0 {
-        &[][..]
-    } else {
-        &path[..folder_end]
-    };
+    let separator = path.iter().rposition(|byte| matches!(*byte, b'/' | b'\\'));
+    let folder = separator.map_or(&[][..], |end| &path[..end]);
+    let name = separator.map_or(path, |end| &path[end + 1..]);
     (
         hash_directory(folder).0.numeric(),
-        hash_file(path).0.numeric(),
+        hash_file(name).0.numeric(),
     )
 }
 

@@ -29,6 +29,7 @@ pub enum Error {
     InvalidChunkSize(u16),
     InvalidArchivePath,
     DuplicatePath,
+    FileNotFound(bstr::BString),
     OutOfBounds,
     IntegralTruncation,
     Capacity,
@@ -64,6 +65,7 @@ impl fmt::Display for Error {
             }
             Self::InvalidArchivePath => f.write_str("invalid archive path"),
             Self::DuplicatePath => f.write_str("duplicate archive path"),
+            Self::FileNotFound(path) => write!(f, "archive member not found: {path}"),
             Self::OutOfBounds => f.write_str("archive offset or size is out of bounds"),
             Self::IntegralTruncation => {
                 f.write_str("archive integer field can not fit on this platform")

@@ -119,6 +119,17 @@ impl Archive {
             .map(|&index| &self.entries[index])
     }
 
+    /// Get an entry by path, returning an error when it is absent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::FileNotFound`] when the normalized path is not present.
+    pub fn get_required(&self, path: impl AsRef<[u8]>) -> Result<&Entry> {
+        let path = path.as_ref();
+        self.get(path)
+            .ok_or_else(|| Error::FileNotFound(BString::from(path)))
+    }
+
     #[must_use]
     pub fn contains(&self, path: impl AsRef<[u8]>) -> bool {
         self.get(path).is_some()
@@ -175,6 +186,16 @@ impl Archive {
             .transpose()
     }
 
+    /// Extract a required path into a new vector.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::FileNotFound`] if the path does not exist, or the same
+    /// errors as [`Self::read_entry`] when it does.
+    pub fn read_file_required(&self, path: impl AsRef<[u8]>) -> Result<Vec<u8>> {
+        self.read_entry(self.get_required(path)?)
+    }
+
     /// Extract a path into a writer without allocating a payload buffer.
     ///
     /// # Errors
@@ -188,6 +209,20 @@ impl Archive {
         self.get(path)
             .map(|entry| self.extract_entry(entry, out))
             .transpose()
+    }
+
+    /// Extract a required path into a writer without allocating a payload buffer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::FileNotFound`] if the path does not exist, or the same
+    /// errors as [`Self::extract_entry`] when it does.
+    pub fn extract_file_required(
+        &self,
+        path: impl AsRef<[u8]>,
+        out: impl std::io::Write,
+    ) -> Result<u64> {
+        self.extract_entry(self.get_required(path)?, out)
     }
 
     /// Extract every entry to `target_dir`, preserving archive paths.
