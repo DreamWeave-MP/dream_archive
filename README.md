@@ -293,7 +293,7 @@ The `lua` feature exposes a byte-first Lua API through `dream_archive::lua` for
 Rust embedders. It does not install a standalone `require("dream_archive")` C Lua
 module by itself; register the `mlua` table in your application. Use the
 `dream_archive::dream_path` re-export for companion path helpers instead of
-adding a separate `dream-path` dependency just to reach the same API. Lua strings
+adding a separate `dream_path` dependency just to reach the same API. Lua strings
 are archive path bytes and payload bytes. Filesystem arguments are the exception:
 all `open_path`, `detect_path`, `write_path`, `extract_to*`,
 `extract_entry_to_path`, `add_dir`, and source paths such as `add_file` /
@@ -506,8 +506,8 @@ can be added with tests.
 
 ## Support
 
-Has `dream-archive` been useful to you?
+Has `dream_archive` been useful to you?
 
 If so, please consider [amplifying the signal](https://ko-fi.com/magicaldave) through my ko-fi.
 
-Thank you for using `dream-archive`.
+Thank you for using `dream_archive`.
