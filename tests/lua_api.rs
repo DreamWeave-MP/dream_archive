@@ -1,10 +1,25 @@
 use mlua::Lua;
+use std::path::PathBuf;
 
 fn lua_with_module() -> Lua {
     let lua = Lua::new();
     let module = dream_archive::lua::create_module(&lua).unwrap();
     lua.globals().set("dream_archive", module).unwrap();
     lua
+}
+
+fn temp_dir(name: &str) -> PathBuf {
+    let mut path = std::env::temp_dir();
+    path.push(format!(
+        "dream-archive-lua-{name}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&path).unwrap();
+    path
 }
 
 #[test]
@@ -209,6 +224,211 @@ fn lua_covers_tes4_hash_only_and_dx10_builder_surfaces() {
         local ba2 = dream_archive.ba2.open_bytes(dx10:to_bytes())
         assert(ba2:info().format == "dx10")
         assert(string.sub(ba2:read_entry(1), 1, 4) == "DDS ")
+    "#,
+    )
+    .exec()
+    .unwrap();
+}
+
+#[test]
+fn lua_rejects_non_utf8_filesystem_paths() {
+    let lua = lua_with_module();
+
+    lua.load(
+        r#"
+        local function fails(f)
+            local ok = pcall(f)
+            assert(not ok)
+        end
+
+        fails(function() dream_archive.open_path("bad\255.ba2") end)
+        fails(function() dream_archive.detect_path("bad\255.ba2") end)
+
+        local builder = dream_archive.ba2.Builder.new()
+        builder:add_bytes("a.txt", "x")
+        local archive = dream_archive.ba2.open_bytes(builder:to_bytes())
+        fails(function() archive:extract_to("bad\255dir") end)
+        fails(function() archive:extract_entry_to_path(1, "bad\255file") end)
+        fails(function() builder:write_path("bad\255.ba2") end)
+        fails(function() builder:add_file("b.txt", "bad\255source") end)
+
+        local tes3 = dream_archive.bsa.tes3.Builder.new()
+        fails(function() tes3:add_file("b.txt", "bad\255source") end)
+        fails(function() tes3:add_dir("bad\255dir") end)
+        fails(function() tes3:write_path("bad\255.bsa") end)
+    "#,
+    )
+    .exec()
+    .unwrap();
+}
+
+#[test]
+fn lua_required_missing_paths_raise_errors_for_all_families() {
+    let lua = lua_with_module();
+
+    lua.load(
+        r#"
+        local function assert_missing_errors(archive)
+            assert(archive:read_file("missing.txt") == nil)
+            assert(archive:extract_file("missing.txt") == nil)
+            assert(not pcall(function() archive:read_file_required("missing.txt") end))
+            assert(not pcall(function() archive:extract_file_required("missing.txt") end))
+        end
+
+        local ba2_builder = dream_archive.ba2.Builder.new()
+        ba2_builder:add_bytes("present.txt", "ba2")
+        assert_missing_errors(dream_archive.open_bytes(ba2_builder:to_bytes()))
+        assert_missing_errors(dream_archive.ba2.open_bytes(ba2_builder:to_bytes()))
+
+        local tes3_builder = dream_archive.bsa.tes3.Builder.new()
+        tes3_builder:add_bytes("present.txt", "tes3")
+        assert_missing_errors(dream_archive.bsa.tes3.open_bytes(tes3_builder:to_bytes()))
+
+        local tes4_builder = dream_archive.bsa.tes4.Builder.new()
+        tes4_builder:add_bytes("present.txt", "tes4")
+        assert_missing_errors(dream_archive.bsa.tes4.open_bytes(tes4_builder:to_bytes()))
+    "#,
+    )
+    .exec()
+    .unwrap();
+}
+
+#[test]
+fn lua_filesystem_extraction_and_builder_paths_round_trip() {
+    let lua = lua_with_module();
+    let root = temp_dir("fs-round-trip");
+    let source = root.join("source.txt");
+    std::fs::write(&source, b"from source file").unwrap();
+    let dir = root.join("dir");
+    std::fs::create_dir_all(dir.join("nested")).unwrap();
+    std::fs::write(dir.join("nested/from-dir.txt"), b"from directory").unwrap();
+    let archive_path = root.join("test.ba2");
+    let entry_out = root.join("entry.bin");
+    let extract_dir = root.join("out");
+
+    lua.globals()
+        .set("source_path", source.to_string_lossy().as_ref())
+        .unwrap();
+    lua.globals()
+        .set("dir_path", dir.to_string_lossy().as_ref())
+        .unwrap();
+    lua.globals()
+        .set("archive_path", archive_path.to_string_lossy().as_ref())
+        .unwrap();
+    lua.globals()
+        .set("entry_out", entry_out.to_string_lossy().as_ref())
+        .unwrap();
+    lua.globals()
+        .set("extract_dir", extract_dir.to_string_lossy().as_ref())
+        .unwrap();
+
+    lua.load(
+        r#"
+        local builder = dream_archive.ba2.Builder.new()
+        builder:add_file("from-source.txt", source_path)
+        builder:add_dir(dir_path)
+        builder:write_path(archive_path)
+
+        assert(dream_archive.detect_path(archive_path) == "ba2")
+        local archive = dream_archive.ba2.open_path(archive_path)
+        assert(archive:read_file_required("from-source.txt") == "from source file")
+        assert(archive:read_file_required("nested/from-dir.txt") == "from directory")
+        archive:extract_entry_to_path(1, entry_out)
+        archive:extract_to(extract_dir)
+    "#,
+    )
+    .exec()
+    .unwrap();
+
+    assert_eq!(std::fs::read(entry_out).unwrap(), b"from source file");
+    assert_eq!(
+        std::fs::read(extract_dir.join("nested/from-dir.txt")).unwrap(),
+        b"from directory"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn lua_exposes_exact_hash_values() {
+    let lua = lua_with_module();
+
+    lua.load(
+        r#"
+        local ba2 = dream_archive.ba2.hash_file("Textures\\CreationClub\\BGSFO4001\\AnimObjects\\PipBoy\\PipBoy02(Black)_d.DDS")
+        assert(ba2.directory == 0x23157A84)
+        assert(ba2.file == 0x69E1E82C)
+        assert(ba2.extension == 0x00736464)
+        assert(ba2.normalized == "textures\\creationclub\\bgsfo4001\\animobjects\\pipboy\\pipboy02(black)_d.dds")
+
+        local tes3 = dream_archive.bsa.tes3.hash_file("meshes/c/artifact_bloodring_01.nif")
+        assert(tes3.lo == 0x1c3c1149)
+        assert(tes3.hi == 0x920d5f0c)
+        assert(tes3.hex == "1c3c1149920d5f0c")
+
+        local dir = dream_archive.bsa.tes4.hash_directory("textures/armor/amuletsandrings/elder council")
+        assert(dir.hex == "04bc422c742c696c")
+        assert(dir.crc == 0x04bc422c)
+        assert(dir.first == string.byte("t"))
+        assert(dir.last == string.byte("l"))
+        assert(dir.last2 == string.byte("i"))
+        assert(dir.length == 44)
+        assert(dir.numeric == nil)
+
+        local file = dream_archive.bsa.tes4.hash_file("elder_council_amulet_n.dds")
+        assert(file.hex == "dc531e2f6516dfee")
+        assert(file.crc == 0xdc531e2f)
+        assert(file.first == string.byte("e"))
+        assert(file.last == 0xee)
+        assert(file.last2 == 0xdf)
+        assert(file.length == 22)
+    "#,
+    )
+    .exec()
+    .unwrap();
+}
+
+#[test]
+fn lua_accepts_default_compression_options_and_rejects_bad_dx10_headers() {
+    let lua = lua_with_module();
+
+    lua.load(
+        r#"
+        local ba2 = dream_archive.ba2.Builder.new()
+        assert(ba2:is_empty())
+        ba2:set_compression(nil)
+        ba2:add_bytes_with_compression("a.txt", "x", nil)
+        ba2:add_bytes_with_compression("b.txt", "y", "inherit")
+        assert(ba2:len() == 2)
+
+        local tes3 = dream_archive.bsa.tes3.Builder.new()
+        assert(tes3:is_empty())
+
+        local tes4 = dream_archive.bsa.tes4.Builder.new()
+        assert(tes4:is_empty())
+        tes4:add_bytes_with_compression("a.txt", "x", nil)
+        tes4:add_bytes_with_compression("b.txt", "y", "compress")
+        assert(tes4:len() == 2)
+
+        local dx10 = dream_archive.ba2.Dx10Builder.new()
+        assert(not pcall(function()
+            dx10:add_texture_bytes("bad.dds", {
+                height = 1,
+                width = 1,
+                mip_count = 1,
+                flags = 0,
+                tile_mode = 0,
+            }, "\127")
+        end))
+        assert(not pcall(function()
+            dx10:add_texture_bytes("bad2.dds", {
+                height = "bad",
+                width = 1,
+                mip_count = 1,
+                format = 61,
+                flags = 0,
+                tile_mode = 0,
+            }, "\127")
+        end))
     "#,
     )
     .exec()

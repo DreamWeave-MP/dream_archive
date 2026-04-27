@@ -206,9 +206,11 @@ impl UserData for LuaArchive {
             }
         });
         methods.add_method("extract_file_required", |lua, this, path: LuaString| {
-            collect_to_string(lua, |out| {
-                this.0.extract_file_required(path.as_bytes().as_ref(), out)
-            })
+            let mut out = Vec::new();
+            this.0
+                .extract_file_required(path.as_bytes().as_ref(), &mut out)
+                .map_err(mlua::Error::external)?;
+            lua.create_string(&out)
         });
         methods.add_method("extract_to", |_lua, this, target: LuaString| {
             this.0
@@ -296,6 +298,26 @@ impl UserData for LuaBa2Archive {
                     .read_file_required(path.as_bytes().as_ref())
                     .map_err(mlua::Error::external)?,
             )
+        });
+        methods.add_method("extract_file", |lua, this, path: LuaString| {
+            let mut out = Vec::new();
+            if this
+                .0
+                .extract_file(path.as_bytes().as_ref(), &mut out)
+                .map_err(mlua::Error::external)?
+                .is_some()
+            {
+                Ok(Value::String(lua.create_string(&out)?))
+            } else {
+                Ok(Value::Nil)
+            }
+        });
+        methods.add_method("extract_file_required", |lua, this, path: LuaString| {
+            let mut out = Vec::new();
+            this.0
+                .extract_file_required(path.as_bytes().as_ref(), &mut out)
+                .map_err(mlua::Error::external)?;
+            lua.create_string(&out)
         });
         methods.add_method("read_entry", |lua, this, index: usize| {
             let entry = this
@@ -660,6 +682,7 @@ impl UserData for LuaTes3Archive {
 impl UserData for LuaTes3Builder {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("len", |_lua, this, ()| Ok(this.0.len()));
+        methods.add_method("is_empty", |_lua, this, ()| Ok(this.0.is_empty()));
         methods.add_method_mut(
             "add_bytes",
             |_lua, this, (path, bytes): (LuaString, LuaString)| {
@@ -830,6 +853,7 @@ impl UserData for LuaTes4Archive {
 impl UserData for LuaTes4Builder {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("len", |_lua, this, ()| Ok(this.0.len()));
+        methods.add_method("is_empty", |_lua, this, ()| Ok(this.0.is_empty()));
         methods.add_method_mut("set_version", |_lua, this, version: u32| {
             this.0.set_version(tes4_version(version)?);
             Ok(())

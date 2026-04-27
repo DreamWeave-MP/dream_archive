@@ -242,11 +242,14 @@ dream_archive = { version = "0.1", features = ["lua"] }
 The `lua` feature exposes a byte-first Lua API through `dream_archive::lua` for
 Rust embedders. It does not install a standalone `require("dream_archive")` C Lua
 module by itself; register the `mlua` table in your application. Lua strings are
-archive path bytes and payload bytes. Filesystem arguments (`open_path`,
-`write_path`, `extract_to`, `add_dir`, and source paths for `add_file`) are the
-exception: they are converted as UTF-8 host paths. If your Unix filesystem path
-is not valid UTF-8, use the Rust API directly. Annoying, but less dishonest than
-pretending all paths are the same kind of string.
+archive path bytes and payload bytes. Filesystem arguments are the exception:
+`open_path`, `detect_path`, `write_path`, `extract_to`, `extract_entry_to_path`,
+`add_dir`, and source paths such as `add_file` / `add_dds_file` are converted as
+UTF-8 host paths. Archive paths passed to `read_file`, `add_bytes`, `add_file`'s
+first argument, hash helpers, and `normalize_path` remain raw archive path bytes.
+If your Unix filesystem path is not valid UTF-8, use the Rust API directly.
+Annoying, but less dishonest than pretending all paths are the same kind of
+string.
 
 ```rust,no_run
 # fn main() -> mlua::Result<()> {
@@ -278,6 +281,11 @@ The module exposes:
 - TES3/TES4 archive inspection, hashes, builders, TES4 profiles, name modes,
   compression policy, and archive type bits.
 
+`entries()` returns a fully materialized Lua table, copying entry metadata into
+Lua values. That is convenient for scripts and not a streaming iterator. Likewise
+TES4 `extract_to_with_paths()` copies the supplied Lua path dictionary before it
+starts matching hash-only entries.
+
 Use `dream_archive.open_*` when you want one generic reader for BA2/TES3/TES4.
 Use `dream_archive.ba2.open_*`, `dream_archive.bsa.tes3.open_*`, or
 `dream_archive.bsa.tes4.open_*` when you need format-specific metadata or helper
@@ -293,10 +301,39 @@ local path = dream_archive.bsa.encode_filename(
 local bytes = archive:read_file_required(path)
 ```
 
+Optional read/extract APIs return `nil` when the archive does not contain the
+path. The `*_required` variants raise an error instead:
+
+```lua
+local maybe = archive:read_file("meshes/foo.nif")
+if maybe == nil then
+    -- absent from the archive
+end
+
+local ok, err = pcall(function()
+    archive:extract_file_required("missing.nif")
+end)
+if not ok then
+    print(err)
+end
+```
+
 `normalize_path` returns normalized archive path bytes, not a Unicode-cleaned OS
 path. TES3/TES4 64-bit hashes are exposed as exact component fields plus a fixed
 width hexadecimal string; they are not exposed as Lua numbers because LuaJIT
 numbers are not a safe exact carrier for arbitrary `u64` values.
+
+```lua
+local ba2 = dream_archive.ba2.hash_file("Meshes/Foo.NIF")
+-- ba2.directory, ba2.file, ba2.extension, ba2.normalized
+
+local tes3 = dream_archive.bsa.tes3.hash_file("Meshes/Foo.NIF")
+-- tes3.lo, tes3.hi, tes3.hex, tes3.normalized
+
+local tes4 = dream_archive.bsa.tes4.hash_file("Meshes/Foo.NIF")
+-- tes4.last, tes4.last2, tes4.length, tes4.first, tes4.crc, tes4.hex
+-- no numeric u64 field; use hex for exact identity
+```
 
 To support Lua's `require`, preload the module yourself:
 
@@ -309,6 +346,9 @@ preload.set(
     "dream_archive",
     lua.create_function(|lua, ()| dream_archive::lua::create_module(lua))?,
 )?;
+
+// Lua side:
+// local dream_archive = require("dream_archive")
 # Ok(())
 # }
 ```
