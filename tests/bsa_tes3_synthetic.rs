@@ -65,6 +65,22 @@ fn extracts_synthetic_tes3_file() {
 }
 
 #[test]
+fn tes3_extract_entry_to_path_creates_parent_directories() {
+    let archive = Archive::from_slice(&tiny_tes3_archive(b"Meshes/Foo.NIF", b"hello")).unwrap();
+    let out = output_dir("tes3-entry-create-parent");
+    let file_path = out.join("missing/parents/foo.nif");
+
+    assert_eq!(
+        archive
+            .extract_entry_to_path(&archive.entries()[0], &file_path)
+            .unwrap(),
+        5
+    );
+    assert_eq!(std::fs::read(&file_path).unwrap(), b"hello");
+    std::fs::remove_dir_all(out).unwrap();
+}
+
+#[test]
 fn writes_tes3_archive_from_bytes() {
     let mut builder = Builder::new();
     builder.add_bytes("Meshes/Foo.NIF", b"mesh").unwrap();

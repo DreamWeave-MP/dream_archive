@@ -232,6 +232,26 @@ fn writes_ba2_gnrl_archive_from_bytes() {
 }
 
 #[test]
+fn ba2_extract_entry_to_path_creates_parent_directories() {
+    let mut builder = Builder::new();
+    builder.add_bytes("Meshes/Foo.NIF", b"mesh").unwrap();
+    let bytes = builder.to_vec().unwrap();
+    let archive = Archive::from_slice(&bytes).unwrap();
+    let out = output_dir("ba2-entry-create-parent");
+    let file_path = out.join("missing/parents/foo.nif");
+
+    assert_eq!(
+        archive
+            .extract_entry_to_path(&archive.entries()[0], &file_path)
+            .unwrap(),
+        4
+    );
+    assert_eq!(std::fs::read(&file_path).unwrap(), b"mesh");
+    assert_no_temp_extract_files(file_path.parent().unwrap());
+    std::fs::remove_dir_all(out).unwrap();
+}
+
+#[test]
 fn ba2_writer_places_payloads_before_string_table() {
     let mut builder = Builder::new();
     builder.set_compression(Some(Ba2CompressionFormat::Zip));

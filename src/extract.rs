@@ -114,6 +114,9 @@ pub(crate) fn write_file_atomically<E>(
 where
     E: From<io::Error>,
 {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let (temp_path, mut file) = create_temp_file(path)?;
 
     let result = write(&mut file).and_then(|written| {
