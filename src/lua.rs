@@ -3,7 +3,10 @@
 //! Enable the `lua` feature to build an `mlua` interface using `LuaJIT` with Lua
 //! 5.2 compatibility and vendored sources. The API is intentionally byte-first:
 //! Lua strings are archive path bytes and payload bytes. Filesystem paths are
-//! the few places where strings are interpreted as host paths.
+//! the few places where strings are interpreted as UTF-8 host paths. This module
+//! creates an embedded `mlua` table; it does not install a standalone
+//! `require("dream_archive")` module unless the embedding application registers
+//! one.
 //!
 //! ```rust,no_run
 //! # fn main() -> mlua::Result<()> {
@@ -190,11 +193,17 @@ impl UserData for LuaArchive {
             lua.create_string(&bytes)
         });
         methods.add_method("extract_file", |lua, this, path: LuaString| {
-            collect_to_string(lua, |out| {
-                this.0
-                    .extract_file(path.as_bytes().as_ref(), out)
-                    .map(|bytes| bytes.unwrap_or(0))
-            })
+            let mut out = Vec::new();
+            if this
+                .0
+                .extract_file(path.as_bytes().as_ref(), &mut out)
+                .map_err(mlua::Error::external)?
+                .is_some()
+            {
+                Ok(Value::String(lua.create_string(&out)?))
+            } else {
+                Ok(Value::Nil)
+            }
         });
         methods.add_method("extract_file_required", |lua, this, path: LuaString| {
             collect_to_string(lua, |out| {
@@ -236,8 +245,17 @@ fn ba2_module(lua: &Lua) -> Result<Table> {
         "Dx10Builder",
         constructor_table(lua, LuaBa2Dx10Builder::default)?,
     )?;
-    module.set("compression", enum_table(lua, &["zip", "lz4"])?)?;
-    module.set("version", enum_table(lua, &["v1", "v2", "v3", "v7", "v8"])?)?;
+    module.set(
+        "compression",
+        enum_table(lua, &["none", "store", "zip", "lz4"])?,
+    )?;
+    let version = lua.create_table()?;
+    version.set("v1", 1)?;
+    version.set("v2", 2)?;
+    version.set("v3", 3)?;
+    version.set("v7", 7)?;
+    version.set("v8", 8)?;
+    module.set("version", version)?;
     Ok(module)
 }
 
@@ -349,6 +367,7 @@ fn ba2_entries(lua: &Lua, this: &LuaBa2Archive) -> Result<Table> {
         let table = lua.create_table()?;
         table.set("index", index + 1)?;
         table.set("name", lua.create_string(entry.name().as_bytes())?)?;
+        table.set("path", lua.create_string(entry.name().as_bytes())?)?;
         let hash = lua.create_table()?;
         hash.set("directory", entry.hash().directory)?;
         hash.set("file", entry.hash().file)?;
@@ -421,6 +440,9 @@ impl UserData for LuaBa2Builder {
         methods.add_method("to_string", |lua, this, ()| {
             lua.create_string(&this.0.to_vec().map_err(mlua::Error::external)?)
         });
+        methods.add_method("to_bytes", |lua, this, ()| {
+            lua.create_string(&this.0.to_vec().map_err(mlua::Error::external)?)
+        });
     }
 }
 
@@ -477,6 +499,9 @@ impl UserData for LuaBa2Dx10Builder {
                 .map_err(mlua::Error::external)
         });
         methods.add_method("to_string", |lua, this, ()| {
+            lua.create_string(&this.0.to_vec().map_err(mlua::Error::external)?)
+        });
+        methods.add_method("to_bytes", |lua, this, ()| {
             lua.create_string(&this.0.to_vec().map_err(mlua::Error::external)?)
         });
     }
@@ -603,14 +628,14 @@ fn tes3_module(lua: &Lua) -> Result<Table> {
 }
 
 #[cfg(feature = "bsa-tes3")]
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "mlua create_function requires callbacks to return mlua::Result"
-)]
-fn tes3_hash_file(_lua: &Lua, path: LuaString) -> Result<u64> {
-    Ok(crate::bsa::tes3::hash_file(path.as_bytes().as_ref())
-        .0
-        .numeric())
+fn tes3_hash_file(lua: &Lua, path: LuaString) -> Result<Table> {
+    let (hash, normalized) = crate::bsa::tes3::hash_file(path.as_bytes().as_ref());
+    let table = lua.create_table()?;
+    table.set("lo", hash.lo)?;
+    table.set("hi", hash.hi)?;
+    table.set("hex", u64_hex(hash.numeric()))?;
+    table.set("normalized", lua.create_string(&normalized)?)?;
+    Ok(table)
 }
 
 #[cfg(feature = "bsa-tes3")]
@@ -674,6 +699,9 @@ impl UserData for LuaTes3Builder {
                 .map_err(mlua::Error::external)
         });
         methods.add_method("to_string", |lua, this, ()| {
+            lua.create_string(&this.0.to_vec().map_err(mlua::Error::external)?)
+        });
+        methods.add_method("to_bytes", |lua, this, ()| {
             lua.create_string(&this.0.to_vec().map_err(mlua::Error::external)?)
         });
     }
@@ -761,7 +789,7 @@ fn hash_fields(lua: &Lua, hash: crate::bsa::tes4::HashFields) -> Result<Table> {
     table.set("length", hash.length)?;
     table.set("first", hash.first)?;
     table.set("crc", hash.crc)?;
-    table.set("numeric", hash.numeric())?;
+    table.set("hex", u64_hex(hash.numeric()))?;
     Ok(table)
 }
 
@@ -880,6 +908,9 @@ impl UserData for LuaTes4Builder {
         methods.add_method("to_string", |lua, this, ()| {
             lua.create_string(&this.0.to_vec().map_err(mlua::Error::external)?)
         });
+        methods.add_method("to_bytes", |lua, this, ()| {
+            lua.create_string(&this.0.to_vec().map_err(mlua::Error::external)?)
+        });
     }
 }
 
@@ -968,7 +999,7 @@ impl BsaArchiveAccess for LuaTes3Archive {
             let table = lua.create_table()?;
             table.set("index", index + 1)?;
             table.set("path", lua.create_string(entry.path().as_bytes())?)?;
-            table.set("hash", entry.hash())?;
+            table.set("hash", tes3_entry_hash(lua, entry.hash())?)?;
             table.set("size", entry.file().size)?;
             table.set("offset", entry.file().offset)?;
             entries.set(index + 1, table)?;
@@ -1209,5 +1240,20 @@ fn enum_table(lua: &Lua, values: &[&str]) -> Result<Table> {
     for value in values {
         table.set(*value, *value)?;
     }
+    Ok(table)
+}
+
+fn u64_hex(value: u64) -> String {
+    format!("{value:016x}")
+}
+
+#[cfg(feature = "bsa-tes3")]
+fn tes3_entry_hash(lua: &Lua, hash: u64) -> Result<Table> {
+    let table = lua.create_table()?;
+    let lo = u32::try_from(hash >> 32).expect("upper 32 bits fit in u32 after shifting");
+    let hi = u32::try_from(hash & u64::from(u32::MAX)).expect("masked lower 32 bits fit in u32");
+    table.set("lo", lo)?;
+    table.set("hi", hi)?;
+    table.set("hex", u64_hex(hash))?;
     Ok(table)
 }

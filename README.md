@@ -228,16 +228,25 @@ Default features enable BA2 and both BSA families.
 - `bsa-tes4`: TES4-family BSA support.
 - `bsa`: both BSA families.
 - `parallel`: parallel extraction with Rayon.
-- `lua`: enables the `mlua` bindings and pulls in `ba2`, `bsa`, LuaJIT 5.2
-  compatibility, and vendored LuaJIT sources.
+- `lua`: enables the `mlua` bindings and pulls in `ba2`, `bsa`, `mlua`'s
+  `luajit52` support, and vendored LuaJIT sources.
 
 ## Lua bindings
 
-The `lua` feature exposes a byte-first Lua API through `dream_archive::lua`.
-Lua strings are archive path bytes and payload bytes; filesystem APIs are the
-only methods that interpret strings as host paths. This mirrors the Rust API
-instead of quietly converting old BSA paths through whatever Unicode guess was
-nearest. That would be convenient right up until it corrupts a mod.
+Enable it in `Cargo.toml`:
+
+```toml
+dream_archive = { version = "0.1", features = ["lua"] }
+```
+
+The `lua` feature exposes a byte-first Lua API through `dream_archive::lua` for
+Rust embedders. It does not install a standalone `require("dream_archive")` C Lua
+module by itself; register the `mlua` table in your application. Lua strings are
+archive path bytes and payload bytes. Filesystem arguments (`open_path`,
+`write_path`, `extract_to`, `add_dir`, and source paths for `add_file`) are the
+exception: they are converted as UTF-8 host paths. If your Unix filesystem path
+is not valid UTF-8, use the Rust API directly. Annoying, but less dishonest than
+pretending all paths are the same kind of string.
 
 ```rust,no_run
 # fn main() -> mlua::Result<()> {
@@ -247,10 +256,11 @@ lua.globals().set("dream_archive", module)?;
 
 lua.load(r#"
     local builder = dream_archive.ba2.Builder.new()
-    builder:set_compression("zip")
+    builder:set_compression(dream_archive.ba2.compression.zip)
     builder:add_bytes("meshes/example.nif", "payload")
 
-    local archive = dream_archive.open_bytes(builder:to_string())
+    -- to_bytes()/to_string() return raw archive bytes as a Lua string.
+    local archive = dream_archive.open_bytes(builder:to_bytes())
     assert(archive:format() == "ba2")
     assert(archive:read_file_required("meshes/example.nif") == "payload")
 "#).exec()?;
@@ -267,6 +277,41 @@ The module exposes:
 - BSA encoding/decoding helpers and path normalization;
 - TES3/TES4 archive inspection, hashes, builders, TES4 profiles, name modes,
   compression policy, and archive type bits.
+
+Use `dream_archive.open_*` when you want one generic reader for BA2/TES3/TES4.
+Use `dream_archive.ba2.open_*`, `dream_archive.bsa.tes3.open_*`, or
+`dream_archive.bsa.tes4.open_*` when you need format-specific metadata or helper
+APIs such as BA2 `info()` or TES4 `extract_to_with_paths()`.
+
+Legacy BSA filenames must still be encoded explicitly from Lua:
+
+```lua
+local path = dream_archive.bsa.encode_filename(
+    "textures/zażółć.dds",
+    dream_archive.bsa.encoding.windows1250
+)
+local bytes = archive:read_file_required(path)
+```
+
+`normalize_path` returns normalized archive path bytes, not a Unicode-cleaned OS
+path. TES3/TES4 64-bit hashes are exposed as exact component fields plus a fixed
+width hexadecimal string; they are not exposed as Lua numbers because LuaJIT
+numbers are not a safe exact carrier for arbitrary `u64` values.
+
+To support Lua's `require`, preload the module yourself:
+
+```rust,no_run
+# fn main() -> mlua::Result<()> {
+let lua = mlua::Lua::new();
+let package: mlua::Table = lua.globals().get("package")?;
+let preload: mlua::Table = package.get("preload")?;
+preload.set(
+    "dream_archive",
+    lua.create_function(|lua, ()| dream_archive::lua::create_module(lua))?,
+)?;
+# Ok(())
+# }
+```
 
 ## Compatibility policy
 
