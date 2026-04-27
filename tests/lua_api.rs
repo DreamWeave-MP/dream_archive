@@ -39,6 +39,8 @@ fn lua_builds_and_reads_ba2_through_top_level_facade() {
         assert(archive:format() == "ba2")
         assert(archive:len() == 1)
         assert(archive:read_file_required("meshes/foo.nif") == "mesh payload")
+        assert(archive:read_entry(1) == "mesh payload")
+        assert(archive:extract_entry(1) == "mesh payload")
         local entries = archive:entries()
         assert(entries[1].path == "meshes\\foo.nif")
 
@@ -46,6 +48,56 @@ fn lua_builds_and_reads_ba2_through_top_level_facade() {
         assert(ba2:info().format == "gnrl")
         assert(ba2:entries()[1].path == "meshes\\foo.nif")
         assert(ba2:entries()[1].name == "meshes\\foo.nif")
+    "#,
+    )
+    .exec()
+    .unwrap();
+}
+
+#[test]
+fn lua_ba2_stringless_entries_report_nil_paths() {
+    let lua = lua_with_module();
+    let fixture = std::env::current_dir()
+        .unwrap()
+        .join("tests/fixtures/ba2/missing_string_table/in.ba2");
+    lua.globals()
+        .set("fixture_path", fixture.to_string_lossy().as_ref())
+        .unwrap();
+
+    lua.load(
+        r"
+        local generic = dream_archive.open_path(fixture_path)
+        assert(generic:entries()[1].path == nil)
+
+        local ba2 = dream_archive.ba2.open_path(fixture_path)
+        local entry = ba2:entries()[1]
+        assert(entry.path == nil)
+        assert(entry.name == nil)
+        assert(ba2:read_entry(1) ~= nil)
+    ",
+    )
+    .exec()
+    .unwrap();
+}
+
+#[test]
+fn lua_exports_expected_module_shape() {
+    let lua = lua_with_module();
+
+    lua.load(
+        r#"
+        assert(type(dream_archive.open_bytes) == "function")
+        assert(type(dream_archive.detect_path) == "function")
+        assert(type(dream_archive.ba2.Builder.new) == "function")
+        assert(type(dream_archive.ba2.Dx10Builder.new) == "function")
+        assert(dream_archive.ba2.compression.none == "none")
+        assert(dream_archive.ba2.version.v8 == 8)
+        assert(dream_archive.bsa.encoding.cp437 == "cp437")
+        assert(type(dream_archive.bsa.tes3.Builder.new) == "function")
+        assert(type(dream_archive.bsa.tes4.Builder.new) == "function")
+        assert(dream_archive.bsa.tes4.profile.skyrim_se == "skyrim_se")
+        assert(dream_archive.bsa.tes4.name_mode.hash_only == "hash_only")
+        assert(type(dream_archive.bsa.tes4.archive_types.textures) == "number")
     "#,
     )
     .exec()
@@ -61,6 +113,9 @@ fn lua_builds_and_reads_tes3_and_encodes_paths() {
         local encoded = dream_archive.bsa.encode_filename("textures/zażółć.dds", dream_archive.bsa.encoding.windows1250)
         assert(encoded == "textures/za\191\243\179\230.dds")
         assert(dream_archive.bsa.decode_filename_lossy(encoded, "windows1250") == "textures/zażółć.dds")
+        assert(dream_archive.bsa.encode_filename("a", "cp1250") == "a")
+        assert(dream_archive.bsa.encode_filename("a", "cp1251") == "a")
+        assert(dream_archive.bsa.encode_filename("a", "cp1252") == "a")
 
         local builder = dream_archive.bsa.tes3.Builder.new()
         builder:add_bytes("Meshes/Foo.NIF", "tes3 payload")
@@ -70,6 +125,33 @@ fn lua_builds_and_reads_tes3_and_encodes_paths() {
         assert(archive:entries()[1].path == "meshes\\foo.nif")
         assert(archive:read_entry(1) == "tes3 payload")
         assert(archive:extract_file_required("meshes/foo.nif") == "tes3 payload")
+    "#,
+    )
+    .exec()
+    .unwrap();
+}
+
+#[test]
+fn lua_top_level_facade_reads_tes3_and_tes4() {
+    let lua = lua_with_module();
+
+    lua.load(
+        r#"
+        local tes3_builder = dream_archive.bsa.tes3.Builder.new()
+        tes3_builder:add_bytes("meshes/foo.nif", "tes3")
+        local tes3 = dream_archive.open_bytes(tes3_builder:to_bytes())
+        assert(tes3:format() == "bsa-tes3")
+        assert(tes3:entries()[1].format == "bsa-tes3")
+        assert(tes3:read_file_required("meshes/foo.nif") == "tes3")
+        assert(tes3:read_entry(1) == "tes3")
+
+        local tes4_builder = dream_archive.bsa.tes4.Builder.new()
+        tes4_builder:add_bytes("textures/foo.dds", "tes4")
+        local tes4 = dream_archive.open_bytes(tes4_builder:to_bytes())
+        assert(tes4:format() == "bsa-tes4")
+        assert(tes4:entries()[1].format == "bsa-tes4")
+        assert(tes4:read_file_required("textures/foo.dds") == "tes4")
+        assert(tes4:extract_entry(1) == "tes4")
     "#,
     )
     .exec()
@@ -124,6 +206,58 @@ fn lua_preserves_byte_strings_and_optional_absence() {
         local normalized = dream_archive.normalize_path("A/B\255/C")
         assert(string.byte(normalized, 4) == 255)
         assert(normalized == "a/b\255/c")
+        assert(dream_archive.bsa.normalize_path("A\\B\255/C") == "a/b\255/c")
+    "#,
+    )
+    .exec()
+    .unwrap();
+}
+
+#[test]
+fn lua_preserves_raw_archive_path_bytes() {
+    let lua = lua_with_module();
+
+    lua.load(
+        r#"
+        local path = "bytes/\255.bin"
+        local builder = dream_archive.ba2.Builder.new()
+        builder:add_bytes(path, "payload")
+        local archive = dream_archive.ba2.open_bytes(builder:to_bytes())
+        assert(archive:contains(path))
+        assert(archive:read_file_required(path) == "payload")
+        local entry_path = archive:entries()[1].path
+        assert(string.byte(entry_path, 7) == 255)
+        assert(entry_path == "bytes\\\255.bin")
+    "#,
+    )
+    .exec()
+    .unwrap();
+}
+
+#[test]
+fn lua_preserves_bsa_raw_archive_path_bytes() {
+    let lua = lua_with_module();
+
+    lua.load(
+        r#"
+        local path = "bytes/\255.bin"
+
+        local tes3_builder = dream_archive.bsa.tes3.Builder.new()
+        tes3_builder:add_bytes(path, "tes3")
+        local tes3 = dream_archive.bsa.tes3.open_bytes(tes3_builder:to_bytes())
+        assert(tes3:contains(path))
+        assert(tes3:read_file_required(path) == "tes3")
+        assert(string.byte(tes3:entries()[1].path, 7) == 255)
+
+        local tes4_builder = dream_archive.bsa.tes4.Builder.new()
+        tes4_builder:add_bytes(path, "tes4")
+        local tes4 = dream_archive.bsa.tes4.open_bytes(tes4_builder:to_bytes())
+        assert(tes4:contains(path))
+        assert(tes4:read_file_required(path) == "tes4")
+        local entry = tes4:entries()[1]
+        assert(string.byte(entry.path, 7) == 255)
+        assert(entry.folder == "bytes")
+        assert(string.byte(entry.name, 1) == 255)
     "#,
     )
     .exec()
@@ -145,27 +279,81 @@ fn lua_reports_option_and_index_errors() {
         local ba2 = dream_archive.ba2.Builder.new()
         fails_with("unsupported BA2 version", function() ba2:set_version(9) end)
         fails_with("unknown BA2 compression", function() ba2:set_compression("nonsense") end)
+        fails_with("zlib compression level", function() ba2:set_zlib_level(10) end)
         fails_with("unknown compression override", function()
             ba2:add_bytes_with_compression("a.txt", "x", "nonsense")
         end)
         fails_with("unknown filename encoding", function()
             dream_archive.bsa.encode_filename("x", "nonsense")
         end)
+        fails_with("invalid utf-8", function()
+            dream_archive.bsa.encode_filename("bad\255", "windows1250")
+        end)
 
         local tes4_builder = dream_archive.bsa.tes4.Builder.new()
         fails_with("unsupported TES4 BSA version", function() tes4_builder:set_version(999) end)
         fails_with("unknown TES4 profile", function() tes4_builder:set_profile("arena") end)
         fails_with("unknown TES4 name mode", function() tes4_builder:set_name_mode("mystery") end)
+        fails_with("zlib compression level", function() tes4_builder:set_zlib_level(999) end)
 
         ba2:add_bytes("a.txt", "x")
         local archive = dream_archive.ba2.open_bytes(ba2:to_bytes())
         assert(archive:read_entry(1) == "x")
         fails_with("out of bounds", function() archive:read_entry(0) end)
         fails_with("out of bounds", function() archive:extract_entry(2) end)
+
+        local generic = dream_archive.open_bytes(ba2:to_bytes())
+        fails_with("out of bounds", function() generic:read_entry(0) end)
+
+        local tes3_builder = dream_archive.bsa.tes3.Builder.new()
+        fails_with("invalid utf-8", function()
+            tes3_builder:add_encoded_path("bad\255", "windows1250", "x")
+        end)
+        tes3_builder:add_bytes("a.txt", "x")
+        local tes3_archive = dream_archive.bsa.tes3.open_bytes(tes3_builder:to_bytes())
+        fails_with("out of bounds", function() tes3_archive:read_entry(0) end)
+        fails_with("out of bounds", function() tes3_archive:extract_entry(2) end)
+
+        fails_with("invalid utf-8", function()
+            tes4_builder:add_encoded_path("bad\255", "windows1250", "x")
+        end)
+        tes4_builder:add_bytes("a.txt", "x")
+        local tes4_archive = dream_archive.bsa.tes4.open_bytes(tes4_builder:to_bytes())
+        fails_with("out of bounds", function() tes4_archive:read_entry(0) end)
+        fails_with("out of bounds", function() tes4_archive:extract_entry(2) end)
     "#,
     )
     .exec()
     .unwrap();
+}
+
+#[test]
+fn lua_unknown_detection_returns_nil() {
+    let lua = lua_with_module();
+    let root = temp_dir("detect-nil");
+    let unknown = root.join("unknown.bin");
+    let short = root.join("short.bin");
+    std::fs::write(&unknown, b"not an archive").unwrap();
+    std::fs::write(&short, b"").unwrap();
+    lua.globals()
+        .set("unknown_path", unknown.to_string_lossy().as_ref())
+        .unwrap();
+    lua.globals()
+        .set("short_path", short.to_string_lossy().as_ref())
+        .unwrap();
+
+    lua.load(
+        r#"
+        assert(dream_archive.guess_format("not an archive") == nil)
+        assert(dream_archive.guess_format("") == nil)
+        assert(dream_archive.detect_path(unknown_path) == nil)
+        assert(dream_archive.detect_path(short_path) == nil)
+    "#,
+    )
+    .exec()
+    .unwrap();
+
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -252,10 +440,49 @@ fn lua_rejects_non_utf8_filesystem_paths() {
         fails(function() builder:write_path("bad\255.ba2") end)
         fails(function() builder:add_file("b.txt", "bad\255source") end)
 
+        local dx10 = dream_archive.ba2.Dx10Builder.new()
+        fails(function() dx10:write_path("bad\255.ba2") end)
+        fails(function() dx10:add_dds_file("textures/a.dds", "bad\255source") end)
+
         local tes3 = dream_archive.bsa.tes3.Builder.new()
         fails(function() tes3:add_file("b.txt", "bad\255source") end)
         fails(function() tes3:add_dir("bad\255dir") end)
         fails(function() tes3:write_path("bad\255.bsa") end)
+
+        local tes4 = dream_archive.bsa.tes4.Builder.new()
+        fails(function() tes4:add_file("b.txt", "bad\255source") end)
+        fails(function() tes4:add_dir("bad\255dir") end)
+        fails(function() tes4:write_path("bad\255.bsa") end)
+        tes4:add_bytes("a.txt", "x")
+        local tes4_archive = dream_archive.bsa.tes4.open_bytes(tes4:to_bytes())
+        fails(function() tes4_archive:extract_to("bad\255dir") end)
+        fails(function() tes4_archive:extract_entry_to_path(1, "bad\255file") end)
+        fails(function() tes4_archive:extract_to_with_encoding("bad\255dir", "utf8") end)
+        fails(function() tes4_archive:extract_to_with_paths("bad\255dir", { "a.txt" }) end)
+    "#,
+    )
+    .exec()
+    .unwrap();
+}
+
+#[test]
+fn lua_open_bytes_errors_are_not_detection_nil() {
+    let lua = lua_with_module();
+
+    lua.load(
+        r#"
+        local ba2_builder = dream_archive.ba2.Builder.new()
+        ba2_builder:add_bytes("a.txt", "ba2")
+        local ba2_bytes = ba2_builder:to_bytes()
+
+        local tes3_builder = dream_archive.bsa.tes3.Builder.new()
+        tes3_builder:add_bytes("a.txt", "tes3")
+        local tes3_bytes = tes3_builder:to_bytes()
+
+        assert(not pcall(function() dream_archive.open_bytes("not an archive") end))
+        assert(not pcall(function() dream_archive.ba2.open_bytes(tes3_bytes) end))
+        assert(not pcall(function() dream_archive.bsa.tes3.open_bytes(ba2_bytes) end))
+        assert(not pcall(function() dream_archive.bsa.tes4.open_bytes(tes3_bytes) end))
     "#,
     )
     .exec()
@@ -349,6 +576,144 @@ fn lua_filesystem_extraction_and_builder_paths_round_trip() {
 }
 
 #[test]
+fn lua_generic_facade_extracts_entries_and_archives() {
+    let lua = lua_with_module();
+    let root = temp_dir("generic-extract");
+    let entry_out = root.join("entry.bin");
+    let tes3_out = root.join("tes3-out");
+    let tes4_out = root.join("tes4-out");
+    lua.globals()
+        .set("entry_out", entry_out.to_string_lossy().as_ref())
+        .unwrap();
+    lua.globals()
+        .set("tes3_out", tes3_out.to_string_lossy().as_ref())
+        .unwrap();
+    lua.globals()
+        .set("tes4_out", tes4_out.to_string_lossy().as_ref())
+        .unwrap();
+
+    lua.load(
+        r#"
+        local tes3_builder = dream_archive.bsa.tes3.Builder.new()
+        tes3_builder:add_bytes("meshes/foo.nif", "tes3")
+        local tes3 = dream_archive.open_bytes(tes3_builder:to_bytes())
+        tes3:extract_entry_to_path(1, entry_out)
+        tes3:extract_to(tes3_out)
+
+        local tes4_builder = dream_archive.bsa.tes4.Builder.new()
+        tes4_builder:add_bytes("textures/foo.dds", "tes4")
+        local tes4 = dream_archive.open_bytes(tes4_builder:to_bytes())
+        tes4:extract_to(tes4_out)
+    "#,
+    )
+    .exec()
+    .unwrap();
+
+    assert_eq!(std::fs::read(entry_out).unwrap(), b"tes3");
+    assert_eq!(
+        std::fs::read(tes3_out.join("meshes/foo.nif")).unwrap(),
+        b"tes3"
+    );
+    assert_eq!(
+        std::fs::read(tes4_out.join("textures/foo.dds")).unwrap(),
+        b"tes4"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn lua_bsa_extracts_entries_and_encoded_paths_to_filesystem() {
+    let lua = lua_with_module();
+    let root = temp_dir("bsa-extract");
+    let entry_out = root.join("entry.bin");
+    let tes3_out = root.join("tes3-out");
+    let tes4_out = root.join("tes4-out");
+
+    lua.globals()
+        .set("entry_out", entry_out.to_string_lossy().as_ref())
+        .unwrap();
+    lua.globals()
+        .set("tes3_out", tes3_out.to_string_lossy().as_ref())
+        .unwrap();
+    lua.globals()
+        .set("tes4_out", tes4_out.to_string_lossy().as_ref())
+        .unwrap();
+
+    lua.load(
+        r#"
+        local encoded = "textures/za\191\243\179\230.dds"
+
+        local tes3_builder = dream_archive.bsa.tes3.Builder.new()
+        tes3_builder:add_encoded_path("textures/zażółć.dds", "windows1250", "tes3")
+        local tes3 = dream_archive.bsa.tes3.open_bytes(tes3_builder:to_bytes())
+        tes3:extract_entry_to_path(1, entry_out)
+        tes3:extract_to_with_encoding(tes3_out, "windows1250")
+        assert(tes3:read_file_required(encoded) == "tes3")
+
+        local tes4_builder = dream_archive.bsa.tes4.Builder.new()
+        tes4_builder:add_encoded_path("textures/zażółć.dds", "windows1250", "tes4")
+        local tes4 = dream_archive.bsa.tes4.open_bytes(tes4_builder:to_bytes())
+        tes4:extract_to_with_encoding(tes4_out, "windows1250")
+    "#,
+    )
+    .exec()
+    .unwrap();
+
+    assert_eq!(std::fs::read(entry_out).unwrap(), b"tes3");
+    assert_eq!(
+        std::fs::read(tes3_out.join("textures/zażółć.dds")).unwrap(),
+        b"tes3"
+    );
+    assert_eq!(
+        std::fs::read(tes4_out.join("textures/zażółć.dds")).unwrap(),
+        b"tes4"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn lua_tes4_extract_to_with_paths_uses_sequence_values() {
+    let lua = lua_with_module();
+    let root = temp_dir("tes4-path-sequence");
+    let extract_dir = root.join("out");
+    lua.globals()
+        .set("extract_dir", extract_dir.to_string_lossy().as_ref())
+        .unwrap();
+
+    lua.load(
+        r#"
+        local builder = dream_archive.bsa.tes4.Builder.new()
+        builder:set_name_mode(dream_archive.bsa.tes4.name_mode.hash_only)
+        builder:add_bytes("textures/foo.dds", "payload")
+        local archive = dream_archive.bsa.tes4.open_bytes(builder:to_bytes())
+        local entry = archive:entries()[1]
+        assert(entry.path == nil)
+        assert(entry.folder == nil)
+        assert(entry.name == nil)
+        archive:extract_to_with_paths(extract_dir, {
+            "meshes/not-this.nif",
+            "textures/foo.dds",
+        })
+
+        local bad_out = extract_dir .. "-bad"
+        archive:extract_to_with_paths(bad_out, {
+            [2] = "textures/foo.dds",
+            candidate = "textures/foo.dds",
+        })
+    "#,
+    )
+    .exec()
+    .unwrap();
+
+    assert_eq!(
+        std::fs::read(extract_dir.join("textures/foo.dds")).unwrap(),
+        b"payload"
+    );
+    assert!(!root.join("out-bad/textures/foo.dds").exists());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn lua_exposes_exact_hash_values() {
     let lua = lua_with_module();
 
@@ -395,6 +760,8 @@ fn lua_accepts_default_compression_options_and_rejects_bad_dx10_headers() {
         r#"
         local ba2 = dream_archive.ba2.Builder.new()
         assert(ba2:is_empty())
+        ba2:set_zlib_level(0)
+        ba2:set_zlib_level(9)
         ba2:set_compression(nil)
         ba2:add_bytes_with_compression("a.txt", "x", nil)
         ba2:add_bytes_with_compression("b.txt", "y", "inherit")
@@ -405,11 +772,14 @@ fn lua_accepts_default_compression_options_and_rejects_bad_dx10_headers() {
 
         local tes4 = dream_archive.bsa.tes4.Builder.new()
         assert(tes4:is_empty())
+        tes4:set_zlib_level(0)
+        tes4:set_zlib_level(9)
         tes4:add_bytes_with_compression("a.txt", "x", nil)
         tes4:add_bytes_with_compression("b.txt", "y", "compress")
         assert(tes4:len() == 2)
 
         local dx10 = dream_archive.ba2.Dx10Builder.new()
+        assert(dx10:is_empty())
         assert(not pcall(function()
             dx10:add_texture_bytes("bad.dds", {
                 height = 1,

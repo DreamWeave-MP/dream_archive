@@ -96,16 +96,20 @@ fn open_bytes(_lua: &Lua, bytes: LuaString) -> Result<LuaArchive> {
 }
 
 fn detect_path(_lua: &Lua, path: LuaString) -> Result<Option<String>> {
-    crate::detect_path(path.to_str()?.as_ref())
-        .map(|format| format.map(format_name).map(str::to_owned))
-        .map_err(mlua::Error::external)
+    match crate::detect_path(path.to_str()?.as_ref()) {
+        Ok(format) => Ok(format.map(format_name).map(str::to_owned)),
+        Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => Ok(None),
+        Err(error) => Err(mlua::Error::external(error)),
+    }
 }
 
 fn guess_format(_lua: &Lua, bytes: LuaString) -> Result<Option<String>> {
     let mut cursor = std::io::Cursor::new(bytes.as_bytes());
-    crate::guess_format(&mut cursor)
-        .map(|format| format.map(format_name).map(str::to_owned))
-        .map_err(mlua::Error::external)
+    match crate::guess_format(&mut cursor) {
+        Ok(format) => Ok(format.map(format_name).map(str::to_owned)),
+        Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => Ok(None),
+        Err(error) => Err(mlua::Error::external(error)),
+    }
 }
 
 fn normalize_path(lua: &Lua, path: LuaString) -> Result<LuaString> {
@@ -157,8 +161,14 @@ fn compression_override(value: Option<String>) -> Result<crate::CompressionOverr
 }
 
 #[cfg(any(feature = "ba2", feature = "bsa-tes4"))]
-fn zlib_level(level: u32) -> flate2::Compression {
-    flate2::Compression::new(level)
+fn zlib_level(level: u32) -> Result<flate2::Compression> {
+    if level <= 9 {
+        Ok(flate2::Compression::new(level))
+    } else {
+        Err(mlua::Error::external(format!(
+            "zlib compression level must be 0..=9, got {level}"
+        )))
+    }
 }
 
 impl UserData for LuaArchive {
@@ -167,9 +177,9 @@ impl UserData for LuaArchive {
         methods.add_method("len", |_lua, this, ()| Ok(this.0.len()));
         methods.add_method("is_empty", |_lua, this, ()| Ok(this.0.is_empty()));
         methods.add_method("entries", |lua, this, ()| {
-            let entries = lua.create_table()?;
+            let entries = lua.create_table_with_capacity(this.0.len(), 0)?;
             for (index, entry) in this.0.entries().enumerate() {
-                let table = lua.create_table()?;
+                let table = lua.create_table_with_capacity(0, 3)?;
                 table.set("index", index + 1)?;
                 table.set("format", format_name(entry.format()))?;
                 set_bytes_field(lua, &table, "path", entry.path().map(AsRef::as_ref))?;
@@ -212,11 +222,132 @@ impl UserData for LuaArchive {
                 .map_err(mlua::Error::external)?;
             lua.create_string(&out)
         });
+        methods.add_method("read_entry", |lua, this, index: usize| {
+            lua.create_string(&read_top_level_entry(&this.0, index).map_err(mlua::Error::external)?)
+        });
+        methods.add_method("extract_entry", |lua, this, index: usize| {
+            collect_to_string(lua, |out| extract_top_level_entry(&this.0, index, out))
+        });
+        methods.add_method(
+            "extract_entry_to_path",
+            |_lua, this, (index, path): (usize, LuaString)| {
+                extract_top_level_entry_to_path(&this.0, index, path.to_str()?.as_ref())
+                    .map_err(mlua::Error::external)
+            },
+        );
         methods.add_method("extract_to", |_lua, this, target: LuaString| {
             this.0
                 .extract_to(target.to_str()?.as_ref())
                 .map_err(mlua::Error::external)
         });
+    }
+}
+
+fn top_level_entry_error() -> crate::Error {
+    crate::Error::Io(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "entry index out of bounds",
+    ))
+}
+
+fn read_top_level_entry(archive: &crate::Archive, index: usize) -> crate::Result<Vec<u8>> {
+    match archive {
+        #[cfg(feature = "ba2")]
+        crate::Archive::BA2(archive) => {
+            let entry = archive
+                .entries()
+                .get(index.checked_sub(1).unwrap_or(usize::MAX))
+                .ok_or_else(top_level_entry_error)?;
+            archive.read_entry(entry).map_err(Into::into)
+        }
+        #[cfg(feature = "bsa-tes3")]
+        crate::Archive::Tes3Bsa(archive) => {
+            let entry = archive
+                .entries()
+                .get(index.checked_sub(1).unwrap_or(usize::MAX))
+                .ok_or_else(top_level_entry_error)?;
+            archive.read_entry(entry).map_err(Into::into)
+        }
+        #[cfg(feature = "bsa-tes4")]
+        crate::Archive::Tes4Bsa(archive) => {
+            let entry = archive
+                .entries()
+                .get(index.checked_sub(1).unwrap_or(usize::MAX))
+                .ok_or_else(top_level_entry_error)?;
+            archive.read_entry(entry).map_err(Into::into)
+        }
+    }
+}
+
+fn extract_top_level_entry(
+    archive: &crate::Archive,
+    index: usize,
+    out: &mut Vec<u8>,
+) -> crate::Result<u64> {
+    match archive {
+        #[cfg(feature = "ba2")]
+        crate::Archive::BA2(archive) => {
+            let entry = archive
+                .entries()
+                .get(index.checked_sub(1).unwrap_or(usize::MAX))
+                .ok_or_else(top_level_entry_error)?;
+            archive.extract_entry(entry, out).map_err(Into::into)
+        }
+        #[cfg(feature = "bsa-tes3")]
+        crate::Archive::Tes3Bsa(archive) => {
+            let entry = archive
+                .entries()
+                .get(index.checked_sub(1).unwrap_or(usize::MAX))
+                .ok_or_else(top_level_entry_error)?;
+            archive.extract_entry(entry, out).map_err(Into::into)
+        }
+        #[cfg(feature = "bsa-tes4")]
+        crate::Archive::Tes4Bsa(archive) => {
+            let entry = archive
+                .entries()
+                .get(index.checked_sub(1).unwrap_or(usize::MAX))
+                .ok_or_else(top_level_entry_error)?;
+            archive.extract_entry(entry, out).map_err(Into::into)
+        }
+    }
+}
+
+fn extract_top_level_entry_to_path(
+    archive: &crate::Archive,
+    index: usize,
+    path: &str,
+) -> crate::Result<u64> {
+    match archive {
+        #[cfg(feature = "ba2")]
+        crate::Archive::BA2(archive) => {
+            let entry = archive
+                .entries()
+                .get(index.checked_sub(1).unwrap_or(usize::MAX))
+                .ok_or_else(top_level_entry_error)?;
+            archive
+                .extract_entry_to_path(entry, path)
+                .map_err(Into::into)
+        }
+        #[cfg(feature = "bsa-tes3")]
+        crate::Archive::Tes3Bsa(archive) => {
+            let entry = archive
+                .entries()
+                .get(index.checked_sub(1).unwrap_or(usize::MAX))
+                .ok_or_else(top_level_entry_error)?;
+            archive
+                .extract_entry_to_path(entry, path)
+                .map_err(Into::into)
+        }
+        #[cfg(feature = "bsa-tes4")]
+        crate::Archive::Tes4Bsa(archive) => {
+            let entry = archive
+                .entries()
+                .get(index.checked_sub(1).unwrap_or(usize::MAX))
+                .ok_or_else(top_level_entry_error)?;
+            archive
+                .extract_entry_to_path(entry, path)
+                .map_err(Into::into)
+        }
     }
 }
 
@@ -384,13 +515,19 @@ fn ba2_archive_info(lua: &Lua, this: &LuaBa2Archive, (): ()) -> Result<Table> {
 
 #[cfg(feature = "ba2")]
 fn ba2_entries(lua: &Lua, this: &LuaBa2Archive) -> Result<Table> {
-    let entries = lua.create_table()?;
+    let entries = lua.create_table_with_capacity(this.0.len(), 0)?;
+    let has_string_table = this.0.info().strings;
     for (index, entry) in this.0.entries().iter().enumerate() {
-        let table = lua.create_table()?;
+        let table = lua.create_table_with_capacity(0, 5)?;
         table.set("index", index + 1)?;
-        table.set("name", lua.create_string(entry.name().as_bytes())?)?;
-        table.set("path", lua.create_string(entry.name().as_bytes())?)?;
-        let hash = lua.create_table()?;
+        if has_string_table && !entry.name().is_empty() {
+            table.set("name", lua.create_string(entry.name().as_bytes())?)?;
+            table.set("path", lua.create_string(entry.name().as_bytes())?)?;
+        } else {
+            table.set("name", Value::Nil)?;
+            table.set("path", Value::Nil)?;
+        }
+        let hash = lua.create_table_with_capacity(0, 3)?;
         hash.set("directory", entry.hash().directory)?;
         hash.set("file", entry.hash().file)?;
         hash.set("extension", entry.hash().extension)?;
@@ -418,7 +555,7 @@ impl UserData for LuaBa2Builder {
             },
         );
         methods.add_method_mut("set_zlib_level", |_lua, this, level: u32| {
-            this.0.set_zlib_level(zlib_level(level));
+            this.0.set_zlib_level(zlib_level(level)?);
             Ok(())
         });
         methods.add_method_mut(
@@ -472,6 +609,7 @@ impl UserData for LuaBa2Builder {
 impl UserData for LuaBa2Dx10Builder {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("len", |_lua, this, ()| Ok(this.0.len()));
+        methods.add_method("is_empty", |_lua, this, ()| Ok(this.0.is_empty()));
         methods.add_method_mut("set_version", |_lua, this, version: u32| {
             this.0.set_version(ba2_version(version)?);
             Ok(())
@@ -484,7 +622,7 @@ impl UserData for LuaBa2Dx10Builder {
             },
         );
         methods.add_method_mut("set_zlib_level", |_lua, this, level: u32| {
-            this.0.set_zlib_level(zlib_level(level));
+            this.0.set_zlib_level(zlib_level(level)?);
             Ok(())
         });
         methods.add_method_mut(
@@ -876,7 +1014,7 @@ impl UserData for LuaTes4Builder {
             Ok(())
         });
         methods.add_method_mut("set_zlib_level", |_lua, this, level: u32| {
-            this.0.set_zlib_level(zlib_level(level));
+            this.0.set_zlib_level(zlib_level(level)?);
             Ok(())
         });
         methods.add_method_mut(
@@ -1018,9 +1156,9 @@ impl BsaArchiveAccess for LuaTes3Archive {
         self.0.is_empty()
     }
     fn entries_table(&self, lua: &Lua) -> Result<Table> {
-        let entries = lua.create_table()?;
+        let entries = lua.create_table_with_capacity(self.0.len(), 0)?;
         for (index, entry) in self.0.entries().iter().enumerate() {
-            let table = lua.create_table()?;
+            let table = lua.create_table_with_capacity(0, 5)?;
             table.set("index", index + 1)?;
             table.set("path", lua.create_string(entry.path().as_bytes())?)?;
             table.set("hash", tes3_entry_hash(lua, entry.hash())?)?;
@@ -1102,9 +1240,9 @@ impl BsaArchiveAccess for LuaTes4Archive {
         self.0.is_empty()
     }
     fn entries_table(&self, lua: &Lua) -> Result<Table> {
-        let entries = lua.create_table()?;
+        let entries = lua.create_table_with_capacity(self.0.len(), 0)?;
         for (index, entry) in self.0.entries().iter().enumerate() {
-            let table = lua.create_table()?;
+            let table = lua.create_table_with_capacity(0, 8)?;
             table.set("index", index + 1)?;
             set_bytes_field(lua, &table, "path", entry.path().map(AsRef::as_ref))?;
             set_bytes_field(lua, &table, "folder", entry.folder().map(AsRef::as_ref))?;
