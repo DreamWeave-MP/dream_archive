@@ -433,3 +433,11 @@ The target is real PC archive compatibility. Console archive layouts and XMem
 compression are not implemented. If a future PC archive proves a currently
 unsupported path is real, useful, and not just format archaeology with a hat, it
 can be added with tests.
+
+## Support
+
+Has `dream-archive` been useful to you?
+
+If so, please consider [amplifying the signal](https://ko-fi.com/magicaldave) through my ko-fi.
+
+Thank you for using `dream-archive`.
