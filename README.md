@@ -146,6 +146,45 @@ Ok(())
 }
 ```
 
+Builder filesystem inputs are deferred. `add_file` and `add_dir` validate archive
+paths, reject duplicates, and record source file metadata when called, but they
+read payload bytes during `write_path`, `write_seek`, or `to_vec`. If a deferred
+source file disappears, becomes unreadable, or changes size before writing, the
+write fails rather than emitting an archive whose table lies about its payloads.
+
+For filesystem output, prefer `write_path` or `write_seek`. `to_vec` necessarily
+buffers the final archive because it returns a `Vec<u8>`; useful for tests and
+small archives, not magic.
+
+When rewriting an archive, unchanged entries can be attached from the parsed
+source archive instead of first extracting them into a `Vec<u8>`:
+
+```rust,no_run
+use std::sync::Arc;
+use dream_archive::bsa::tes3::{Archive, Builder};
+
+fn main() -> dream_archive::bsa::Result<()> {
+let source = Arc::new(Archive::open_path("Old.bsa")?);
+let mut builder = Builder::new();
+
+for (id, entry) in source.entries_with_ids() {
+    if entry.path() != b"data/replaced.txt".as_slice() {
+        builder.add_archive_entry(entry.path(), Arc::clone(&source), id)?;
+    }
+}
+
+builder.add_file("data/replaced.txt", "loose/replaced.txt")?;
+builder.write_path("New.bsa")?;
+Ok(())
+}
+```
+
+BA2 and TES4 builders expose the same `add_archive_entry` pattern, plus
+`add_archive_entry_with_compression` where per-file compression policy matters.
+The first implementation decodes existing entries and writes them according to
+the destination builder policy. Raw compressed-byte copy is deliberately not
+claimed here. That would be a different feature, not a vibe.
+
 Build a BA2 DX10 texture archive from DDS files:
 
 ```rust,no_run
@@ -255,6 +294,14 @@ produce or insert legacy-encoded archive filename bytes. If your Unix filesystem
 path is not valid UTF-8, use the Rust API directly.
 Annoying, but less dishonest than pretending all paths are the same kind of
 string.
+
+Lua builders follow the Rust deferred-source behavior: `add_file` records a host
+path and reads it when `write_path` / `to_bytes` runs. Format-specific archive
+entry tables include both `index` and `id` fields; today they are the same
+1-based number. Pass that `id` to `builder:add_archive_entry(...)` to preserve an
+entry from an already-open archive without round-tripping it through a Lua
+string. BA2 and TES4 builders also expose
+`add_archive_entry_with_compression(path, archive, id, policy)`.
 
 ```rust,no_run
 fn main() -> mlua::Result<()> {

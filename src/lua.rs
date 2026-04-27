@@ -73,8 +73,12 @@
 //! `extract_file*`, `read_entry`, and `extract_entry` materialize full payloads
 //! as Lua strings. `open_bytes` copies Lua archive bytes into Rust-owned storage,
 //! and builder `to_bytes()` / `to_string()` build an archive buffer and then copy
-//! it into Lua. For large archives, prefer `open_path`, `write_path`, and
-//! path-based extraction.
+//! it into Lua. Builder `add_file` records source paths and reads payloads during
+//! `write_path` / `to_bytes`, matching the Rust deferred-source API. Builders can
+//! also preserve entries from an already-open archive with `add_archive_entry`;
+//! the source archive userdata must stay alive through the call, and the builder
+//! stores its own Rust archive handle afterwards. For large archives, prefer
+//! `open_path`, `write_path`, and path-based extraction.
 //!
 //! `extract_entry_to_path` and `extract_to` write to the filesystem and return
 //! byte counts. They create missing parent directories and write individual files
@@ -98,7 +102,9 @@
 )]
 
 use bstr::ByteSlice as _;
-use mlua::{Lua, Result, String as LuaString, Table, UserData, UserDataMethods, Value};
+use mlua::{
+    AnyUserData, Lua, Result, String as LuaString, Table, UserData, UserDataMethods, Value,
+};
 
 #[derive(Clone)]
 struct LuaArchive(crate::Archive);
@@ -229,6 +235,27 @@ fn compression_override(value: Option<String>) -> Result<crate::CompressionOverr
     }
 }
 
+fn entry_index(index: usize) -> Result<usize> {
+    index
+        .checked_sub(1)
+        .ok_or_else(|| mlua::Error::external("entry index out of bounds"))
+}
+
+#[cfg(feature = "ba2")]
+fn ba2_entry_id(index: usize) -> Result<crate::ba2::EntryId> {
+    Ok(crate::ba2::EntryId::from_index(entry_index(index)?))
+}
+
+#[cfg(feature = "bsa-tes3")]
+fn tes3_entry_id(index: usize) -> Result<crate::bsa::tes3::EntryId> {
+    Ok(crate::bsa::tes3::EntryId::from_index(entry_index(index)?))
+}
+
+#[cfg(feature = "bsa-tes4")]
+fn tes4_entry_id(index: usize) -> Result<crate::bsa::tes4::EntryId> {
+    Ok(crate::bsa::tes4::EntryId::from_index(entry_index(index)?))
+}
+
 #[cfg(any(feature = "ba2", feature = "bsa-tes4"))]
 fn zlib_level(level: u32) -> Result<flate2::Compression> {
     if level <= 9 {
@@ -250,6 +277,7 @@ impl UserData for LuaArchive {
             for (index, entry) in this.0.entries().enumerate() {
                 let table = lua.create_table_with_capacity(0, 3)?;
                 table.set("index", index + 1)?;
+                table.set("id", index + 1)?;
                 table.set("format", format_name(entry.format()))?;
                 set_bytes_field(lua, &table, "path", entry.path().map(AsRef::as_ref))?;
                 entries.set(index + 1, table)?;
@@ -589,6 +617,7 @@ fn ba2_entries(lua: &Lua, this: &LuaBa2Archive) -> Result<Table> {
     for (index, entry) in this.0.entries().iter().enumerate() {
         let table = lua.create_table_with_capacity(0, 5)?;
         table.set("index", index + 1)?;
+        table.set("id", index + 1)?;
         if has_string_table && !entry.name().is_empty() {
             table.set("name", lua.create_string(entry.name().as_bytes())?)?;
             table.set("path", lua.create_string(entry.name().as_bytes())?)?;
@@ -652,6 +681,40 @@ impl UserData for LuaBa2Builder {
             |_lua, this, (archive_path, source): (LuaString, LuaString)| {
                 this.0
                     .add_file(archive_path.as_bytes().as_ref(), source.to_str()?.as_ref())
+                    .map_err(mlua::Error::external)
+            },
+        );
+        methods.add_method_mut(
+            "add_archive_entry",
+            |_lua, this, (archive_path, archive, index): (LuaString, AnyUserData, usize)| {
+                let archive = archive.borrow::<LuaBa2Archive>()?;
+                this.0
+                    .add_archive_entry(
+                        archive_path.as_bytes().as_ref(),
+                        std::sync::Arc::new(archive.0.clone()),
+                        ba2_entry_id(index)?,
+                    )
+                    .map_err(mlua::Error::external)
+            },
+        );
+        methods.add_method_mut(
+            "add_archive_entry_with_compression",
+            |_lua,
+             this,
+             (archive_path, archive, index, compression): (
+                LuaString,
+                AnyUserData,
+                usize,
+                Option<String>,
+            )| {
+                let archive = archive.borrow::<LuaBa2Archive>()?;
+                this.0
+                    .add_archive_entry_with_compression(
+                        archive_path.as_bytes().as_ref(),
+                        std::sync::Arc::new(archive.0.clone()),
+                        ba2_entry_id(index)?,
+                        compression_override(compression)?,
+                    )
                     .map_err(mlua::Error::external)
             },
         );
@@ -918,6 +981,19 @@ impl UserData for LuaTes3Builder {
                     .map_err(mlua::Error::external)
             },
         );
+        methods.add_method_mut(
+            "add_archive_entry",
+            |_lua, this, (archive_path, archive, index): (LuaString, AnyUserData, usize)| {
+                let archive = archive.borrow::<LuaTes3Archive>()?;
+                this.0
+                    .add_archive_entry(
+                        archive_path.as_bytes().as_ref(),
+                        std::sync::Arc::new(archive.0.clone()),
+                        tes3_entry_id(index)?,
+                    )
+                    .map_err(mlua::Error::external)
+            },
+        );
         methods.add_method_mut("add_dir", |_lua, this, root: LuaString| {
             this.0
                 .add_dir(root.to_str()?.as_ref())
@@ -1126,6 +1202,7 @@ impl UserData for LuaTes4Builder {
                     .map_err(mlua::Error::external)
             },
         );
+        tes4_builder_archive_entry_methods(methods);
         methods.add_method_mut("add_dir", |_lua, this, root: LuaString| {
             this.0
                 .add_dir(root.to_str()?.as_ref())
@@ -1143,6 +1220,47 @@ impl UserData for LuaTes4Builder {
             lua.create_string(&this.0.to_vec().map_err(mlua::Error::external)?)
         });
     }
+}
+
+#[cfg(feature = "bsa-tes4")]
+fn tes4_builder_archive_entry_methods<M>(methods: &mut M)
+where
+    M: UserDataMethods<LuaTes4Builder>,
+{
+    methods.add_method_mut(
+        "add_archive_entry",
+        |_lua, this, (archive_path, archive, index): (LuaString, AnyUserData, usize)| {
+            let archive = archive.borrow::<LuaTes4Archive>()?;
+            this.0
+                .add_archive_entry(
+                    archive_path.as_bytes().as_ref(),
+                    std::sync::Arc::new(archive.0.clone()),
+                    tes4_entry_id(index)?,
+                )
+                .map_err(mlua::Error::external)
+        },
+    );
+    methods.add_method_mut(
+        "add_archive_entry_with_compression",
+        |_lua,
+         this,
+         (archive_path, archive, index, compression): (
+            LuaString,
+            AnyUserData,
+            usize,
+            Option<String>,
+        )| {
+            let archive = archive.borrow::<LuaTes4Archive>()?;
+            this.0
+                .add_archive_entry_with_compression(
+                    archive_path.as_bytes().as_ref(),
+                    std::sync::Arc::new(archive.0.clone()),
+                    tes4_entry_id(index)?,
+                    compression_override(compression)?,
+                )
+                .map_err(mlua::Error::external)
+        },
+    );
 }
 
 #[cfg(feature = "bsa-tes4")]
@@ -1229,6 +1347,7 @@ impl BsaArchiveAccess for LuaTes3Archive {
         for (index, entry) in self.0.entries().iter().enumerate() {
             let table = lua.create_table_with_capacity(0, 5)?;
             table.set("index", index + 1)?;
+            table.set("id", index + 1)?;
             table.set("path", lua.create_string(entry.path().as_bytes())?)?;
             table.set("hash", tes3_entry_hash(lua, entry.hash())?)?;
             table.set("size", entry.file().size)?;
@@ -1313,6 +1432,7 @@ impl BsaArchiveAccess for LuaTes4Archive {
         for (index, entry) in self.0.entries().iter().enumerate() {
             let table = lua.create_table_with_capacity(0, 8)?;
             table.set("index", index + 1)?;
+            table.set("id", index + 1)?;
             set_bytes_field(lua, &table, "path", entry.path().map(AsRef::as_ref))?;
             set_bytes_field(lua, &table, "folder", entry.folder().map(AsRef::as_ref))?;
             set_bytes_field(lua, &table, "name", entry.name().map(AsRef::as_ref))?;

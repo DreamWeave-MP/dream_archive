@@ -113,6 +113,14 @@
 //! # fn main() {}
 //! ```
 //!
+//! Builder `add_file` / `add_dir` calls are deferred: they record source paths
+//! and sizes, then read payload bytes during `write_path`, `write_seek`, or
+//! `to_vec`. Use `add_bytes` when the payload is already in memory. Rewriters can
+//! preserve unchanged members with format-specific `add_archive_entry` methods
+//! and stable entry ids from `entries_with_ids`, avoiding the old “extract every
+//! preserved file into a Vec first” routine. That routine had all the elegance of
+//! swallowing a filing cabinet.
+//!
 //! # Legacy BSA filename encodings
 //!
 //! ```

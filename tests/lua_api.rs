@@ -804,3 +804,48 @@ fn lua_accepts_default_compression_options_and_rejects_bad_dx10_headers() {
     .exec()
     .unwrap();
 }
+
+#[test]
+fn lua_builders_defer_existing_archive_entries() {
+    let lua = lua_with_module();
+
+    lua.load(
+        r#"
+        local ba2_source_builder = dream_archive.ba2.Builder.new()
+        ba2_source_builder:add_bytes("data/source.txt", "ba2 payload")
+        local ba2_source = dream_archive.ba2.open_bytes(ba2_source_builder:to_bytes())
+        local ba2_entry = ba2_source:entries()[1]
+        assert(ba2_entry.id == 1)
+
+        local ba2_dest_builder = dream_archive.ba2.Builder.new()
+        ba2_dest_builder:add_archive_entry("data/copied.txt", ba2_source, ba2_entry.id)
+        local ba2_dest = dream_archive.ba2.open_bytes(ba2_dest_builder:to_bytes())
+        assert(ba2_dest:read_file_required("data/copied.txt") == "ba2 payload")
+
+        local tes3_source_builder = dream_archive.bsa.tes3.Builder.new()
+        tes3_source_builder:add_bytes("data/source.txt", "tes3 payload")
+        local tes3_source = dream_archive.bsa.tes3.open_bytes(tes3_source_builder:to_bytes())
+        local tes3_entry = tes3_source:entries()[1]
+        assert(tes3_entry.id == 1)
+
+        local tes3_dest_builder = dream_archive.bsa.tes3.Builder.new()
+        tes3_dest_builder:add_archive_entry("data/copied.txt", tes3_source, tes3_entry.id)
+        local tes3_dest = dream_archive.bsa.tes3.open_bytes(tes3_dest_builder:to_bytes())
+        assert(tes3_dest:read_file_required("data/copied.txt") == "tes3 payload")
+
+        local tes4_source_builder = dream_archive.bsa.tes4.Builder.new()
+        tes4_source_builder:set_compressed(true)
+        tes4_source_builder:add_bytes("data/source.txt", "tes4 payload")
+        local tes4_source = dream_archive.bsa.tes4.open_bytes(tes4_source_builder:to_bytes())
+        local tes4_entry = tes4_source:entries()[1]
+        assert(tes4_entry.id == 1)
+
+        local tes4_dest_builder = dream_archive.bsa.tes4.Builder.new()
+        tes4_dest_builder:add_archive_entry_with_compression("data/copied.txt", tes4_source, tes4_entry.id, "store")
+        local tes4_dest = dream_archive.bsa.tes4.open_bytes(tes4_dest_builder:to_bytes())
+        assert(tes4_dest:read_file_required("data/copied.txt") == "tes4 payload")
+    "#,
+    )
+    .exec()
+    .unwrap();
+}
