@@ -108,6 +108,23 @@
 //! `tes4_archive:extract_to_with_paths(target, paths)` expects a contiguous Lua
 //! sequence (`paths[1]..paths[n]`) of candidate archive path byte strings for
 //! hash-only extraction. It is not a dictionary; non-sequence keys are ignored.
+//!
+//! # Public userdata seam
+//!
+//! [`LuaArchive`] is the public userdata wrapper returned by top-level
+//! `dream_archive.open_path` and `dream_archive.open_bytes`. Downstream crates can
+//! accept an `mlua::AnyUserData` and borrow the already-open archive with
+//! `userdata.borrow::<dream_archive::lua::LuaArchive>()?`. [`LuaArchive::archive`]
+//! returns the opened archive state; [`LuaArchive::path`] is `Some` only when the
+//! userdata came from `open_path`. Reader- or byte-backed userdata do not invent a
+//! fake path. The wrapper exposes read-only archive access; policy code using it
+//! should operate on this handle/snapshot rather than reopening the path and
+//! creating a stale-path race.
+//!
+//! Embedders that want method syntax for downstream policy can use
+//! [`create_module_with_archive_methods`] or [`register_archive_methods`] to attach
+//! additional Rust-level methods to [`LuaArchive`] before any `LuaArchive` userdata
+//! is created in that `Lua` state.
 
 #![expect(
     clippy::needless_pass_by_value,
@@ -116,11 +133,32 @@
 
 use crate::ByteSlice as _;
 use mlua::{
-    AnyUserData, Lua, Result, String as LuaString, Table, UserData, UserDataMethods, Value,
+    AnyUserData, Lua, Result, String as LuaString, Table, UserData, UserDataMethods,
+    UserDataRegistry, Value,
 };
+use std::path::{Path, PathBuf};
 
 #[derive(Clone)]
-struct LuaArchive(crate::Archive);
+pub struct LuaArchive {
+    archive: crate::Archive,
+    path: Option<PathBuf>,
+}
+
+impl LuaArchive {
+    /// Return the already-opened archive represented by this Lua userdata.
+    #[must_use]
+    pub fn archive(&self) -> &crate::Archive {
+        &self.archive
+    }
+
+    /// Return the host path used by `dream_archive.open_path`, if there was one.
+    ///
+    /// Byte-backed archives return `None`; this API does not fabricate labels.
+    #[must_use]
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+}
 
 #[cfg(feature = "ba2")]
 #[derive(Clone)]
@@ -156,9 +194,67 @@ struct LuaTes4Builder(crate::bsa::tes4::Builder);
 ///
 /// Returns an `mlua` error if table/function/userdata creation fails.
 pub fn create_module(lua: &Lua) -> Result<Table> {
+    create_module_table(lua, false)
+}
+
+/// Build the `dream_archive` Lua module table after registering extra `LuaArchive` methods.
+///
+/// The callback runs against `mlua`'s userdata registry for [`LuaArchive`]. Call
+/// this before creating any `LuaArchive` userdata in the same Lua state; `mlua`
+/// caches userdata metatables by Rust type. The built-in archive primitive methods
+/// are registered first, then the callback may add downstream policy methods.
+///
+/// # Errors
+///
+/// Returns an `mlua` error if userdata registration or table/function creation fails.
+pub fn create_module_with_archive_methods<F>(lua: &Lua, extend: F) -> Result<Table>
+where
+    F: FnOnce(&mut UserDataRegistry<LuaArchive>),
+{
+    register_archive_methods(lua, extend)?;
+    create_module_table(lua, true)
+}
+
+/// Register built-in and downstream methods for [`LuaArchive`] in a Lua state.
+///
+/// Use this when an embedding application builds its module table separately but
+/// still wants Rust-level method extension. Call it before creating any
+/// `LuaArchive` userdata in that Lua state. Create the userdata with
+/// `Lua::create_any_userdata` (or use [`create_module_with_archive_methods`]);
+/// `Lua::create_userdata` uses the type's `UserData` implementation directly.
+///
+/// # Errors
+///
+/// Returns an `mlua` error if the userdata type registry cannot be installed.
+pub fn register_archive_methods<F>(lua: &Lua, extend: F) -> Result<()>
+where
+    F: FnOnce(&mut UserDataRegistry<LuaArchive>),
+{
+    lua.register_userdata_type::<LuaArchive>(|registry| {
+        add_archive_methods(registry);
+        extend(registry);
+    })
+}
+
+fn create_module_table(lua: &Lua, use_any_userdata: bool) -> Result<Table> {
     let module = lua.create_table()?;
-    module.set("open_path", lua.create_function(open_path)?)?;
-    module.set("open_bytes", lua.create_function(open_bytes)?)?;
+    if use_any_userdata {
+        module.set(
+            "open_path",
+            lua.create_function(|lua, path: LuaString| {
+                lua.create_any_userdata(open_path(lua, path)?)
+            })?,
+        )?;
+        module.set(
+            "open_bytes",
+            lua.create_function(|lua, bytes: LuaString| {
+                lua.create_any_userdata(open_bytes(lua, bytes)?)
+            })?,
+        )?;
+    } else {
+        module.set("open_path", lua.create_function(open_path)?)?;
+        module.set("open_bytes", lua.create_function(open_bytes)?)?;
+    }
     module.set("detect_path", lua.create_function(detect_path)?)?;
     module.set("guess_format", lua.create_function(guess_format)?)?;
     module.set("normalize_path", lua.create_function(normalize_path)?)?;
@@ -172,15 +268,19 @@ pub fn create_module(lua: &Lua) -> Result<Table> {
 }
 
 fn open_path(_lua: &Lua, path: LuaString) -> Result<LuaArchive> {
-    Ok(LuaArchive(
-        crate::Archive::open_path(path.to_str()?.as_ref()).map_err(mlua::Error::external)?,
-    ))
+    let path = PathBuf::from(path.to_str()?.as_ref());
+    Ok(LuaArchive {
+        archive: crate::Archive::open_path(&path).map_err(mlua::Error::external)?,
+        path: Some(path),
+    })
 }
 
 fn open_bytes(_lua: &Lua, bytes: LuaString) -> Result<LuaArchive> {
-    Ok(LuaArchive(
-        crate::Archive::from_slice(bytes.as_bytes().as_ref()).map_err(mlua::Error::external)?,
-    ))
+    Ok(LuaArchive {
+        archive: crate::Archive::from_slice(bytes.as_bytes().as_ref())
+            .map_err(mlua::Error::external)?,
+        path: None,
+    })
 }
 
 fn detect_path(_lua: &Lua, path: LuaString) -> Result<Option<String>> {
@@ -280,76 +380,94 @@ fn zlib_level(level: u32) -> Result<flate2::Compression> {
     }
 }
 
+/// Register the built-in Lua primitive methods for [`LuaArchive`].
+///
+/// Downstream wrappers can call this when building their own registry. Most
+/// embedders should prefer [`create_module_with_archive_methods`] so type identity
+/// stays exactly `dream_archive::lua::LuaArchive`.
+pub fn add_archive_methods<M>(methods: &mut M)
+where
+    M: UserDataMethods<LuaArchive>,
+{
+    methods.add_method("format", |_lua, this, ()| {
+        Ok(format_name(this.archive.format()))
+    });
+    methods.add_method("len", |_lua, this, ()| Ok(this.archive.len()));
+    methods.add_method("is_empty", |_lua, this, ()| Ok(this.archive.is_empty()));
+    methods.add_method("entries", |lua, this, ()| {
+        let entries = lua.create_table_with_capacity(this.archive.len(), 0)?;
+        for (index, entry) in this.archive.entries().enumerate() {
+            let table = lua.create_table_with_capacity(0, 3)?;
+            table.set("index", index + 1)?;
+            table.set("id", index + 1)?;
+            table.set("format", format_name(entry.format()))?;
+            set_bytes_field(lua, &table, "path", entry.path().map(AsRef::as_ref))?;
+            entries.set(index + 1, table)?;
+        }
+        Ok(entries)
+    });
+    methods.add_method("read_file", |lua, this, path: LuaString| {
+        read_optional_bytes(
+            lua,
+            this.archive
+                .read_file(path.as_bytes().as_ref())
+                .map_err(mlua::Error::external)?,
+        )
+    });
+    methods.add_method("read_file_required", |lua, this, path: LuaString| {
+        let bytes = this
+            .archive
+            .read_file_required(path.as_bytes().as_ref())
+            .map_err(mlua::Error::external)?;
+        lua.create_string(&bytes)
+    });
+    methods.add_method("extract_file", |lua, this, path: LuaString| {
+        let mut out = Vec::new();
+        if this
+            .archive
+            .extract_file(path.as_bytes().as_ref(), &mut out)
+            .map_err(mlua::Error::external)?
+            .is_some()
+        {
+            Ok(Value::String(lua.create_string(&out)?))
+        } else {
+            Ok(Value::Nil)
+        }
+    });
+    methods.add_method("extract_file_required", |lua, this, path: LuaString| {
+        let mut out = Vec::new();
+        this.archive
+            .extract_file_required(path.as_bytes().as_ref(), &mut out)
+            .map_err(mlua::Error::external)?;
+        lua.create_string(&out)
+    });
+    methods.add_method("read_entry", |lua, this, index: usize| {
+        lua.create_string(
+            &read_top_level_entry(&this.archive, index).map_err(mlua::Error::external)?,
+        )
+    });
+    methods.add_method("extract_entry", |lua, this, index: usize| {
+        collect_to_string(lua, |out| {
+            extract_top_level_entry(&this.archive, index, out)
+        })
+    });
+    methods.add_method(
+        "extract_entry_to_path",
+        |_lua, this, (index, path): (usize, LuaString)| {
+            extract_top_level_entry_to_path(&this.archive, index, path.to_str()?.as_ref())
+                .map_err(mlua::Error::external)
+        },
+    );
+    methods.add_method("extract_to", |_lua, this, target: LuaString| {
+        this.archive
+            .extract_to(target.to_str()?.as_ref())
+            .map_err(mlua::Error::external)
+    });
+}
+
 impl UserData for LuaArchive {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("format", |_lua, this, ()| Ok(format_name(this.0.format())));
-        methods.add_method("len", |_lua, this, ()| Ok(this.0.len()));
-        methods.add_method("is_empty", |_lua, this, ()| Ok(this.0.is_empty()));
-        methods.add_method("entries", |lua, this, ()| {
-            let entries = lua.create_table_with_capacity(this.0.len(), 0)?;
-            for (index, entry) in this.0.entries().enumerate() {
-                let table = lua.create_table_with_capacity(0, 3)?;
-                table.set("index", index + 1)?;
-                table.set("id", index + 1)?;
-                table.set("format", format_name(entry.format()))?;
-                set_bytes_field(lua, &table, "path", entry.path().map(AsRef::as_ref))?;
-                entries.set(index + 1, table)?;
-            }
-            Ok(entries)
-        });
-        methods.add_method("read_file", |lua, this, path: LuaString| {
-            read_optional_bytes(
-                lua,
-                this.0
-                    .read_file(path.as_bytes().as_ref())
-                    .map_err(mlua::Error::external)?,
-            )
-        });
-        methods.add_method("read_file_required", |lua, this, path: LuaString| {
-            let bytes = this
-                .0
-                .read_file_required(path.as_bytes().as_ref())
-                .map_err(mlua::Error::external)?;
-            lua.create_string(&bytes)
-        });
-        methods.add_method("extract_file", |lua, this, path: LuaString| {
-            let mut out = Vec::new();
-            if this
-                .0
-                .extract_file(path.as_bytes().as_ref(), &mut out)
-                .map_err(mlua::Error::external)?
-                .is_some()
-            {
-                Ok(Value::String(lua.create_string(&out)?))
-            } else {
-                Ok(Value::Nil)
-            }
-        });
-        methods.add_method("extract_file_required", |lua, this, path: LuaString| {
-            let mut out = Vec::new();
-            this.0
-                .extract_file_required(path.as_bytes().as_ref(), &mut out)
-                .map_err(mlua::Error::external)?;
-            lua.create_string(&out)
-        });
-        methods.add_method("read_entry", |lua, this, index: usize| {
-            lua.create_string(&read_top_level_entry(&this.0, index).map_err(mlua::Error::external)?)
-        });
-        methods.add_method("extract_entry", |lua, this, index: usize| {
-            collect_to_string(lua, |out| extract_top_level_entry(&this.0, index, out))
-        });
-        methods.add_method(
-            "extract_entry_to_path",
-            |_lua, this, (index, path): (usize, LuaString)| {
-                extract_top_level_entry_to_path(&this.0, index, path.to_str()?.as_ref())
-                    .map_err(mlua::Error::external)
-            },
-        );
-        methods.add_method("extract_to", |_lua, this, target: LuaString| {
-            this.0
-                .extract_to(target.to_str()?.as_ref())
-                .map_err(mlua::Error::external)
-        });
+        add_archive_methods(methods);
     }
 }
 

@@ -1,4 +1,4 @@
-use mlua::Lua;
+use mlua::{AnyUserData, Lua, UserDataMethods};
 use std::path::PathBuf;
 
 fn lua_with_module() -> Lua {
@@ -75,6 +75,73 @@ fn lua_ba2_stringless_entries_report_nil_paths() {
         assert(entry.name == nil)
         assert(ba2:read_entry(1) ~= nil)
     ",
+    )
+    .exec()
+    .unwrap();
+}
+
+#[test]
+fn lua_top_level_archive_userdata_can_be_borrowed_from_rust() {
+    let lua = lua_with_module();
+    let fixture = std::env::current_dir()
+        .unwrap()
+        .join("tests/fixtures/ba2/missing_string_table/in.ba2");
+    lua.globals()
+        .set("fixture_path", fixture.to_string_lossy().as_ref())
+        .unwrap();
+
+    let value: AnyUserData = lua
+        .load("return dream_archive.open_path(fixture_path)")
+        .eval()
+        .unwrap();
+    let archive = value.borrow::<dream_archive::lua::LuaArchive>().unwrap();
+    assert_eq!(archive.archive().format(), dream_archive::FileFormat::BA2);
+    assert_eq!(archive.path(), Some(fixture.as_path()));
+
+    let value: AnyUserData = lua
+        .load(
+            r#"
+            local builder = dream_archive.ba2.Builder.new()
+            builder:add_bytes("meshes/example.nif", "payload")
+            return dream_archive.open_bytes(builder:to_bytes())
+        "#,
+        )
+        .eval()
+        .unwrap();
+    let archive = value.borrow::<dream_archive::lua::LuaArchive>().unwrap();
+    assert_eq!(archive.archive().len(), 1);
+    assert_eq!(archive.path(), None);
+}
+
+#[test]
+fn lua_top_level_archive_methods_can_be_extended_from_rust() {
+    let lua = Lua::new();
+    let module = dream_archive::lua::create_module_with_archive_methods(&lua, |methods| {
+        methods.add_method("policy_len", |_lua, this, ()| Ok(this.archive().len()));
+        methods.add_method("has_open_path", |_lua, this, ()| Ok(this.path().is_some()));
+    })
+    .unwrap();
+    lua.globals().set("dream_archive", module).unwrap();
+
+    let fixture = std::env::current_dir()
+        .unwrap()
+        .join("tests/fixtures/ba2/missing_string_table/in.ba2");
+    lua.globals()
+        .set("fixture_path", fixture.to_string_lossy().as_ref())
+        .unwrap();
+
+    lua.load(
+        r#"
+        local archive = dream_archive.open_path(fixture_path)
+        assert(archive:policy_len() == archive:len())
+        assert(archive:has_open_path())
+
+        local builder = dream_archive.ba2.Builder.new()
+        builder:add_bytes("meshes/example.nif", "payload")
+        local bytes_archive = dream_archive.open_bytes(builder:to_bytes())
+        assert(bytes_archive:policy_len() == 1)
+        assert(not bytes_archive:has_open_path())
+    "#,
     )
     .exec()
     .unwrap();
