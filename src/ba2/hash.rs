@@ -1,4 +1,4 @@
-use bstr::{BStr, BString, ByteSlice as _};
+use crate::{BStr, BString, ByteSlice as _};
 
 /// Hash fields stored in BA2 file records.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]

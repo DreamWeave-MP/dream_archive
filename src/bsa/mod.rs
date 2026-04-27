@@ -72,7 +72,7 @@ pub enum Error {
     InvalidArchivePath,
     ArchivePathsUnavailable,
     DuplicatePath,
-    FileNotFound(bstr::BString),
+    FileNotFound(crate::BString),
     InvalidFileRecordFlags(u32),
     IntegralTruncation,
     Capacity,

@@ -2,8 +2,8 @@ use super::{
     Archive, ArchiveFlags, ArchiveInfo, ArchiveTypes, ArchiveVersion, Entry, Error, FileRecord,
     HashFields, Result,
 };
+use crate::BString;
 use crate::{read::Cursor, storage::Storage};
-use bstr::BString;
 
 const MAGIC: u32 = u32::from_le_bytes(*b"BSA\0");
 const HEADER_SIZE: u32 = 0x24;

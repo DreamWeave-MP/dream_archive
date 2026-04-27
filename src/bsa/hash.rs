@@ -1,4 +1,4 @@
-use bstr::BString;
+use crate::BString;
 
 pub(crate) fn normalize_hash_path(path: &[u8]) -> BString {
     let mut normalized = BString::from(path);

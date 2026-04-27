@@ -3,6 +3,7 @@ use crate::bsa::{
     FilenameEncoding, NormalizedPath, decode_filename_lossy, normalize_lookup_path,
     normalize_lookup_path_into,
 };
+use crate::{BStr, BString};
 use crate::{
     Copied,
     extract::{
@@ -10,7 +11,6 @@ use crate::{
     },
     storage::Storage,
 };
-use bstr::{BStr, BString};
 use flate2::read::ZlibDecoder;
 use lz4_flex::frame::FrameDecoder;
 #[cfg(feature = "parallel")]

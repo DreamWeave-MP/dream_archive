@@ -42,7 +42,7 @@ pub enum Error {
     InvalidChunkSize(u16),
     InvalidArchivePath,
     DuplicatePath,
-    FileNotFound(bstr::BString),
+    FileNotFound(crate::BString),
     OutOfBounds,
     IntegralTruncation,
     Capacity,

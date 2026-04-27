@@ -1,6 +1,6 @@
 use super::{ArchiveVersion, Error, FileHash, Result, hash_file};
+use crate::{BString, ByteSlice as _};
 use crate::{CompressionOverride, builder_fs};
-use bstr::{BString, ByteSlice as _};
 use flate2::{Compression, write::ZlibEncoder};
 use std::{
     collections::HashSet,

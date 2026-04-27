@@ -2,8 +2,8 @@ use super::{
     Archive, ArchiveFile, ArchiveInfo, ArchiveVersion, Ba2CompressionFormat, Chunk, Entry, Error,
     FileHeader, Hash, PayloadFormat, Result, TextureHeader,
 };
+use crate::BString;
 use crate::{dds, read::Cursor, storage::Storage};
-use bstr::BString;
 
 const MAGIC: u32 = u32::from_le_bytes(*b"BTDX");
 const GNRL: u32 = u32::from_le_bytes(*b"GNRL");

@@ -1,6 +1,6 @@
 use super::{Archive, ArchiveInfo, Entry, Error, FileRecord, Result};
+use crate::BString;
 use crate::{read::Cursor, storage::Storage};
-use bstr::BString;
 
 const VERSION: u32 = 0x0000_0100;
 const HEADER_SIZE: usize = 12;

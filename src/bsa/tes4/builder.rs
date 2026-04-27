@@ -2,12 +2,12 @@ use super::{
     ArchiveFlags, ArchiveTypes, ArchiveVersion, Error, HashFields, Result, hash_directory,
     hash_file,
 };
+use crate::BString;
 use crate::{
     CompressionOverride,
     bsa::{FilenameEncoding, encode_filename},
     builder_fs,
 };
-use bstr::BString;
 use flate2::{Compression, write::ZlibEncoder};
 use std::{
     borrow::Cow,

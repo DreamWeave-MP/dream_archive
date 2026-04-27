@@ -1,9 +1,9 @@
 use super::{Error, Result, hash::FileHash, hash::hash_normalized_file};
+use crate::{BString, ByteSlice as _};
 use crate::{
     bsa::{FilenameEncoding, encode_filename},
     builder_fs,
 };
-use bstr::{BString, ByteSlice as _};
 use std::{
     collections::HashSet,
     fs::{self, File},

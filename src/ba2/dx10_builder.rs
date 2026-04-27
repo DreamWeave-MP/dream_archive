@@ -1,6 +1,6 @@
 use super::{ArchiveVersion, Error, FileHash, Result, TextureHeader, builder, hash_file};
+use crate::{BString, ByteSlice as _};
 use crate::{CompressionOverride, builder_fs, dds};
-use bstr::{BString, ByteSlice as _};
 use flate2::Compression;
 use std::{
     borrow::Cow,

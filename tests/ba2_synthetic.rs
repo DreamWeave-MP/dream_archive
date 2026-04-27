@@ -1,4 +1,4 @@
-use bstr::ByteSlice as _;
+use dream_archive::ByteSlice as _;
 use dream_archive::{
     CompressionOverride,
     ba2::{

@@ -244,7 +244,8 @@ pub fn guess_format(input: &mut impl Read) -> io::Result<Option<FileFormat>> {
     })
 }
 
-pub use bstr::{BStr, BString, ByteSlice, ByteVec};
+pub use dream_path::bstr;
+pub use dream_path::bstr::{BStr, BString, ByteSlice, ByteVec};
 
 #[cfg(feature = "ba2")]
 pub type Ba2Builder = ba2::Builder;

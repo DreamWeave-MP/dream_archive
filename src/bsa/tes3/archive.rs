@@ -1,5 +1,6 @@
 use super::{Error, Result, parser};
 use crate::bsa::{FilenameEncoding, NormalizedPath, decode_filename_lossy, normalize_lookup_path};
+use crate::{BStr, BString};
 use crate::{
     Copied,
     extract::{
@@ -7,7 +8,6 @@ use crate::{
     },
     storage::Storage,
 };
-use bstr::{BStr, BString};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use std::collections::HashMap;

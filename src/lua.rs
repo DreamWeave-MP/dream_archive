@@ -114,7 +114,7 @@
     reason = "mlua callback arguments are owned Lua values supplied by the VM"
 )]
 
-use bstr::ByteSlice as _;
+use crate::ByteSlice as _;
 use mlua::{
     AnyUserData, Lua, Result, String as LuaString, Table, UserData, UserDataMethods, Value,
 };

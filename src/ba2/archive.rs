@@ -1,13 +1,13 @@
 use super::{
     ArchiveVersion, Ba2CompressionFormat, Error, FileHash, PayloadFormat, Result, hash_file, parser,
 };
+use crate::{BStr, BString, ByteSlice as _};
 use crate::{
     Copied,
     dds::{self, DdsHeader},
     extract::{ensure_parent_dir, output_path_into, write_file_atomically},
     storage::Storage,
 };
-use bstr::{BStr, BString, ByteSlice as _};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use std::collections::HashMap;
