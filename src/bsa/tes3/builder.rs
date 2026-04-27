@@ -7,8 +7,9 @@ use bstr::{BString, ByteSlice as _};
 use std::{
     collections::HashSet,
     fs::{self, File},
-    io::{BufWriter, Write},
-    path::Path,
+    io::{self, BufWriter, Cursor, Seek, Write},
+    path::{Path, PathBuf},
+    sync::Arc,
 };
 
 const VERSION: u32 = 0x0000_0100;
@@ -18,10 +19,8 @@ const NAME_OFFSET_SIZE: usize = 4;
 
 /// Builder for TES3/Morrowind BSA archives.
 ///
-/// Entries are stored uncompressed. Paths are normalized to TES3 lookup form
-/// (`/` to `\`, ASCII lowercase, no leading/trailing separators) before being
-/// written, because that is the name the hash table describes. Preserving a
-/// spelling that hashes as something else would be charmingly broken.
+/// File-backed entries are deferred: [`Self::add_file`] records the source path
+/// and size, but payload bytes are not read until the archive is written.
 #[derive(Clone, Debug, Default)]
 pub struct Builder {
     entries: Vec<BuilderEntry>,
@@ -32,7 +31,21 @@ pub struct Builder {
 struct BuilderEntry {
     path: BString,
     hash: FileHash,
-    bytes: Vec<u8>,
+    source: EntrySource,
+}
+
+#[derive(Clone, Debug)]
+enum EntrySource {
+    Bytes(Vec<u8>),
+    File {
+        path: PathBuf,
+        len: u64,
+    },
+    ArchiveEntry {
+        archive: Arc<super::Archive>,
+        id: super::EntryId,
+        len: u64,
+    },
 }
 
 impl Builder {
@@ -55,26 +68,12 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error if the path can not be represented safely, is a
-    /// duplicate after TES3 normalization, or allocation fails.
+    /// Returns an error if the path is invalid, duplicated, or allocation fails.
     pub fn add_bytes(&mut self, path: impl AsRef<[u8]>, bytes: impl AsRef<[u8]>) -> Result<()> {
-        let path = normalize_stored_path(path.as_ref())?;
-        if self.paths.contains(path.as_bstr()) {
-            return Err(Error::DuplicatePath);
-        }
         let mut owned = Vec::new();
         owned.try_reserve_exact(bytes.as_ref().len())?;
         owned.extend_from_slice(bytes.as_ref());
-        let hash = hash_normalized_file(path.as_bstr());
-        self.entries.try_reserve(1)?;
-        self.paths.try_reserve(1)?;
-        self.paths.insert(path.clone());
-        self.entries.push(BuilderEntry {
-            path,
-            hash,
-            bytes: owned,
-        });
-        Ok(())
+        self.add_source(path, EntrySource::Bytes(owned))
     }
 
     /// Encode a Unicode archive path with an explicit legacy filename encoding,
@@ -82,8 +81,7 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error if `path` can not be encoded losslessly, the encoded
-    /// path is invalid for a TES3 archive, is a duplicate, or allocation fails.
+    /// Returns an error if the path can not be encoded, is invalid, duplicated, or allocation fails.
     pub fn add_encoded_path(
         &mut self,
         path: &str,
@@ -94,33 +92,52 @@ impl Builder {
         self.add_bytes(encoded.as_ref(), bytes)
     }
 
-    /// Read a filesystem file and store it at `archive_path`.
+    /// Record a filesystem file and store it at `archive_path` when written.
     ///
-    /// Symlinked files are followed for payload bytes; the archive path is the
-    /// path supplied by the caller.
+    /// Symlinked files are followed for size and later payload bytes. If the
+    /// source changes size before writing, writing fails instead of producing a
+    /// table that lies about payload length.
     ///
     /// # Errors
     ///
-    /// Returns an error if reading the file fails or adding the archive entry fails.
+    /// Returns an error if source metadata lookup fails or the archive path is invalid or duplicated.
     pub fn add_file(
         &mut self,
         archive_path: impl AsRef<[u8]>,
         source: impl AsRef<Path>,
     ) -> Result<()> {
-        let bytes = fs::read(source)?;
-        self.add_bytes(archive_path, bytes)
+        let source = source.as_ref();
+        let len = fs::metadata(source)?.len();
+        self.add_source(
+            archive_path,
+            EntrySource::File {
+                path: source.to_path_buf(),
+                len,
+            },
+        )
+    }
+
+    /// Preserve an entry from another TES3 archive without materializing it in
+    /// the builder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the archive path is invalid, duplicated, or the source id is invalid.
+    pub fn add_archive_entry(
+        &mut self,
+        archive_path: impl AsRef<[u8]>,
+        archive: Arc<super::Archive>,
+        id: super::EntryId,
+    ) -> Result<()> {
+        let len = u64::from(archive.entry_by_id_required(id)?.file().size);
+        self.add_source(archive_path, EntrySource::ArchiveEntry { archive, id, len })
     }
 
     /// Recursively add all files below `root` using paths relative to `root`.
     ///
-    /// File symlinks are followed for payload bytes, but stored at the relative
-    /// path where the symlink was found. Directory symlinks are ignored. Paths
-    /// are taken from the platform filesystem bytes where available; use
-    /// [`Self::add_encoded_path`] when a legacy BSA filename encoding is required.
-    ///
     /// # Errors
     ///
-    /// Returns an error if directory traversal, file reading, or adding an entry fails.
+    /// Returns an error if directory traversal, source metadata lookup, or adding an entry fails.
     pub fn add_dir(&mut self, root: impl AsRef<Path>) -> Result<()> {
         let root = root.as_ref();
         for path in builder_fs::collect_files(root)? {
@@ -138,33 +155,47 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error if creating/writing the file fails or archive integer
-    /// fields overflow their TES3 on-disk sizes.
+    /// Returns an error if creating/writing the file fails, archive metadata overflows, or a deferred source can not be read.
     pub fn write_path(&self, path: impl AsRef<Path>) -> Result<()> {
         let file = File::create(path)?;
-        self.write_to(BufWriter::new(file))
+        self.write_seek(BufWriter::new(file))
     }
 
     /// Write the archive to a byte vector.
     ///
     /// # Errors
     ///
-    /// Returns an error if archive integer fields overflow their TES3 on-disk
-    /// sizes or output allocation fails.
+    /// Returns an error if archive metadata overflows, output allocation fails, or a deferred source can not be read.
     pub fn to_vec(&self) -> Result<Vec<u8>> {
-        let mut out = Vec::new();
-        out.try_reserve_exact(self.archive_size_hint()?)?;
-        self.write_to(&mut out)?;
-        Ok(out)
+        let mut out = Cursor::new(Vec::new());
+        out.get_mut().try_reserve_exact(self.archive_size_hint()?)?;
+        self.write_seek(&mut out)?;
+        Ok(out.into_inner())
     }
 
-    /// Write the archive to `out`.
+    /// Write the archive to `out` using deferred payload sources.
     ///
     /// # Errors
     ///
-    /// Returns an error if writing fails or archive integer fields overflow
-    /// their TES3 on-disk sizes.
-    pub fn write_to(&self, mut out: impl Write) -> Result<()> {
+    /// Returns an error if writing fails, archive metadata overflows, or a deferred source can not be read.
+    pub fn write_seek<W: Write + Seek>(&self, mut out: W) -> Result<()> {
+        self.write_streaming(&mut out)
+    }
+
+    fn add_source(&mut self, path: impl AsRef<[u8]>, source: EntrySource) -> Result<()> {
+        let path = normalize_stored_path(path.as_ref())?;
+        if self.paths.contains(path.as_bstr()) {
+            return Err(Error::DuplicatePath);
+        }
+        let hash = hash_normalized_file(path.as_bstr());
+        self.entries.try_reserve(1)?;
+        self.paths.try_reserve(1)?;
+        self.paths.insert(path.clone());
+        self.entries.push(BuilderEntry { path, hash, source });
+        Ok(())
+    }
+
+    fn write_streaming(&self, out: &mut impl Write) -> Result<()> {
         let entries = self.sorted_entries();
         let file_count: u32 = entries.len().try_into()?;
         let names_len = names_len(&entries)?;
@@ -174,22 +205,21 @@ impl Builder {
             .and_then(|size| size.checked_add(names_len))
             .ok_or(Error::OutOfBounds)?;
 
-        write_u32(&mut out, VERSION)?;
-        write_u32(&mut out, hash_offset.try_into()?)?;
-        write_u32(&mut out, file_count)?;
+        write_u32(out, VERSION)?;
+        write_u32(out, hash_offset.try_into()?)?;
+        write_u32(out, file_count)?;
 
         let mut data_offset = 0u32;
         for entry in &entries {
-            write_u32(&mut out, entry.bytes.len().try_into()?)?;
-            write_u32(&mut out, data_offset)?;
-            data_offset = data_offset
-                .checked_add(entry.bytes.len().try_into()?)
-                .ok_or(Error::OutOfBounds)?;
+            let len: u32 = entry.source.len().try_into()?;
+            write_u32(out, len)?;
+            write_u32(out, data_offset)?;
+            data_offset = data_offset.checked_add(len).ok_or(Error::OutOfBounds)?;
         }
 
         let mut name_offset = 0u32;
         for entry in &entries {
-            write_u32(&mut out, name_offset)?;
+            write_u32(out, name_offset)?;
             name_offset = name_offset
                 .checked_add((entry.path.len() + 1).try_into()?)
                 .ok_or(Error::OutOfBounds)?;
@@ -200,11 +230,11 @@ impl Builder {
             out.write_all(&[0])?;
         }
         for entry in &entries {
-            write_u32(&mut out, entry.hash.lo)?;
-            write_u32(&mut out, entry.hash.hi)?;
+            write_u32(out, entry.hash.lo)?;
+            write_u32(out, entry.hash.hi)?;
         }
         for entry in &entries {
-            out.write_all(&entry.bytes)?;
+            entry.source.copy_to(out)?;
         }
         Ok(())
     }
@@ -229,11 +259,51 @@ impl Builder {
             .and_then(|size| size.checked_add(names_len))
             .and_then(|size| size.checked_add(8 * entries.len()))
             .and_then(|size| {
-                entries
-                    .iter()
-                    .try_fold(size, |sum, entry| sum.checked_add(entry.bytes.len()))
+                entries.iter().try_fold(size, |sum, entry| {
+                    usize::try_from(entry.source.len())
+                        .ok()
+                        .and_then(|len| sum.checked_add(len))
+                })
             })
             .ok_or(Error::OutOfBounds)
+    }
+}
+
+impl EntrySource {
+    fn len(&self) -> u64 {
+        match self {
+            Self::Bytes(bytes) => bytes.len() as u64,
+            Self::File { len, .. } | Self::ArchiveEntry { len, .. } => *len,
+        }
+    }
+
+    fn copy_to(&self, out: &mut impl Write) -> Result<u64> {
+        match self {
+            Self::Bytes(bytes) => {
+                out.write_all(bytes)?;
+                Ok(bytes.len().try_into()?)
+            }
+            Self::File { path, len } => {
+                let mut file = File::open(path)?;
+                let copied = io::copy(&mut file, out)?;
+                if copied == *len {
+                    Ok(copied)
+                } else {
+                    Err(Error::Io(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "deferred source file size changed before archive write",
+                    )))
+                }
+            }
+            Self::ArchiveEntry { archive, id, len } => {
+                let copied = archive.extract_entry_by_id(*id, out)?;
+                if copied == *len {
+                    Ok(copied)
+                } else {
+                    Err(Error::OutOfBounds)
+                }
+            }
+        }
     }
 }
 

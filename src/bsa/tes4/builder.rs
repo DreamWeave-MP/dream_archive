@@ -13,8 +13,9 @@ use std::{
     borrow::Cow,
     collections::HashSet,
     fs::{self, File},
-    io::{BufWriter, Write},
-    path::Path,
+    io::{self, BufWriter, Cursor, Seek, Write},
+    path::{Path, PathBuf},
+    sync::Arc,
 };
 
 const MAGIC: u32 = u32::from_le_bytes(*b"BSA\0");
@@ -103,7 +104,21 @@ struct BuilderEntry {
     folder_hash: HashFields,
     file_hash: HashFields,
     compression: CompressionOverride,
-    bytes: Vec<u8>,
+    source: EntrySource,
+}
+
+#[derive(Clone, Debug)]
+enum EntrySource {
+    Bytes(Vec<u8>),
+    File {
+        path: PathBuf,
+        len: u64,
+    },
+    ArchiveEntry {
+        archive: Arc<super::Archive>,
+        id: super::EntryId,
+        len: u64,
+    },
 }
 
 struct PreparedEntry<'a> {
@@ -275,30 +290,23 @@ impl Builder {
         let mut owned = Vec::new();
         owned.try_reserve_exact(bytes.as_ref().len())?;
         owned.extend_from_slice(bytes.as_ref());
-        let folder_hash = hash_directory(&folder).0;
-        let file_hash = hash_file(&name).0;
-        self.entries.try_reserve(1)?;
-        self.paths.try_reserve(1)?;
-        self.paths.insert(path_key);
-        self.entries.push(BuilderEntry {
+        self.add_source(
             folder,
             name,
-            folder_hash,
-            file_hash,
+            path_key,
             compression,
-            bytes: owned,
-        });
-        Ok(())
+            EntrySource::Bytes(owned),
+        )
     }
 
-    /// Read a filesystem file and store it at `archive_path`.
+    /// Record a filesystem file and store it at `archive_path` when written.
     ///
     /// Symlinked files are followed for payload bytes; the archive path is the
     /// path supplied by the caller.
     ///
     /// # Errors
     ///
-    /// Returns an error if reading the file fails or adding the archive entry fails.
+    /// Returns an error if source metadata lookup fails or adding the archive entry fails. Payload read errors are reported when writing.
     pub fn add_file(
         &mut self,
         archive_path: impl AsRef<[u8]>,
@@ -307,19 +315,75 @@ impl Builder {
         self.add_file_with_compression(archive_path, source, CompressionOverride::Inherit)
     }
 
-    /// Read a filesystem file with a per-file compression policy.
+    /// Record a filesystem file with a per-file compression policy.
     ///
     /// # Errors
     ///
-    /// Returns an error if reading the file fails or adding the archive entry fails.
+    /// Returns an error if source metadata lookup fails or adding the archive entry fails. Payload read errors are reported when writing.
     pub fn add_file_with_compression(
         &mut self,
         archive_path: impl AsRef<[u8]>,
         source: impl AsRef<Path>,
         compression: CompressionOverride,
     ) -> Result<()> {
-        let bytes = fs::read(source)?;
-        self.add_bytes_with_compression(archive_path, bytes, compression)
+        let source = source.as_ref();
+        let len = fs::metadata(source)?.len();
+        let (folder, name) = normalize_stored_path(archive_path.as_ref())?;
+        let path_key = (folder.clone(), name.clone());
+        self.add_source(
+            folder,
+            name,
+            path_key,
+            compression,
+            EntrySource::File {
+                path: source.to_path_buf(),
+                len,
+            },
+        )
+    }
+
+    /// Preserve an entry from another TES4-family archive without materializing
+    /// it in the builder. The entry is decoded and stored according to this
+    /// builder's compression policy when written.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the archive path is invalid, duplicated, or the source id is invalid.
+    pub fn add_archive_entry(
+        &mut self,
+        archive_path: impl AsRef<[u8]>,
+        archive: Arc<super::Archive>,
+        id: super::EntryId,
+    ) -> Result<()> {
+        self.add_archive_entry_with_compression(
+            archive_path,
+            archive,
+            id,
+            CompressionOverride::Inherit,
+        )
+    }
+
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the archive path is invalid, duplicated, or the source id is invalid.
+    pub fn add_archive_entry_with_compression(
+        &mut self,
+        archive_path: impl AsRef<[u8]>,
+        archive: Arc<super::Archive>,
+        id: super::EntryId,
+        compression: CompressionOverride,
+    ) -> Result<()> {
+        let len = archive.extracted_len_by_id(id)?;
+        let (folder, name) = normalize_stored_path(archive_path.as_ref())?;
+        let path_key = (folder.clone(), name.clone());
+        self.add_source(
+            folder,
+            name,
+            path_key,
+            compression,
+            EntrySource::ArchiveEntry { archive, id, len },
+        )
     }
 
     /// Recursively add all files below `root` using paths relative to `root`.
@@ -331,7 +395,7 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error if directory traversal, file reading, or adding an entry fails.
+    /// Returns an error if directory traversal, source metadata lookup, or adding an entry fails. Payload read errors are reported when writing.
     pub fn add_dir(&mut self, root: impl AsRef<Path>) -> Result<()> {
         self.add_dir_with_compression(root, CompressionOverride::Inherit)
     }
@@ -343,7 +407,7 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error if directory traversal, file reading, or adding an entry fails.
+    /// Returns an error if directory traversal, source metadata lookup, or adding an entry fails. Payload read errors are reported when writing.
     pub fn add_dir_with_compression(
         &mut self,
         root: impl AsRef<Path>,
@@ -386,7 +450,7 @@ impl Builder {
     /// fields overflow their TES4 on-disk sizes.
     pub fn write_path(&self, path: impl AsRef<Path>) -> Result<()> {
         let file = File::create(path)?;
-        self.write_to(BufWriter::new(file))
+        self.write_seek(BufWriter::new(file))
     }
 
     /// Write the archive to a byte vector.
@@ -395,10 +459,14 @@ impl Builder {
     ///
     /// Returns an error if archive integer fields overflow their TES4 on-disk
     /// sizes or output allocation fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if archive metadata overflows, output allocation fails, or a deferred source can not be read.
     pub fn to_vec(&self) -> Result<Vec<u8>> {
-        let mut out = Vec::new();
-        self.write_to(&mut out)?;
-        Ok(out)
+        let mut out = Cursor::new(Vec::new());
+        self.write_seek(&mut out)?;
+        Ok(out.into_inner())
     }
 
     /// Write the archive to `out`.
@@ -407,7 +475,11 @@ impl Builder {
     ///
     /// Returns an error if writing fails or archive integer fields overflow
     /// their TES4 on-disk sizes.
-    pub fn write_to(&self, mut out: impl Write) -> Result<()> {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing fails, archive metadata overflows, or a deferred source can not be read.
+    pub fn write_seek<W: Write + Seek>(&self, mut out: W) -> Result<()> {
         if self.name_mode.embedded_file_names() && self.version == ArchiveVersion::v103 {
             return Err(Error::NotImplemented(
                 "TES4 embedded file names require version 104 or 105",
@@ -513,6 +585,33 @@ impl Builder {
         Ok(())
     }
 
+    fn add_source(
+        &mut self,
+        folder: BString,
+        name: BString,
+        path_key: (BString, BString),
+        compression: CompressionOverride,
+        source: EntrySource,
+    ) -> Result<()> {
+        if self.paths.contains(&path_key) {
+            return Err(Error::DuplicatePath);
+        }
+        let folder_hash = hash_directory(&folder).0;
+        let file_hash = hash_file(&name).0;
+        self.entries.try_reserve(1)?;
+        self.paths.try_reserve(1)?;
+        self.paths.insert(path_key);
+        self.entries.push(BuilderEntry {
+            folder,
+            name,
+            folder_hash,
+            file_hash,
+            compression,
+            source,
+        });
+        Ok(())
+    }
+
     fn prepare_entries<'a>(&self, entries: &[&'a BuilderEntry]) -> Result<Vec<PreparedEntry<'a>>> {
         let mut prepared = Vec::new();
         prepared.try_reserve_exact(entries.len())?;
@@ -520,11 +619,11 @@ impl Builder {
             let stored = if entry.is_compressed(self.compressed) {
                 Cow::Owned(compressed_payload(
                     self.version,
-                    &entry.bytes,
+                    &entry.source.to_vec()?,
                     self.zlib_level,
                 )?)
             } else {
-                Cow::Borrowed(entry.bytes.as_slice())
+                Cow::Owned(entry.source.to_vec()?)
             };
             prepared.push(PreparedEntry { entry, stored });
         }
@@ -566,6 +665,51 @@ impl PreparedEntry<'_> {
             size |= 1 << 30;
         }
         Ok(size)
+    }
+}
+
+impl EntrySource {
+    fn len(&self) -> u64 {
+        match self {
+            Self::Bytes(bytes) => bytes.len() as u64,
+            Self::File { len, .. } | Self::ArchiveEntry { len, .. } => *len,
+        }
+    }
+
+    fn copy_to(&self, out: &mut impl Write) -> Result<u64> {
+        match self {
+            Self::Bytes(bytes) => {
+                out.write_all(bytes)?;
+                Ok(bytes.len().try_into()?)
+            }
+            Self::File { path, len } => {
+                let mut file = File::open(path)?;
+                let copied = io::copy(&mut file, out)?;
+                if copied == *len {
+                    Ok(copied)
+                } else {
+                    Err(Error::Io(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "deferred source file size changed before archive write",
+                    )))
+                }
+            }
+            Self::ArchiveEntry { archive, id, len } => {
+                let copied = archive.extract_entry_by_id(*id, out)?;
+                if copied == *len {
+                    Ok(copied)
+                } else {
+                    Err(Error::OutOfBounds)
+                }
+            }
+        }
+    }
+
+    fn to_vec(&self) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        out.try_reserve_exact(self.len().try_into()?)?;
+        self.copy_to(&mut out)?;
+        Ok(out)
     }
 }
 

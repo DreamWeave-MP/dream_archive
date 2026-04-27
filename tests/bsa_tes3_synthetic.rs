@@ -332,3 +332,40 @@ fn tes3_read_entry_into_appends_to_existing_output() {
         .unwrap();
     assert_eq!(out, b"prefixhello");
 }
+
+#[test]
+fn add_file_reads_payload_when_written() {
+    let root = output_dir("tes3-deferred-add-file");
+    std::fs::create_dir_all(&root).unwrap();
+    let source = root.join("source.txt");
+    std::fs::write(&source, b"first").unwrap();
+
+    let mut builder = Builder::new();
+    builder.add_file("data/source.txt", &source).unwrap();
+    std::fs::write(&source, b"later").unwrap();
+
+    let archive = Archive::from_vec(builder.to_vec().unwrap()).unwrap();
+    assert_eq!(
+        archive.read_file_required("data/source.txt").unwrap(),
+        b"later"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn builder_can_defer_existing_archive_entry() {
+    let source = std::sync::Arc::new(
+        Archive::from_slice(&tiny_tes3_archive(b"data/source.txt", b"payload")).unwrap(),
+    );
+    let (id, _) = source.entries_with_ids().next().unwrap();
+
+    let mut builder = Builder::new();
+    builder
+        .add_archive_entry("data/copied.txt", std::sync::Arc::clone(&source), id)
+        .unwrap();
+    let archive = Archive::from_vec(builder.to_vec().unwrap()).unwrap();
+    assert_eq!(
+        archive.read_file_required("data/copied.txt").unwrap(),
+        b"payload"
+    );
+}

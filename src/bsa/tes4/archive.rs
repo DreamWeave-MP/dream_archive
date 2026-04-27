@@ -34,6 +34,22 @@ pub struct ArchiveInfo {
     pub archive_types: ArchiveTypes,
 }
 
+/// Stable identifier for an entry within one parsed TES4-family BSA archive.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct EntryId(usize);
+
+impl EntryId {
+    #[must_use]
+    pub const fn from_index(index: usize) -> Self {
+        Self(index)
+    }
+
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.0
+    }
+}
+
 /// One file entry in a TES4-family BSA archive index.
 ///
 /// Paths preserve the archive's spelling. Lookup through [`Archive::get`] and
@@ -228,6 +244,64 @@ impl Archive {
     #[must_use]
     pub fn entries(&self) -> &[Entry] {
         &self.entries
+    }
+
+    pub fn entries_with_ids(&self) -> impl Iterator<Item = (EntryId, &Entry)> {
+        self.entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| (EntryId(index), entry))
+    }
+
+    #[must_use]
+    pub fn entry_by_id(&self, id: EntryId) -> Option<&Entry> {
+        self.entries.get(id.0)
+    }
+
+    /// Get an entry by stable id, returning an error when it is absent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::OutOfBounds`] when `id` does not identify an entry in this archive.
+    pub fn entry_by_id_required(&self, id: EntryId) -> Result<&Entry> {
+        self.entry_by_id(id).ok_or(Error::OutOfBounds)
+    }
+
+    /// Return the decoded size that extraction would write for an entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if payload metadata is out of bounds or malformed.
+    pub fn extracted_len(&self, entry: &Entry) -> Result<u64> {
+        if entry.record.is_compressed(self.info.archive_flags) {
+            let payload = self.entry_payload(entry)?;
+            if payload.len() < 4 {
+                return Err(Error::OutOfBounds);
+            }
+            Ok(u64::from(u32::from_le_bytes([
+                payload[0], payload[1], payload[2], payload[3],
+            ])))
+        } else {
+            Ok(u64::try_from(self.entry_payload(entry)?.len())?)
+        }
+    }
+
+    /// Return the decoded size that extraction would write for an entry id.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::OutOfBounds`] for an invalid id, or payload metadata errors.
+    pub fn extracted_len_by_id(&self, id: EntryId) -> Result<u64> {
+        self.extracted_len(self.entry_by_id_required(id)?)
+    }
+
+    /// Extract an entry selected by stable id into a writer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::OutOfBounds`] for an invalid id, or the same errors as entry extraction.
+    pub fn extract_entry_by_id(&self, id: EntryId, out: impl std::io::Write) -> Result<u64> {
+        self.extract_entry(self.entry_by_id_required(id)?, out)
     }
 
     /// Get an entry by case-insensitive path with slash normalization.

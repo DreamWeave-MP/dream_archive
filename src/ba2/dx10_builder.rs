@@ -6,7 +6,7 @@ use std::{
     borrow::Cow,
     collections::HashSet,
     fs::{self, File},
-    io::{BufWriter, Write},
+    io::{BufWriter, Cursor, Seek, Write},
     path::Path,
 };
 
@@ -295,7 +295,7 @@ impl Dx10Builder {
     /// fields overflow their BA2 on-disk sizes.
     pub fn write_path(&self, path: impl AsRef<Path>) -> Result<()> {
         let file = File::create(path)?;
-        self.write_to(BufWriter::new(file))
+        self.write_seek(BufWriter::new(file))
     }
 
     /// Write the archive to a byte vector.
@@ -305,9 +305,9 @@ impl Dx10Builder {
     /// Returns an error if archive integer fields overflow their BA2 on-disk
     /// sizes or output allocation fails.
     pub fn to_vec(&self) -> Result<Vec<u8>> {
-        let mut out = Vec::new();
-        self.write_to(&mut out)?;
-        Ok(out)
+        let mut out = Cursor::new(Vec::new());
+        self.write_seek(&mut out)?;
+        Ok(out.into_inner())
     }
 
     /// Write the archive to `out`.
@@ -316,7 +316,7 @@ impl Dx10Builder {
     ///
     /// Returns an error if writing fails or archive integer fields overflow
     /// their BA2 on-disk sizes.
-    pub fn write_to(&self, mut out: impl Write) -> Result<()> {
+    pub fn write_seek<W: Write + Seek>(&self, mut out: W) -> Result<()> {
         let entries = self.sorted_entries();
         let prepared = self.prepare_entries(&entries)?;
         let payload_offset = payload_offset(entries.len(), self.version)?;

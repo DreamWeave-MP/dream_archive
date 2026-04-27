@@ -1771,3 +1771,23 @@ fn failed_lz4_extract_entry_to_path_keeps_existing_ba2_file_and_removes_temp() {
     assert_no_temp_extract_files(&out);
     std::fs::remove_dir_all(out).unwrap();
 }
+
+#[test]
+fn ba2_builder_can_defer_existing_archive_entry() {
+    let mut source_builder = Builder::new();
+    source_builder
+        .add_bytes("data/source.txt", b"payload")
+        .unwrap();
+    let source = std::sync::Arc::new(Archive::from_vec(source_builder.to_vec().unwrap()).unwrap());
+    let (id, _) = source.entries_with_ids().next().unwrap();
+
+    let mut builder = Builder::new();
+    builder
+        .add_archive_entry("data/copied.txt", std::sync::Arc::clone(&source), id)
+        .unwrap();
+    let archive = Archive::from_vec(builder.to_vec().unwrap()).unwrap();
+    assert_eq!(
+        archive.read_file_required("data/copied.txt").unwrap(),
+        b"payload"
+    );
+}

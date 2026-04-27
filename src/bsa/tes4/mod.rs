@@ -15,7 +15,7 @@ mod parser;
 
 pub use super::{Error, Result};
 pub use archive::{
-    Archive, ArchiveFlags, ArchiveInfo, ArchiveTypes, ArchiveVersion, Entry, FileRecord,
+    Archive, ArchiveFlags, ArchiveInfo, ArchiveTypes, ArchiveVersion, Entry, EntryId, FileRecord,
 };
 pub use builder::{Builder, GameProfile, NameMode};
 pub use hash::{HashFields, hash_directory, hash_file};

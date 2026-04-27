@@ -17,7 +17,7 @@ mod dx10_builder;
 mod hash;
 mod parser;
 
-pub use archive::{Archive, ArchiveFile, ArchiveInfo, Entry, FileHeader, TextureHeader};
+pub use archive::{Archive, ArchiveFile, ArchiveInfo, Entry, EntryId, FileHeader, TextureHeader};
 pub use builder::Builder;
 pub use chunk::{Ba2CompressionFormat, Chunk};
 pub use dx10_builder::Dx10Builder;

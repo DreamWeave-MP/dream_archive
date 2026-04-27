@@ -3,11 +3,11 @@ use crate::{CompressionOverride, builder_fs};
 use bstr::{BString, ByteSlice as _};
 use flate2::{Compression, write::ZlibEncoder};
 use std::{
-    borrow::Cow,
     collections::HashSet,
     fs::{self, File},
-    io::{BufWriter, Write},
-    path::Path,
+    io::{self, BufWriter, Cursor, Seek, SeekFrom, Write},
+    path::{Path, PathBuf},
+    sync::Arc,
 };
 
 const MAGIC: u32 = u32::from_le_bytes(*b"BTDX");
@@ -36,12 +36,21 @@ struct BuilderEntry {
     name: BString,
     hash: FileHash,
     compression: CompressionOverride,
-    bytes: Vec<u8>,
+    source: EntrySource,
 }
 
-struct PreparedEntry<'a> {
-    entry: &'a BuilderEntry,
-    stored: Cow<'a, [u8]>,
+#[derive(Clone, Debug)]
+enum EntrySource {
+    Bytes(Vec<u8>),
+    File {
+        path: PathBuf,
+        len: u64,
+    },
+    ArchiveEntry {
+        archive: Arc<super::Archive>,
+        id: super::EntryId,
+        len: u64,
+    },
 }
 
 impl Default for Builder {
@@ -137,19 +146,10 @@ impl Builder {
         let mut owned = Vec::new();
         owned.try_reserve_exact(bytes.as_ref().len())?;
         owned.extend_from_slice(bytes.as_ref());
-        self.entries.try_reserve(1)?;
-        self.names.try_reserve(1)?;
-        self.names.insert(name.clone());
-        self.entries.push(BuilderEntry {
-            name,
-            hash,
-            compression,
-            bytes: owned,
-        });
-        Ok(())
+        self.add_source(name, hash, compression, EntrySource::Bytes(owned))
     }
 
-    /// Read a filesystem file and store it at `archive_path`.
+    /// Record a filesystem file and store it at `archive_path` when written.
     ///
     /// Symlinked files are followed for their payload bytes; the archive path is
     /// still the path supplied by the caller. Which is the point, otherwise this
@@ -157,7 +157,7 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error if reading the file fails or adding the archive entry fails.
+    /// Returns an error if source metadata lookup fails or adding the archive entry fails. Payload read errors are reported when writing.
     pub fn add_file(
         &mut self,
         archive_path: impl AsRef<[u8]>,
@@ -166,19 +166,77 @@ impl Builder {
         self.add_file_with_compression(archive_path, source, CompressionOverride::Inherit)
     }
 
-    /// Read a filesystem file with a per-file compression policy.
+    /// Record a filesystem file with a per-file compression policy.
     ///
     /// # Errors
     ///
-    /// Returns an error if reading the file fails or adding the archive entry fails.
+    /// Returns an error if source metadata lookup fails or adding the archive entry fails. Payload read errors are reported when writing.
     pub fn add_file_with_compression(
         &mut self,
         archive_path: impl AsRef<[u8]>,
         source: impl AsRef<Path>,
         compression: CompressionOverride,
     ) -> Result<()> {
-        let bytes = fs::read(source)?;
-        self.add_bytes_with_compression(archive_path, bytes, compression)
+        let source = source.as_ref();
+        let len = fs::metadata(source)?.len();
+        let name = normalize_stored_path(archive_path.as_ref())?;
+        let (hash, normalized) = hash_file(name.as_bstr());
+        debug_assert_eq!(name, normalized);
+        self.add_source(
+            name,
+            hash,
+            compression,
+            EntrySource::File {
+                path: source.to_path_buf(),
+                len,
+            },
+        )
+    }
+
+    /// Preserve an entry from another BA2 archive without materializing it in
+    /// the builder. The entry is decoded and then stored according to this
+    /// builder's compression policy when written.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the archive path is invalid, duplicated, or the source id is invalid.
+    pub fn add_archive_entry(
+        &mut self,
+        archive_path: impl AsRef<[u8]>,
+        archive: Arc<super::Archive>,
+        id: super::EntryId,
+    ) -> Result<()> {
+        self.add_archive_entry_with_compression(
+            archive_path,
+            archive,
+            id,
+            CompressionOverride::Inherit,
+        )
+    }
+
+    /// Preserve an entry from another BA2 archive with an explicit compression
+    /// policy for the new archive.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the archive path is invalid, duplicated, or the source id is invalid.
+    pub fn add_archive_entry_with_compression(
+        &mut self,
+        archive_path: impl AsRef<[u8]>,
+        archive: Arc<super::Archive>,
+        id: super::EntryId,
+        compression: CompressionOverride,
+    ) -> Result<()> {
+        let len = archive.extracted_len_by_id(id)?;
+        let name = normalize_stored_path(archive_path.as_ref())?;
+        let (hash, normalized) = hash_file(name.as_bstr());
+        debug_assert_eq!(name, normalized);
+        self.add_source(
+            name,
+            hash,
+            compression,
+            EntrySource::ArchiveEntry { archive, id, len },
+        )
     }
 
     /// Recursively add all files below `root` using paths relative to `root`.
@@ -188,7 +246,7 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error if directory traversal, file reading, or adding an entry fails.
+    /// Returns an error if directory traversal, source metadata lookup, or adding an entry fails. Payload read errors are reported when writing.
     pub fn add_dir(&mut self, root: impl AsRef<Path>) -> Result<()> {
         self.add_dir_with_compression(root, CompressionOverride::Inherit)
     }
@@ -200,7 +258,7 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error if directory traversal, file reading, or adding an entry fails.
+    /// Returns an error if directory traversal, source metadata lookup, or adding an entry fails. Payload read errors are reported when writing.
     pub fn add_dir_with_compression(
         &mut self,
         root: impl AsRef<Path>,
@@ -226,42 +284,47 @@ impl Builder {
     /// fields overflow their BA2 on-disk sizes.
     pub fn write_path(&self, path: impl AsRef<Path>) -> Result<()> {
         let file = File::create(path)?;
-        self.write_to(BufWriter::new(file))
+        self.write_seek(BufWriter::new(file))
     }
 
     /// Write the archive to a byte vector.
     ///
+    /// This necessarily buffers the final archive because the return value is a
+    /// `Vec<u8>`. Use [`Self::write_seek`] for filesystem output.
+    ///
     /// # Errors
     ///
-    /// Returns an error if archive integer fields overflow their BA2 on-disk
-    /// sizes or output allocation fails.
+    /// Returns an error if archive metadata overflows, output allocation fails, or a deferred source can not be read.
     pub fn to_vec(&self) -> Result<Vec<u8>> {
-        let mut out = Vec::new();
-        self.write_to(&mut out)?;
-        Ok(out)
+        let mut out = Cursor::new(Vec::new());
+        self.write_seek(&mut out)?;
+        Ok(out.into_inner())
     }
 
-    /// Write the archive to `out`.
+    /// Write the archive to a seekable output, streaming deferred payloads.
     ///
     /// # Errors
     ///
-    /// Returns an error if writing fails or archive integer fields overflow
-    /// their BA2 on-disk sizes.
-    pub fn write_to(&self, mut out: impl Write) -> Result<()> {
+    /// Returns an error if writing fails, archive metadata overflows, or a deferred source can not be read.
+    pub fn write_seek<W: Write + Seek>(&self, mut out: W) -> Result<()> {
+        if self.compression == Some(super::Ba2CompressionFormat::LZ4)
+            && self.version != ArchiveVersion::v3
+            && self
+                .entries
+                .iter()
+                .any(|entry| entry.is_compressed(self.compression))
+        {
+            return Err(Error::NotImplemented("BA2 LZ4 writer requires version 3"));
+        }
+
         let entries = self.sorted_entries();
-        let prepared = self.prepare_entries(&entries)?;
-        let payload_offset = payload_offset(entries.len(), self.version)?;
-        let string_table_offset = prepared.iter().try_fold(payload_offset, |offset, entry| {
-            offset
-                .checked_add(entry.stored.len())
-                .ok_or(Error::OutOfBounds)
-        })?;
+        let payload_start = payload_offset(entries.len(), self.version)?;
 
         write_u32(&mut out, MAGIC)?;
         write_u32(&mut out, self.version as u32)?;
         write_u32(&mut out, GNRL)?;
         write_u32(&mut out, entries.len().try_into()?)?;
-        write_u64(&mut out, string_table_offset.try_into()?)?;
+        write_u64(&mut out, 0)?;
         if matches!(self.version, ArchiveVersion::v2 | ArchiveVersion::v3) {
             write_u64(&mut out, 1)?;
         }
@@ -276,31 +339,45 @@ impl Builder {
             )?;
         }
 
-        let mut next_payload_offset: u64 = payload_offset.try_into()?;
-        for entry in &prepared {
-            write_hash(&mut out, entry.entry.hash)?;
+        for entry in &entries {
+            write_hash(&mut out, entry.hash)?;
             out.write_all(&[0])?;
             out.write_all(&[1])?;
             write_u16(&mut out, FILE_HEADER_SIZE_GNRL)?;
-            write_u64(&mut out, next_payload_offset)?;
+            write_u64(&mut out, 0)?;
+            write_u32(&mut out, 0)?;
+            write_u32(&mut out, entry.source.len().try_into()?)?;
+            write_u32(&mut out, CHUNK_SENTINEL)?;
+        }
+
+        out.seek(SeekFrom::Start(payload_start.try_into()?))?;
+        for (index, entry) in entries.iter().enumerate() {
+            let data_offset = out.stream_position()?;
+            let stored_len = entry.write_payload(&mut out, self.compression, self.zlib_level)?;
+            let resume = out.stream_position()?;
+            let record_offset = u64::try_from(header_size(self.version)?)?
+                + u64::try_from(
+                    index
+                        .checked_mul(FILE_RECORD_SIZE_GNRL)
+                        .ok_or(Error::OutOfBounds)?,
+                )?;
+            out.seek(SeekFrom::Start(record_offset + 16))?;
+            write_u64(&mut out, data_offset)?;
             write_u32(
                 &mut out,
-                if entry.entry.is_compressed(self.compression) {
-                    entry.stored.len().try_into()?
+                if entry.is_compressed(self.compression) {
+                    stored_len.try_into()?
                 } else {
                     0
                 },
             )?;
-            write_u32(&mut out, entry.entry.bytes.len().try_into()?)?;
-            write_u32(&mut out, CHUNK_SENTINEL)?;
-            next_payload_offset = next_payload_offset
-                .checked_add(entry.stored.len().try_into()?)
-                .ok_or(Error::OutOfBounds)?;
+            out.seek(SeekFrom::Start(resume))?;
         }
 
-        for entry in &prepared {
-            out.write_all(&entry.stored)?;
-        }
+        let string_table_offset = out.stream_position()?;
+        out.seek(SeekFrom::Start(16))?;
+        write_u64(&mut out, string_table_offset)?;
+        out.seek(SeekFrom::Start(string_table_offset))?;
         for entry in &entries {
             write_u16(&mut out, entry.name.len().try_into()?)?;
             out.write_all(&entry.name)?;
@@ -308,33 +385,26 @@ impl Builder {
         Ok(())
     }
 
-    fn prepare_entries<'a>(&self, entries: &[&'a BuilderEntry]) -> Result<Vec<PreparedEntry<'a>>> {
-        if self.compression == Some(super::Ba2CompressionFormat::LZ4)
-            && self.version != ArchiveVersion::v3
-            && entries
-                .iter()
-                .any(|entry| entry.is_compressed(self.compression))
-        {
-            return Err(Error::NotImplemented("BA2 LZ4 writer requires version 3"));
+    fn add_source(
+        &mut self,
+        name: BString,
+        hash: FileHash,
+        compression: CompressionOverride,
+        source: EntrySource,
+    ) -> Result<()> {
+        if self.names.contains(name.as_bstr()) {
+            return Err(Error::DuplicatePath);
         }
-        let mut prepared = Vec::new();
-        prepared.try_reserve_exact(entries.len())?;
-        for entry in entries {
-            let stored = if entry.is_compressed(self.compression) {
-                match self.compression.unwrap_or(super::Ba2CompressionFormat::Zip) {
-                    super::Ba2CompressionFormat::Zip => {
-                        Cow::Owned(zlib_compress(&entry.bytes, self.zlib_level)?)
-                    }
-                    super::Ba2CompressionFormat::LZ4 => {
-                        Cow::Owned(lz4_flex::block::compress(&entry.bytes))
-                    }
-                }
-            } else {
-                Cow::Borrowed(entry.bytes.as_slice())
-            };
-            prepared.push(PreparedEntry { entry, stored });
-        }
-        Ok(prepared)
+        self.entries.try_reserve(1)?;
+        self.names.try_reserve(1)?;
+        self.names.insert(name.clone());
+        self.entries.push(BuilderEntry {
+            name,
+            hash,
+            compression,
+            source,
+        });
+        Ok(())
     }
 
     fn sorted_entries(&self) -> Vec<&BuilderEntry> {
@@ -355,6 +425,110 @@ impl BuilderEntry {
             CompressionOverride::Store => false,
             CompressionOverride::Compress => true,
         }
+    }
+
+    fn write_payload(
+        &self,
+        out: &mut impl Write,
+        default: Option<super::Ba2CompressionFormat>,
+        zlib_level: Compression,
+    ) -> Result<u64> {
+        if self.is_compressed(default) {
+            match default.unwrap_or(super::Ba2CompressionFormat::Zip) {
+                super::Ba2CompressionFormat::Zip => {
+                    let mut counter = CountingWriter::new(out);
+                    {
+                        let mut encoder = ZlibEncoder::new(&mut counter, zlib_level);
+                        self.source.copy_to(&mut encoder)?;
+                        encoder.finish()?;
+                    }
+                    Ok(counter.written())
+                }
+                super::Ba2CompressionFormat::LZ4 => {
+                    let bytes = self.source.to_vec()?;
+                    let compressed = lz4_flex::block::compress(&bytes);
+                    out.write_all(&compressed)?;
+                    Ok(compressed.len().try_into()?)
+                }
+            }
+        } else {
+            self.source.copy_to(out)
+        }
+    }
+}
+
+impl EntrySource {
+    fn len(&self) -> u64 {
+        match self {
+            Self::Bytes(bytes) => bytes.len() as u64,
+            Self::File { len, .. } | Self::ArchiveEntry { len, .. } => *len,
+        }
+    }
+
+    fn copy_to(&self, out: &mut impl Write) -> Result<u64> {
+        match self {
+            Self::Bytes(bytes) => {
+                out.write_all(bytes)?;
+                Ok(bytes.len().try_into()?)
+            }
+            Self::File { path, len } => {
+                let mut file = File::open(path)?;
+                let copied = io::copy(&mut file, out)?;
+                if copied == *len {
+                    Ok(copied)
+                } else {
+                    Err(Error::Io(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "deferred source file size changed before archive write",
+                    )))
+                }
+            }
+            Self::ArchiveEntry { archive, id, len } => {
+                let copied = archive.extract_entry_by_id(*id, out)?;
+                if copied == *len {
+                    Ok(copied)
+                } else {
+                    Err(Error::OutOfBounds)
+                }
+            }
+        }
+    }
+
+    fn to_vec(&self) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        out.try_reserve_exact(self.len().try_into()?)?;
+        self.copy_to(&mut out)?;
+        Ok(out)
+    }
+}
+
+struct CountingWriter<'a, W> {
+    inner: &'a mut W,
+    written: u64,
+}
+
+impl<'a, W> CountingWriter<'a, W> {
+    const fn new(inner: &'a mut W) -> Self {
+        Self { inner, written: 0 }
+    }
+
+    const fn written(&self) -> u64 {
+        self.written
+    }
+}
+
+impl<W: Write> Write for CountingWriter<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let written = self.inner.write(buf)?;
+        self.written = self
+            .written
+            .checked_add(u64::try_from(written).map_err(io::Error::other)?)
+            .ok_or_else(|| io::Error::other("byte counter overflow"))?;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
     }
 }
 
