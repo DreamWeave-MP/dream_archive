@@ -21,10 +21,16 @@
 //! both BSA generations. `parallel` enables Rayon-backed bulk extraction paths.
 //!
 //! The `lua` feature exposes an embedded [`mlua`] API through the
-//! `dream_archive::lua` module. It enables BA2 and BSA support, uses vendored
-//! `LuaJIT` with Lua 5.2 compatibility, and is meant for applications that embed a
-//! Lua VM. It does not install a standalone C module named `dream_archive`; the
-//! host application creates and registers the module table.
+//! `dream_archive::lua` module. It enables BA2 and BSA support, and also enables
+//! the re-exported [`dream_path`]'s Lua companion helpers. It deliberately does
+//! not choose an `mlua` runtime for ordinary library consumers; embedding
+//! applications should select that once at their own top level. The
+//! `standalone-lua` feature is for this crate's tests, examples, and documentation
+//! builds, and selects vendored `LuaJIT` with Lua 5.2 compatibility through
+//! `mlua`. The crate does not install a standalone C module named
+//! `dream_archive`; the host application creates and registers the module table.
+//! Building this crate by itself with `lua` but no `mlua` runtime selected is
+//! intentionally incomplete; use `standalone-lua` for local standalone checks.
 //!
 //! # Capability summary
 //!
@@ -145,6 +151,10 @@
 //! # #[cfg(feature = "lua")]
 //! # fn main() -> mlua::Result<()> {
 //! let lua = mlua::Lua::new();
+//! lua.globals().set(
+//!     "dream_path",
+//!     dream_archive::dream_path::lua::create_module(&lua)?,
+//! )?;
 //! let module = dream_archive::lua::create_module(&lua)?;
 //! lua.globals().set("dream_archive", module)?;
 //!
@@ -182,6 +192,14 @@ pub mod lua;
 mod read;
 #[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
 mod storage;
+
+/// Re-export of the virtual path helper crate used by archive lookup and Lua
+/// companion bindings.
+///
+/// Downstream embedders should use this re-export rather than adding a separate
+/// direct dependency when they only need the path API that belongs with
+/// `dream_archive`.
+pub use dream_path;
 
 use std::io::{self, Read};
 

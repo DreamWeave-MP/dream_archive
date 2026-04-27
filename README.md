@@ -269,21 +269,32 @@ Default features enable BA2 and both BSA families.
 - `bsa-tes4`: TES4-family BSA support.
 - `bsa`: both BSA families.
 - `parallel`: parallel extraction with Rayon.
-- `lua`: enables the `mlua` bindings and pulls in `ba2`, `bsa`, `mlua`'s
-  `luajit52` support, and vendored LuaJIT sources.
+- `lua`: enables the `mlua` bindings, `ba2`, `bsa`, and the re-exported
+  `dream_path`'s Lua companion helpers. It does not select an `mlua` runtime.
+- `standalone-lua`: selects vendored LuaJIT 5.2 through `mlua`; intended for this
+  crate's tests, examples, and documentation builds rather than normal downstream
+  library use.
 
 ## Lua bindings
 
 Enable it in `Cargo.toml`:
 
 ```toml
-dream_archive = { version = "0.1", features = ["lua"] }
+dream_archive = { version = "0.1.2", features = ["lua"] }
 ```
+
+Embedding applications must choose the `mlua` runtime centrally. If you just want
+to run this crate's examples or tests without an application's feature graph, use
+`standalone-lua` instead. Building this crate by itself with `lua` but no `mlua`
+runtime selected is intentionally incomplete. Selecting runtimes in every
+lower-level crate is how you get one build graph wearing several fake moustaches.
 
 The `lua` feature exposes a byte-first Lua API through `dream_archive::lua` for
 Rust embedders. It does not install a standalone `require("dream_archive")` C Lua
-module by itself; register the `mlua` table in your application. Lua strings are
-archive path bytes and payload bytes. Filesystem arguments are the exception:
+module by itself; register the `mlua` table in your application. Use the
+`dream_archive::dream_path` re-export for companion path helpers instead of
+adding a separate `dream-path` dependency just to reach the same API. Lua strings
+are archive path bytes and payload bytes. Filesystem arguments are the exception:
 all `open_path`, `detect_path`, `write_path`, `extract_to*`,
 `extract_entry_to_path`, `add_dir`, and source paths such as `add_file` /
 `add_dds_file` are converted as UTF-8 host paths. Archive paths passed to
@@ -306,6 +317,10 @@ string. BA2 and TES4 builders also expose
 ```rust,no_run
 fn main() -> mlua::Result<()> {
 let lua = mlua::Lua::new();
+lua.globals().set(
+    "dream_path",
+    dream_archive::dream_path::lua::create_module(&lua)?,
+)?;
 let module = dream_archive::lua::create_module(&lua)?;
 lua.globals().set("dream_archive", module)?;
 
@@ -333,6 +348,12 @@ The module exposes:
 - BSA encoding/decoding helpers and path normalization;
 - TES3/TES4 archive inspection, hashes, builders, TES4 profiles, name modes,
   compression policy, and archive type bits.
+
+Register `dream_archive::dream_path` next to `dream_archive` when scripts need
+the shared virtual path helpers. The re-exported `dream_path` handles path
+normalization/helpers; `dream_archive` handles open/list/read/extract/build
+archive mechanics; `dream_archivetool` should remain the layer that decides
+filesystem rewrite, diff, and verification policy.
 
 Common calls look like this:
 

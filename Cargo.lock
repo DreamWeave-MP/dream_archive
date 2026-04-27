@@ -82,16 +82,17 @@ checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 
 [[package]]
 name = "dream-path"
-version = "0.1.0"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77da8fbd812784ce99f7b3f700189f06055ac6e1a9671fcf2cc15e348665ebf3"
+checksum = "049f18a7dce57415b003762676b86f1ac8bf074e134556823d828dcbc04059f4"
 dependencies = [
  "bstr",
+ "mlua",
 ]
 
 [[package]]
 name = "dream_archive"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "bstr",
  "dream-path",

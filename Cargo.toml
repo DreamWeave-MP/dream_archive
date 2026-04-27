@@ -1,8 +1,8 @@
 [package]
 name = "dream_archive"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.87"
 license = "GPL-3.0-only"
 repository = "https://github.com/DreamWeave-MP/dream-archive"
 documentation = "https://dreamweave-mp.github.io/dream-archive/"
@@ -13,12 +13,12 @@ categories = ["game-development", "filesystem"]
 
 [dependencies]
 bstr = { version = "1.12", default-features = false, features = ["std"] }
-dream-path = "0.1"
+dream-path = "0.1.2"
 encoding_rs = { version = "0.8", optional = true }
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"], optional = true }
 lz4_flex = { version = "0.13", default-features = false, optional = true }
 memmap2 = { version = "0.9", optional = true }
-mlua = { version = "0.11", features = ["luajit52", "vendored"], optional = true }
+mlua = { version = "0.11.6", default-features = false, optional = true }
 rayon = { version = "1.11", optional = true }
 
 [dev-dependencies]
@@ -31,7 +31,11 @@ bsa = ["bsa-tes3", "bsa-tes4"]
 bsa-tes3 = ["dep:encoding_rs", "dep:memmap2"]
 bsa-tes4 = ["dep:encoding_rs", "dep:flate2", "dep:lz4_flex", "dep:memmap2", "lz4_flex/frame"]
 parallel = ["dep:rayon"]
-lua = ["dep:mlua", "ba2", "bsa"]
+lua = ["dep:mlua", "dream-path/lua", "ba2", "bsa"]
+standalone-lua = ["lua", "mlua/luajit52", "mlua/vendored"]
+
+[package.metadata.docs.rs]
+features = ["standalone-lua"]
 
 [[example]]
 name = "list_ba2"

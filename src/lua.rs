@@ -1,12 +1,21 @@
 //! Lua bindings for `dream_archive`.
 //!
-//! Enable the `lua` feature to build an `mlua` interface using `LuaJIT` with Lua
-//! 5.2 compatibility and vendored sources. The API is intentionally byte-first:
-//! Lua strings are archive path bytes and payload bytes. Filesystem paths are
-//! the few places where strings are interpreted as UTF-8 host paths. This module
-//! creates an embedded `mlua` table; it does not install a standalone
-//! `require("dream_archive")` module unless the embedding application registers
-//! one.
+//! Enable the `lua` feature to build an `mlua` interface for embedding
+//! applications that choose an `mlua` runtime at their own top level. Enable
+//! `standalone-lua` only for this crate's tests, examples, and documentation
+//! builds; it selects vendored `LuaJIT` with Lua 5.2 compatibility. Building this
+//! crate by itself with `lua` but no `mlua` runtime selected is intentionally
+//! incomplete. The API is intentionally byte-first: Lua strings are archive path
+//! bytes and payload bytes. Filesystem paths are the few places where strings are
+//! interpreted as UTF-8 host paths. This module creates an embedded `mlua` table;
+//! it does not install a standalone `require("dream_archive")` module unless the
+//! embedding application registers one.
+//!
+//! In the intended Lua stack, the re-exported [`crate::dream_path`] owns virtual
+//! path normalization and path helper semantics, `dream_archive` owns archive
+//! mechanics, and `dream_archivetool` owns filesystem/rewrite/diff/verify policy.
+//! Keeping those layers separate avoids making the archive crate pretend to be
+//! the application.
 //!
 //! # Registration
 //!
@@ -18,6 +27,10 @@
 //! ```rust,no_run
 //! # fn main() -> mlua::Result<()> {
 //! let lua = mlua::Lua::new();
+//! lua.globals().set(
+//!     "dream_path",
+//!     dream_archive::dream_path::lua::create_module(&lua)?,
+//! )?;
 //! let archive = dream_archive::lua::create_module(&lua)?;
 //! lua.globals().set("dream_archive", archive)?;
 //! lua.load(r#"

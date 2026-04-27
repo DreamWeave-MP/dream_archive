@@ -62,7 +62,8 @@ fn assert_no_temp_extract_files(dir: &std::path::Path) {
         let name = entry.file_name();
         assert!(
             !name.to_string_lossy().contains(".dream-archive-tmp-"),
-            "temporary extraction file was not cleaned up: {name:?}"
+            "temporary extraction file was not cleaned up: {}",
+            name.to_string_lossy()
         );
     }
 }
