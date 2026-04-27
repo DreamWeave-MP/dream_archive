@@ -8,6 +8,13 @@
 //! `require("dream_archive")` module unless the embedding application registers
 //! one.
 //!
+//! # Registration
+//!
+//! [`create_module`] returns a Lua table. Register that table as a global, or
+//! preload it yourself if you want `require("dream_archive")` to work. The crate
+//! does not export a C Lua module. Pretending otherwise would be convenient and
+//! false, which is the worst kind of convenient.
+//!
 //! ```rust,no_run
 //! # fn main() -> mlua::Result<()> {
 //! let lua = mlua::Lua::new();
@@ -22,6 +29,68 @@
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! # Lua module shape
+//!
+//! The returned table contains:
+//!
+//! - top-level format detection/opening helpers: `open_path`, `open_bytes`,
+//!   `detect_path`, `guess_format`, and `normalize_path`;
+//! - a generic archive userdata returned by `dream_archive.open_*`, with
+//!   `format`, `len`, `is_empty`, `entries`, `read_file*`, `extract_file*`,
+//!   `read_entry`, `extract_entry`, `extract_entry_to_path`, and `extract_to`;
+//! - `dream_archive.ba2`, with BA2 hash helpers, archive metadata, GNRL builder,
+//!   DX10 builder, compression names, and version constants;
+//! - `dream_archive.bsa`, with filename encoding/decoding helpers,
+//!   `normalize_path`, and the `tes3` / `tes4` submodules;
+//! - TES3/TES4 archive userdata, hash helpers, builders, and TES4 profile,
+//!   name-mode, and archive-type constants.
+//!
+//! # String contracts
+//!
+//! Lua strings are byte buffers. Archive paths and payloads are passed with
+//! `LuaString::as_bytes`; non-UTF-8 archive paths are valid when the underlying
+//! format accepts them. Filesystem path arguments are different: `open_path`,
+//! `detect_path`, `write_path`, `extract_to*`, `extract_entry_to_path`, `add_dir`,
+//! and source-file arguments to `add_file` / `add_dds_file` are converted through
+//! UTF-8. If you need arbitrary Unix `OsStr` paths, use the Rust API directly.
+//!
+//! `bsa.encode_filename(text, encoding)` and builder `add_encoded_path(...)` are
+//! also UTF-8 text boundaries: they take Unicode text and produce or insert
+//! legacy-encoded archive filename bytes.
+//!
+//! # Absence and errors
+//!
+//! Optional file APIs return Lua `nil` for missing archive members:
+//! `read_file(path)` and `extract_file(path)`. Required variants raise Lua errors:
+//! `read_file_required(path)` and `extract_file_required(path)`. Detection helpers
+//! return `nil` for unknown or too-short headers, while `open_*` functions raise
+//! errors when parsing fails.
+//!
+//! # Allocation and extraction costs
+//!
+//! `entries()` materializes a Lua table of entry metadata. `read_file*`,
+//! `extract_file*`, `read_entry`, and `extract_entry` materialize full payloads
+//! as Lua strings. `open_bytes` copies Lua archive bytes into Rust-owned storage,
+//! and builder `to_bytes()` / `to_string()` build an archive buffer and then copy
+//! it into Lua. For large archives, prefer `open_path`, `write_path`, and
+//! path-based extraction.
+//!
+//! `extract_entry_to_path` and `extract_to` write to the filesystem and return
+//! byte counts. They create missing parent directories and write individual files
+//! atomically, but archive-wide extraction is not transactional: files written
+//! before a later error remain in place.
+//!
+//! # Hashes and names
+//!
+//! TES3/TES4 64-bit hashes are exposed as exact component fields plus a fixed
+//! width `hex` string instead of lossy `LuaJIT` numbers. Hash-only TES4 entries use
+//! `nil` for `path`, `folder`, and `name`; use `folder_hash.hex` and
+//! `file_hash.hex` when exact identity is required.
+//!
+//! `tes4_archive:extract_to_with_paths(target, paths)` expects a contiguous Lua
+//! sequence (`paths[1]..paths[n]`) of candidate archive path byte strings for
+//! hash-only extraction. It is not a dictionary; non-sequence keys are ignored.
 
 #![expect(
     clippy::needless_pass_by_value,

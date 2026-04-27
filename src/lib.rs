@@ -14,6 +14,18 @@
 //! the BSA filename helpers to encode that text explicitly before lookup rather
 //! than guessing a code page.
 //!
+//! # Feature flags
+//!
+//! The default feature set enables BA2 and BSA support. Individual format
+//! families can be selected with `ba2`, `bsa-tes3`, and `bsa-tes4`; `bsa` enables
+//! both BSA generations. `parallel` enables Rayon-backed bulk extraction paths.
+//!
+//! The `lua` feature exposes an embedded [`mlua`] API through the
+//! `dream_archive::lua` module. It enables BA2 and BSA support, uses vendored
+//! `LuaJIT` with Lua 5.2 compatibility, and is meant for applications that embed a
+//! Lua VM. It does not install a standalone C module named `dream_archive`; the
+//! host application creates and registers the module table.
+//!
 //! # Capability summary
 //!
 //! - BA2 GNRL: read, extract, and write.
@@ -116,6 +128,35 @@
 //! # #[cfg(not(any(feature = "bsa-tes3", feature = "bsa-tes4")))]
 //! # fn main() {}
 //! ```
+//!
+//! # Lua bindings
+//!
+//! Enable the `lua` feature to build an [`mlua`]-based module table:
+//!
+//! ```rust,no_run
+//! # #[cfg(feature = "lua")]
+//! # fn main() -> mlua::Result<()> {
+//! let lua = mlua::Lua::new();
+//! let module = dream_archive::lua::create_module(&lua)?;
+//! lua.globals().set("dream_archive", module)?;
+//!
+//! lua.load(r#"
+//!     local builder = dream_archive.ba2.Builder.new()
+//!     builder:add_bytes("meshes/example.nif", "payload")
+//!     local archive = dream_archive.open_bytes(builder:to_bytes())
+//!     assert(archive:read_file_required("meshes/example.nif") == "payload")
+//! "#).exec()?;
+//! # Ok(())
+//! # }
+//! # #[cfg(not(feature = "lua"))]
+//! # fn main() {}
+//! ```
+//!
+//! Lua strings are used as byte buffers for archive paths and payloads. Host
+//! filesystem paths are the explicit exception and must be valid UTF-8 when
+//! passed through Lua. Optional reads/extractions return `nil` for missing
+//! archive members; `*_required` methods raise Lua errors. See the `lua` module
+//! documentation for the full Lua-facing contract.
 
 #[cfg(feature = "ba2")]
 pub mod ba2;
