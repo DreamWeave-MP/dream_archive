@@ -43,7 +43,7 @@ Open any supported archive and list recoverable paths:
 ```rust,no_run
 use dream_archive::Archive;
 
-# fn main() -> dream_archive::Result<()> {
+fn main() -> dream_archive::Result<()> {
 let archive = Archive::open_path("Data/SomeArchive.bsa")?;
 
 for entry in archive.entries() {
@@ -51,31 +51,33 @@ for entry in archive.entries() {
         println!("{path}");
     }
 }
-# Ok(())
-# }
+Ok(())
+}
 ```
 
 Read a required file:
 
 ```rust,no_run
-# use dream_archive::Archive;
-# fn main() -> dream_archive::Result<()> {
-# let archive = Archive::open_path("Data/SomeArchive.bsa")?;
+use dream_archive::Archive;
+
+fn main() -> dream_archive::Result<()> {
+let archive = Archive::open_path("Data/SomeArchive.bsa")?;
 let bytes = archive.read_file_required("meshes/foo.nif")?;
 println!("{} bytes", bytes.len());
-# Ok(())
-# }
+Ok(())
+}
 ```
 
 Extract everything with paths stored in the archive:
 
 ```rust,no_run
-# use dream_archive::Archive;
-# fn main() -> dream_archive::Result<()> {
+use dream_archive::Archive;
+
+fn main() -> dream_archive::Result<()> {
 let archive = Archive::open_path("Data/SomeArchive.ba2")?;
 archive.extract_to("out")?;
-# Ok(())
-# }
+Ok(())
+}
 ```
 
 Some archive layouts do not contain enough text to name every file. Hash-only
@@ -87,14 +89,14 @@ text exists to recover. No path does not mean empty filename.
 ```rust,no_run
 use dream_archive::bsa::tes4::Archive;
 
-# fn main() -> dream_archive::bsa::Result<()> {
+fn main() -> dream_archive::bsa::Result<()> {
 let archive = Archive::open_path("HashOnly.bsa")?;
 archive.extract_to_with_paths("out", [
     b"meshes/foo.nif".as_slice(),
     b"textures/foo.dds".as_slice(),
 ])?;
-# Ok(())
-# }
+Ok(())
+}
 ```
 
 ## Building archives
@@ -104,12 +106,12 @@ Build a TES3/Morrowind BSA from a directory:
 ```rust,no_run
 use dream_archive::Tes3BsaBuilder;
 
-# fn main() -> dream_archive::bsa::Result<()> {
+fn main() -> dream_archive::bsa::Result<()> {
 let mut builder = Tes3BsaBuilder::new();
 builder.add_dir("Data")?;
 builder.write_path("MyMod.bsa")?;
-# Ok(())
-# }
+Ok(())
+}
 ```
 
 Build a TES4-family BSA using a PC game profile:
@@ -120,14 +122,14 @@ use dream_archive::{
     bsa::tes4::{ArchiveTypes, NameMode},
 };
 
-# fn main() -> dream_archive::bsa::Result<()> {
+fn main() -> dream_archive::bsa::Result<()> {
 let mut builder = Tes4BsaBuilder::skyrim_le();
 builder.set_archive_types(ArchiveTypes::MISC);
 builder.set_name_mode(NameMode::Strings);
 builder.add_dir("Data")?;
 builder.write_path("MyMod.bsa")?;
-# Ok(())
-# }
+Ok(())
+}
 ```
 
 Build a BA2 GNRL archive:
@@ -135,13 +137,13 @@ Build a BA2 GNRL archive:
 ```rust,no_run
 use dream_archive::{Ba2Builder, ba2::Ba2CompressionFormat};
 
-# fn main() -> dream_archive::ba2::Result<()> {
+fn main() -> dream_archive::ba2::Result<()> {
 let mut builder = Ba2Builder::new();
 builder.set_compression(Some(Ba2CompressionFormat::Zip));
 builder.add_dir("Data")?;
 builder.write_path("MyMod.ba2")?;
-# Ok(())
-# }
+Ok(())
+}
 ```
 
 Build a BA2 DX10 texture archive from DDS files:
@@ -149,13 +151,13 @@ Build a BA2 DX10 texture archive from DDS files:
 ```rust,no_run
 use dream_archive::{Ba2Dx10Builder, ba2::Ba2CompressionFormat};
 
-# fn main() -> dream_archive::ba2::Result<()> {
+fn main() -> dream_archive::ba2::Result<()> {
 let mut builder = Ba2Dx10Builder::new();
 builder.set_compression(Some(Ba2CompressionFormat::Zip));
 builder.add_dds_file("textures/example.dds", "source/example.dds")?;
 builder.write_path("Textures.ba2")?;
-# Ok(())
-# }
+Ok(())
+}
 ```
 
 The first path is the archive path to store. The second path is the filesystem
@@ -193,30 +195,30 @@ byte strings, not necessarily Unicode OS paths.
 Example for a legacy Windows code page path:
 
 ```rust,no_run
-use dream_archive::bsa::{FilenameEncoding, encode_filename};
+use dream_archive::{Archive, bsa::{FilenameEncoding, encode_filename}};
 
-# fn main() -> dream_archive::bsa::Result<()> {
+fn main() -> dream_archive::Result<()> {
 let encoded = encode_filename("textures/zażółć.dds", FilenameEncoding::Windows1250)?;
-# let archive = dream_archive::Archive::open_path("Data/SomeArchive.bsa")?;
+let archive = Archive::open_path("Data/SomeArchive.bsa")?;
 let bytes = archive.read_file_required(encoded.as_ref())?;
-# let _ = bytes;
-# Ok(())
-# }
+println!("{} bytes", bytes.len());
+Ok(())
+}
 ```
 
 For GNMF BA2 archives, inspect metadata rather than attempting extraction:
 
 ```rust,no_run
-# fn main() -> dream_archive::ba2::Result<()> {
 use dream_archive::ba2::{Archive, PayloadFormat};
 
+fn main() -> dream_archive::ba2::Result<()> {
 let archive = Archive::open_path("Textures.ba2")?;
 if archive.info().format == PayloadFormat::GNMF {
     eprintln!("GNMF metadata is readable; extraction is unsupported");
     return Ok(());
 }
-# Ok(())
-# }
+Ok(())
+}
 ```
 
 ## Feature flags
@@ -255,7 +257,7 @@ Annoying, but less dishonest than pretending all paths are the same kind of
 string.
 
 ```rust,no_run
-# fn main() -> mlua::Result<()> {
+fn main() -> mlua::Result<()> {
 let lua = mlua::Lua::new();
 let module = dream_archive::lua::create_module(&lua)?;
 lua.globals().set("dream_archive", module)?;
@@ -270,8 +272,8 @@ lua.load(r#"
     assert(archive:format() == "ba2")
     assert(archive:read_file_required("meshes/example.nif") == "payload")
 "#).exec()?;
-# Ok(())
-# }
+Ok(())
+}
 ```
 
 The module exposes:
@@ -412,7 +414,7 @@ local tes4 = dream_archive.bsa.tes4.hash_file("Meshes/Foo.NIF")
 To support Lua's `require`, preload the module yourself:
 
 ```rust,no_run
-# fn main() -> mlua::Result<()> {
+fn main() -> mlua::Result<()> {
 let lua = mlua::Lua::new();
 let package: mlua::Table = lua.globals().get("package")?;
 let preload: mlua::Table = package.get("preload")?;
@@ -423,8 +425,8 @@ preload.set(
 
 // Lua side:
 // local dream_archive = require("dream_archive")
-# Ok(())
-# }
+Ok(())
+}
 ```
 
 ## Compatibility policy
