@@ -216,9 +216,21 @@ impl Archive {
     ///
     /// # Errors
     ///
-    /// Returns an error if entry size metadata overflows the public return type.
+    /// Returns an error if entry metadata is invalid or size metadata overflows
+    /// the public return type.
     pub fn extracted_len(&self, entry: &Entry) -> Result<u64> {
-        Ok(u64::try_from(entry.extraction_capacity_hint()?)?)
+        let chunks_size = u64::try_from(entry.file.decompressed_size()?)?;
+        match entry.file.header {
+            FileHeader::GNRL => Ok(chunks_size),
+            FileHeader::DX10(texture) => {
+                let mut header = Vec::new();
+                dds::write_dds_header(&mut header, texture.dds_header())?;
+                u64::try_from(header.len())?
+                    .checked_add(chunks_size)
+                    .ok_or(Error::OutOfBounds)
+            }
+            FileHeader::GNMF(_) => Err(Error::NotImplemented("BA2 GNMF extraction")),
+        }
     }
 
     /// Return the decoded size that extraction would write for an entry id.

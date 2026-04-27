@@ -1791,3 +1791,35 @@ fn ba2_builder_can_defer_existing_archive_entry() {
         b"payload"
     );
 }
+
+#[test]
+fn ba2_builder_can_defer_dx10_archive_entry_with_legacy_dds_header() {
+    let mut source_builder = Dx10Builder::new();
+    source_builder
+        .add_texture_bytes(
+            "textures/bc1.dds",
+            TextureHeader {
+                height: 4,
+                width: 4,
+                mip_count: 1,
+                format: 71,
+                flags: 0,
+                tile_mode: 0,
+            },
+            [0xab; 8],
+        )
+        .unwrap();
+    let source = std::sync::Arc::new(Archive::from_vec(source_builder.to_vec().unwrap()).unwrap());
+    let (id, _) = source.entries_with_ids().next().unwrap();
+    assert_eq!(source.extracted_len_by_id(id).unwrap(), 136);
+
+    let mut builder = Builder::new();
+    builder
+        .add_archive_entry("textures/copied.dds", std::sync::Arc::clone(&source), id)
+        .unwrap();
+    let archive = Archive::from_vec(builder.to_vec().unwrap()).unwrap();
+    let copied = archive.read_file_required("textures/copied.dds").unwrap();
+    assert_eq!(copied.len(), 136);
+    assert_eq!(&copied[84..88], b"DXT1");
+    assert_eq!(&copied[128..], &[0xab; 8]);
+}
