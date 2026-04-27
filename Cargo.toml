@@ -12,6 +12,7 @@ encoding_rs = { version = "0.8", optional = true }
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"], optional = true }
 lz4_flex = { version = "0.13", default-features = false, optional = true }
 memmap2 = { version = "0.9", optional = true }
+mlua = { version = "0.11", features = ["luajit52", "vendored"], optional = true }
 rayon = { version = "1.11", optional = true }
 
 [dev-dependencies]
@@ -24,6 +25,7 @@ bsa = ["bsa-tes3", "bsa-tes4"]
 bsa-tes3 = ["dep:encoding_rs", "dep:memmap2"]
 bsa-tes4 = ["dep:encoding_rs", "dep:flate2", "dep:lz4_flex", "dep:memmap2", "lz4_flex/frame"]
 parallel = ["dep:rayon"]
+lua = ["dep:mlua", "ba2", "bsa"]
 
 [[example]]
 name = "list_ba2"
@@ -88,6 +90,10 @@ required-features = ["bsa-tes4"]
 [[test]]
 name = "bsa_tes3_synthetic"
 required-features = ["bsa-tes3"]
+
+[[test]]
+name = "lua_api"
+required-features = ["lua"]
 
 [[bench]]
 name = "morrowind_extract"

@@ -228,6 +228,45 @@ Default features enable BA2 and both BSA families.
 - `bsa-tes4`: TES4-family BSA support.
 - `bsa`: both BSA families.
 - `parallel`: parallel extraction with Rayon.
+- `lua`: enables the `mlua` bindings and pulls in `ba2`, `bsa`, LuaJIT 5.2
+  compatibility, and vendored LuaJIT sources.
+
+## Lua bindings
+
+The `lua` feature exposes a byte-first Lua API through `dream_archive::lua`.
+Lua strings are archive path bytes and payload bytes; filesystem APIs are the
+only methods that interpret strings as host paths. This mirrors the Rust API
+instead of quietly converting old BSA paths through whatever Unicode guess was
+nearest. That would be convenient right up until it corrupts a mod.
+
+```rust,no_run
+# fn main() -> mlua::Result<()> {
+let lua = mlua::Lua::new();
+let module = dream_archive::lua::create_module(&lua)?;
+lua.globals().set("dream_archive", module)?;
+
+lua.load(r#"
+    local builder = dream_archive.ba2.Builder.new()
+    builder:set_compression("zip")
+    builder:add_bytes("meshes/example.nif", "payload")
+
+    local archive = dream_archive.open_bytes(builder:to_string())
+    assert(archive:format() == "ba2")
+    assert(archive:read_file_required("meshes/example.nif") == "payload")
+"#).exec()?;
+# Ok(())
+# }
+```
+
+The module exposes:
+
+- top-level detection/open/read/extract facade: `open_path`, `open_bytes`,
+  `detect_path`, `guess_format`, archive `entries`, `read_file*`, and
+  `extract_to`;
+- BA2-specific archive inspection, hashes, GNRL builder, and DX10 builder;
+- BSA encoding/decoding helpers and path normalization;
+- TES3/TES4 archive inspection, hashes, builders, TES4 profiles, name modes,
+  compression policy, and archive type bits.
 
 ## Compatibility policy
 
