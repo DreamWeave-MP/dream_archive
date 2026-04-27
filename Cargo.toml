@@ -5,6 +5,7 @@ edition = "2024"
 rust-version = "1.85"
 license = "GPL-3.0-only"
 repository = "https://github.com/DreamWeave-MP/dream-archive"
+documentation = "https://dreamweave-mp.github.io/dream-archive/"
 description = "Pure-Rust Bethesda BA2 and BSA archive reader, extractor, and writer"
 readme = "README.md"
 keywords = ["bethesda", "archive", "ba2", "bsa", "morrowind"]
