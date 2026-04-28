@@ -7,6 +7,7 @@ use crate::{
     dds::{self, DdsHeader},
     extract::{ensure_parent_dir, output_path_into, write_file_atomically},
     storage::Storage,
+    stream::{self, BoxReader, ChainReader},
 };
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
@@ -428,6 +429,57 @@ impl Archive {
         self.extract_entry(self.get_required(path)?, out)
     }
 
+    /// Open an entry as a reader.
+    ///
+    /// Uncompressed chunks are read directly from archive storage. Compressed BA2
+    /// chunks are currently validated and buffered per chunk before being exposed
+    /// as readers, because a plain [`std::io::Read`] can only report I/O errors
+    /// after construction. It is still the right VFS shape; it just is not a
+    /// magic wand with a shader compiler in the handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same format and bounds errors as [`Self::read_entry`].
+    pub fn open_entry<'a>(&'a self, entry: &'a Entry) -> Result<BoxReader<'a>> {
+        let mut readers = Vec::new();
+        match entry.file.header {
+            FileHeader::GNRL => {}
+            FileHeader::DX10(texture) => {
+                let mut header = Vec::new();
+                dds::write_dds_header(&mut header, texture.dds_header())?;
+                readers.push(stream::owned_reader(header));
+            }
+            FileHeader::GNMF(_) => return Err(Error::NotImplemented("BA2 GNMF extraction")),
+        }
+        self.open_chunk_readers(&entry.file, &mut readers)?;
+        if readers.len() == 1 {
+            Ok(readers.remove(0))
+        } else {
+            Ok(Box::new(ChainReader::new(readers)))
+        }
+    }
+
+    /// Open an optional path as a reader.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::open_entry`] if the path exists.
+    pub fn open_file(&self, path: impl AsRef<[u8]>) -> Result<Option<BoxReader<'_>>> {
+        self.get(path)
+            .map(|entry| self.open_entry(entry))
+            .transpose()
+    }
+
+    /// Open a required path as a reader.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::FileNotFound`] if the path does not exist, or the same
+    /// errors as [`Self::open_entry`] when it does.
+    pub fn open_file_required(&self, path: impl AsRef<[u8]>) -> Result<BoxReader<'_>> {
+        self.open_entry(self.get_required(path)?)
+    }
+
     /// Extract every named entry to `target_dir`, preserving archive paths.
     ///
     /// Returns the number of bytes written to file contents. BA2 archives
@@ -539,6 +591,18 @@ impl Archive {
             )?;
         }
         Ok(written)
+    }
+
+    fn open_chunk_readers<'a>(
+        &'a self,
+        file: &ArchiveFile,
+        readers: &mut Vec<BoxReader<'a>>,
+    ) -> Result<()> {
+        readers.try_reserve_exact(file.chunks.len())?;
+        for chunk in &file.chunks {
+            readers.push(chunk.open_reader(self.storage.as_bytes(), self.info.compression_format)?);
+        }
+        Ok(())
     }
 
     pub(super) fn from_parts(storage: Storage, info: ArchiveInfo, entries: Vec<Entry>) -> Self {

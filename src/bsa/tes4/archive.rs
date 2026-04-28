@@ -10,6 +10,7 @@ use crate::{
         ensure_parent_dir, output_path_decoded_into, output_path_into, write_file_atomically,
     },
     storage::Storage,
+    stream::{self, BoxReader},
 };
 use flate2::read::ZlibDecoder;
 use lz4_flex::frame::FrameDecoder;
@@ -474,6 +475,48 @@ impl Archive {
         out: impl std::io::Write,
     ) -> Result<u64> {
         self.extract_entry(self.get_required(path)?, out)
+    }
+
+    /// Open an entry as a reader.
+    ///
+    /// Uncompressed entries are read directly from archive storage. Compressed
+    /// entries are validated and buffered before the reader is returned, keeping
+    /// construction errors in the format-specific [`Error`] type instead of
+    /// smuggling them through later [`std::io::Error`] reads.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::read_entry`].
+    pub fn open_entry<'a>(&'a self, entry: &'a Entry) -> Result<BoxReader<'a>> {
+        let payload = self.entry_payload(entry)?;
+        if entry.record.is_compressed(self.info.archive_flags) {
+            let mut out = Vec::new();
+            self.decompress_entry(payload, &mut out)?;
+            Ok(stream::owned_reader(out))
+        } else {
+            Ok(stream::borrowed_reader(payload))
+        }
+    }
+
+    /// Open an optional path as a reader.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::open_entry`] if the path exists.
+    pub fn open_file(&self, path: impl AsRef<[u8]>) -> Result<Option<BoxReader<'_>>> {
+        self.get(path)
+            .map(|entry| self.open_entry(entry))
+            .transpose()
+    }
+
+    /// Open a required path as a reader.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::FileNotFound`] if the path does not exist, or the same
+    /// errors as [`Self::open_entry`] when it does.
+    pub fn open_file_required(&self, path: impl AsRef<[u8]>) -> Result<BoxReader<'_>> {
+        self.open_entry(self.get_required(path)?)
     }
 
     /// Extract entries whose names are supplied by an external path dictionary.

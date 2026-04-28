@@ -12,6 +12,7 @@ use dream_archive::{
 };
 use flate2::{Compression, write::ZlibEncoder};
 use lz4_flex::frame::FrameEncoder;
+use std::io::Read as _;
 use std::path::PathBuf;
 
 const MAGIC: u32 = u32::from_le_bytes(*b"BSA\0");
@@ -1191,6 +1192,11 @@ fn extracts_synthetic_zlib_tes4_file() {
         Some(18)
     );
     assert_eq!(out, b"compressed payload");
+
+    let mut reader = archive.open_file_required("data/file.txt").unwrap();
+    let mut streamed = Vec::new();
+    reader.read_to_end(&mut streamed).unwrap();
+    assert_eq!(streamed, b"compressed payload");
 }
 
 #[test]

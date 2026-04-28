@@ -4,6 +4,7 @@ use dream_archive::bsa::{
     FilenameEncoding,
     tes3::{Archive, Builder, Error},
 };
+use std::io::Read as _;
 use std::path::PathBuf;
 
 const VERSION: u32 = 0x0000_0100;
@@ -62,6 +63,11 @@ fn extracts_synthetic_tes3_file() {
         Some(5)
     );
     assert_eq!(out, b"hello");
+
+    let mut reader = archive.open_file_required("meshes/foo.nif").unwrap();
+    let mut streamed = Vec::new();
+    reader.read_to_end(&mut streamed).unwrap();
+    assert_eq!(streamed, b"hello");
 }
 
 #[test]

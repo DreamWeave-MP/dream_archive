@@ -192,6 +192,8 @@ pub mod lua;
 mod read;
 #[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
 mod storage;
+#[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
+mod stream;
 
 /// Re-export of the virtual path helper crate used by archive lookup and Lua
 /// companion bindings.
@@ -616,6 +618,41 @@ impl Archive {
     ) -> Result<u64> {
         let path = path.as_ref();
         self.extract_file(path, out)?
+            .ok_or_else(|| Error::FileNotFound(BString::from(path)))
+    }
+
+    /// Open an optional archive member as a reader.
+    ///
+    /// This is the VFS-shaped API: callers get ordinary [`Read`] bytes without
+    /// learning whether the member came from BA2, TES3 BSA, TES4 BSA, mmap-backed
+    /// slices, or a buffered compression fallback. The returned reader borrows
+    /// the archive, so keep the archive alive while reading. Astonishing, I know.
+    ///
+    /// # Errors
+    ///
+    /// Returns a format-specific extraction error when the member exists but can
+    /// not be opened or decoded.
+    pub fn open_file(&self, path: impl AsRef<[u8]>) -> Result<Option<Box<dyn Read + '_>>> {
+        match self {
+            #[cfg(feature = "ba2")]
+            Self::BA2(archive) => Ok(archive.open_file(path)?),
+            #[cfg(feature = "bsa-tes3")]
+            Self::Tes3Bsa(archive) => Ok(archive.open_file(path)?),
+            #[cfg(feature = "bsa-tes4")]
+            Self::Tes4Bsa(archive) => Ok(archive.open_file(path)?),
+        }
+    }
+
+    /// Open a required archive member as a reader.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::FileNotFound`] if the member is absent, or a
+    /// format-specific extraction error when it exists but can not be opened or
+    /// decoded.
+    pub fn open_file_required(&self, path: impl AsRef<[u8]>) -> Result<Box<dyn Read + '_>> {
+        let path = path.as_ref();
+        self.open_file(path)?
             .ok_or_else(|| Error::FileNotFound(BString::from(path)))
     }
 

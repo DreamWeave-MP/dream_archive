@@ -7,6 +7,7 @@ use dream_archive::{
     },
 };
 use flate2::{Compression, write::ZlibEncoder};
+use std::io::Read as _;
 use std::path::PathBuf;
 
 const MAGIC: u32 = u32::from_le_bytes(*b"BTDX");
@@ -230,6 +231,11 @@ fn writes_ba2_gnrl_archive_from_bytes() {
         archive.read_file("textures/bar.dds").unwrap().unwrap(),
         b"texture"
     );
+
+    let mut reader = archive.open_file_required("meshes/foo.nif").unwrap();
+    let mut streamed = Vec::new();
+    reader.read_to_end(&mut streamed).unwrap();
+    assert_eq!(streamed, b"mesh");
 }
 
 #[test]

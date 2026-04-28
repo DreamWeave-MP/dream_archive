@@ -1,4 +1,5 @@
 use super::{Error, Result};
+use crate::stream::{self, BoxReader};
 use flate2::read::ZlibDecoder;
 use std::io::Read as _;
 
@@ -193,6 +194,21 @@ impl Chunk {
             }
             Ba2CompressionFormat::LZ4 => self.extract_to_writer(archive, compression, out),
         }
+    }
+
+    pub(crate) fn open_reader<'a>(
+        &self,
+        archive: &'a [u8],
+        compression: Ba2CompressionFormat,
+    ) -> Result<BoxReader<'a>> {
+        let stored = self.stored_bytes(archive)?;
+        if self.packed_size == 0 {
+            return Ok(stream::borrowed_reader(stored));
+        }
+
+        let mut bytes = Vec::new();
+        self.extract(archive, compression, &mut bytes)?;
+        Ok(stream::owned_reader(bytes))
     }
 }
 

@@ -7,6 +7,7 @@ use crate::{
         ensure_parent_dir, output_path_decoded_into, output_path_into, write_file_atomically,
     },
     storage::Storage,
+    stream::{self, BoxReader},
 };
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
@@ -296,6 +297,36 @@ impl Archive {
         out: impl std::io::Write,
     ) -> Result<u64> {
         self.extract_entry(self.get_required(path)?, out)
+    }
+
+    /// Open an entry as a reader over the archive payload.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the entry points outside the archive.
+    pub fn open_entry<'a>(&'a self, entry: &'a Entry) -> Result<BoxReader<'a>> {
+        Ok(stream::borrowed_reader(self.entry_payload(entry)?))
+    }
+
+    /// Open an optional path as a reader over the archive payload.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the member exists but points outside the archive.
+    pub fn open_file(&self, path: impl AsRef<[u8]>) -> Result<Option<BoxReader<'_>>> {
+        self.get(path)
+            .map(|entry| self.open_entry(entry))
+            .transpose()
+    }
+
+    /// Open a required path as a reader over the archive payload.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::FileNotFound`] if the path does not exist, or the same
+    /// errors as [`Self::open_entry`] when it does.
+    pub fn open_file_required(&self, path: impl AsRef<[u8]>) -> Result<BoxReader<'_>> {
+        self.open_entry(self.get_required(path)?)
     }
 
     /// Extract every entry to `target_dir`, preserving archive paths.
