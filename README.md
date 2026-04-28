@@ -1,9 +1,9 @@
 # dream_archive
 
 Pure-Rust Bethesda archive tooling for common PC archive layouts. It reads,
-lists, extracts, and builds the archive families used by Morrowind, Oblivion,
-Fallout, Skyrim, Fallout 4, and Starfield-era games, subject to the format rows
-below rather than wishful thinking.
+lists, opens file-like readers, extracts, and builds the archive families used by
+Morrowind, Oblivion, Fallout, Skyrim, Fallout 4, and Starfield-era games,
+subject to the format rows below rather than wishful thinking.
 
 The crate keeps archive paths as bytes. That is intentional. Old Bethesda tools
 and mods do not always agree on Unicode, code pages, or reality in general.
@@ -67,6 +67,29 @@ println!("{} bytes", bytes.len());
 Ok(())
 }
 ```
+
+Open a required file as a `Read` implementation, for callers that want ordinary
+file-like streaming instead of a `Vec<u8>`:
+
+```rust,no_run
+use std::io::Read as _;
+use dream_archive::Archive;
+
+fn main() -> dream_archive::Result<()> {
+let archive = Archive::open_path("Data/SomeArchive.bsa")?;
+let mut reader = archive.open_file_required("meshes/foo.nif")?;
+
+let mut bytes = Vec::new();
+reader.read_to_end(&mut bytes)?;
+println!("{} bytes", bytes.len());
+Ok(())
+}
+```
+
+Uncompressed archive entries read directly from archive storage. Compressed
+entries may be decoded into an internal buffer before the reader is returned so
+format errors remain format errors instead of appearing later as generic I/O
+failures. A reader API is not a wizard. Annoying, but quite useful.
 
 Extract everything with paths stored in the archive:
 
@@ -280,7 +303,7 @@ Default features enable BA2 and both BSA families.
 Enable it in `Cargo.toml`:
 
 ```toml
-dream_archive = { version = "0.1.2", features = ["lua"] }
+dream_archive = { version = "0.1.6", features = ["lua"] }
 ```
 
 Embedding applications must choose the `mlua` runtime centrally. If you just want

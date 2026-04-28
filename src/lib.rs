@@ -1,11 +1,11 @@
 //! Pure-Rust library for Bethesda archive formats.
 //!
 //! The top-level [`Archive`] facade is the ordinary entry point: detect an
-//! archive, list entries, look files up, and extract them without first caring
-//! whether the container is BA2, TES3 BSA, or TES4 BSA. Format-specific modules
-//! remain available for archive metadata, hash-only BSA workflows, builder
-//! policy, and other places where the formats insist on being different
-//! (because of course they do).
+//! archive, list entries, look files up, open file-like readers, and extract
+//! them without first caring whether the container is BA2, TES3 BSA, or TES4
+//! BSA. Format-specific modules remain available for archive metadata, hash-only
+//! BSA workflows, builder policy, and other places where the formats insist on
+//! being different (because of course they do).
 //!
 //! Archive paths are byte strings. Bethesda archive formats do not reliably
 //! declare filename encodings, and older tools commonly wrote paths using the
@@ -62,6 +62,10 @@
 //!
 //! let bytes = archive.read_file_required("textures/example.dds")?;
 //! println!("extracted {} bytes", bytes.len());
+//!
+//! let mut reader = archive.open_file_required("textures/example.dds")?;
+//! let mut streamed = Vec::new();
+//! std::io::Read::read_to_end(&mut reader, &mut streamed)?;
 //! # Ok(())
 //! # }
 //! # #[cfg(not(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4")))]
