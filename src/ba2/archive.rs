@@ -559,6 +559,16 @@ impl Archive {
             name_lookup,
         }
     }
+
+    pub(super) fn write_stored_chunk(
+        &self,
+        chunk: &super::Chunk,
+        out: &mut impl std::io::Write,
+    ) -> Result<u64> {
+        let stored = chunk.stored_bytes(self.storage.as_bytes())?;
+        out.write_all(stored)?;
+        Ok(stored.len().try_into()?)
+    }
 }
 
 impl Entry {

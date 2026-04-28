@@ -916,6 +916,19 @@ impl UserData for LuaBa2Dx10Builder {
                     .map_err(mlua::Error::external)
             },
         );
+        methods.add_method_mut(
+            "add_archive_entry",
+            |_lua, this, (archive_path, archive, index): (LuaString, AnyUserData, usize)| {
+                let archive = archive.borrow::<LuaBa2Archive>()?;
+                this.0
+                    .add_archive_entry(
+                        archive_path.as_bytes().as_ref(),
+                        std::sync::Arc::new(archive.0.clone()),
+                        ba2_entry_id(index)?,
+                    )
+                    .map_err(mlua::Error::external)
+            },
+        );
         methods.add_method("write_path", |_lua, this, path: LuaString| {
             this.0
                 .write_path(path.to_str()?.as_ref())

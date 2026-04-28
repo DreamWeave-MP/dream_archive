@@ -1081,6 +1081,53 @@ fn tiny_texture_archive(options: TinyTextureOptions<'_>) -> Vec<u8> {
     bytes
 }
 
+fn two_chunk_texture_archive() -> Vec<u8> {
+    let name = b"textures/two-chunk.dds";
+    let first_payload = [0x11; 128];
+    let second_payload = [0x22; 64];
+    let string_table_offset = 96_u64;
+    let first_payload_offset = string_table_offset + 2 + u64::try_from(name.len()).unwrap();
+    let second_payload_offset = first_payload_offset + u64::try_from(first_payload.len()).unwrap();
+    let mut bytes = Vec::new();
+    push_u32(&mut bytes, MAGIC);
+    push_u32(&mut bytes, 1);
+    push_u32(&mut bytes, DX10);
+    push_u32(&mut bytes, 1);
+    push_u64(&mut bytes, string_table_offset);
+
+    let (hash, _) = dream_archive::ba2::hash_file(name.as_bstr());
+    push_u32(&mut bytes, hash.file);
+    push_u32(&mut bytes, hash.extension);
+    push_u32(&mut bytes, hash.directory);
+    bytes.push(0);
+    bytes.push(2);
+    push_u16(&mut bytes, FILE_HEADER_SIZE_DX10);
+    push_u16(&mut bytes, 8);
+    push_u16(&mut bytes, 16);
+    bytes.push(4);
+    bytes.push(98);
+    bytes.push(0);
+    bytes.push(0);
+    push_u64(&mut bytes, first_payload_offset);
+    push_u32(&mut bytes, 0);
+    push_u32(&mut bytes, first_payload.len().try_into().unwrap());
+    push_u16(&mut bytes, 0);
+    push_u16(&mut bytes, 0);
+    push_u32(&mut bytes, CHUNK_SENTINEL);
+    push_u64(&mut bytes, second_payload_offset);
+    push_u32(&mut bytes, 0);
+    push_u32(&mut bytes, second_payload.len().try_into().unwrap());
+    push_u16(&mut bytes, 1);
+    push_u16(&mut bytes, 3);
+    push_u32(&mut bytes, CHUNK_SENTINEL);
+    assert_eq!(u64::try_from(bytes.len()).unwrap(), string_table_offset);
+    push_u16(&mut bytes, name.len().try_into().unwrap());
+    bytes.extend_from_slice(name);
+    bytes.extend_from_slice(&first_payload);
+    bytes.extend_from_slice(&second_payload);
+    bytes
+}
+
 #[test]
 fn rejects_invalid_magic() {
     let mut bytes = tiny_archive(TinyArchiveOptions::default());
@@ -1823,4 +1870,43 @@ fn ba2_builder_can_defer_dx10_archive_entry_with_legacy_dds_header() {
     assert_eq!(copied.len(), 136);
     assert_eq!(&copied[84..88], b"DXT1");
     assert_eq!(&copied[128..], &[0xab; 8]);
+}
+
+#[test]
+fn ba2_dx10_builder_can_preserve_existing_archive_entry_without_rehydrating_dds() {
+    let source = std::sync::Arc::new(Archive::from_vec(two_chunk_texture_archive()).unwrap());
+    let (id, _) = source.entries_with_ids().next().unwrap();
+
+    let mut builder = Dx10Builder::new();
+    builder
+        .add_archive_entry("textures/copied.dds", std::sync::Arc::clone(&source), id)
+        .unwrap();
+    let archive = Archive::from_vec(builder.to_vec().unwrap()).unwrap();
+    let entry = archive.get_required("textures/copied.dds").unwrap();
+
+    assert_eq!(entry.file().chunks().len(), 2);
+    assert_eq!(entry.file().chunks()[0].mips, Some(0..=0));
+    assert_eq!(entry.file().chunks()[1].mips, Some(1..=3));
+    let copied = archive.read_entry(entry).unwrap();
+    assert_eq!(&copied[148..276], &[0x11; 128]);
+    assert_eq!(&copied[276..], &[0x22; 64]);
+}
+
+#[test]
+fn ba2_dx10_builder_rejects_preserve_when_version_would_lie() {
+    let source = std::sync::Arc::new(Archive::from_vec(two_chunk_texture_archive()).unwrap());
+    let (id, _) = source.entries_with_ids().next().unwrap();
+
+    let mut builder = Dx10Builder::new();
+    builder.set_version(ArchiveVersion::v7);
+    builder
+        .add_archive_entry("textures/copied.dds", std::sync::Arc::clone(&source), id)
+        .unwrap();
+
+    assert!(matches!(
+        builder.to_vec(),
+        Err(Error::NotImplemented(
+            "BA2 DX10 archive entry preservation requires matching archive versions"
+        ))
+    ));
 }
