@@ -84,14 +84,17 @@
 //!
 //! `entries()` materializes a Lua table of entry metadata. `read_file*`,
 //! `extract_file*`, `read_entry`, and `extract_entry` materialize full payloads
-//! as Lua strings. `open_bytes` copies Lua archive bytes into Rust-owned storage,
-//! and builder `to_bytes()` / `to_string()` build an archive buffer and then copy
-//! it into Lua. Builder `add_file` records source paths and reads payloads during
-//! `write_path` / `to_bytes`, matching the Rust deferred-source API. Builders can
-//! also preserve entries from an already-open archive with `add_archive_entry`;
-//! the source archive userdata must stay alive through the call, and the builder
-//! stores its own Rust archive handle afterwards. For large archives, prefer
-//! `open_path`, `write_path`, and path-based extraction.
+//! as Lua strings. The Rust `open_file* -> impl Read` APIs are not exposed as Lua
+//! userdata readers; pretending a borrowed Rust reader is a Lua string would be a
+//! neat little lie, and we have enough of those already. `open_bytes` copies Lua
+//! archive bytes into Rust-owned storage, and builder `to_bytes()` / `to_string()`
+//! build an archive buffer and then copy it into Lua. Builder `add_file` records
+//! source paths and reads payloads during `write_path` / `to_bytes`, matching the
+//! Rust deferred-source API. Builders can also preserve entries from an
+//! already-open archive with `add_archive_entry`; the source archive userdata must
+//! stay alive through the call, and the builder stores its own Rust archive handle
+//! afterwards. For large archives, prefer `open_path`, `write_path`, and
+//! path-based extraction.
 //!
 //! `extract_entry_to_path` and `extract_to` write to the filesystem and return
 //! byte counts. They create missing parent directories and write individual files

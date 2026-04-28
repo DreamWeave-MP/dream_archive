@@ -398,13 +398,15 @@ Common calls look like this:
 Lua values. That is convenient for scripts and not a streaming iterator.
 `read_file*`, `extract_file*`, and `extract_entry` also materialize the complete
 payload as a Lua string; for large archives that means Rust buffering plus a Lua
-string copy. `open_bytes(bytes)` copies the Lua archive string into Rust-owned
-storage, and builder `to_bytes()` / `to_string()` build a Rust archive buffer and
-then copy it into Lua. For large archives, prefer `open_path()` and
-`write_path()`. Likewise TES4 `extract_to_with_paths()` copies the supplied
-contiguous Lua sequence (`1..n`, no gaps) of candidate archive path byte strings
-before it starts matching hash-only entries. It is not a key/value dictionary;
-non-sequence keys are ignored.
+string copy. The Rust `open_file* -> Read` archive APIs are not exposed as Lua
+userdata readers. Lua gets byte strings or filesystem extraction; if you need an
+actual Rust `Read`, stay in Rust. `open_bytes(bytes)` copies the Lua archive
+string into Rust-owned storage, and builder `to_bytes()` / `to_string()` build a
+Rust archive buffer and then copy it into Lua. For large archives, prefer
+`open_path()` and `write_path()`. Likewise TES4 `extract_to_with_paths()` copies
+the supplied contiguous Lua sequence (`1..n`, no gaps) of candidate archive path
+byte strings before it starts matching hash-only entries. It is not a key/value
+dictionary; non-sequence keys are ignored.
 
 ```lua
 local hash_only = dream_archive.bsa.tes4.open_path("HashOnly.bsa")

@@ -39,6 +39,8 @@ fn lua_builds_and_reads_ba2_through_top_level_facade() {
         assert(archive:format() == "ba2")
         assert(archive:len() == 1)
         assert(archive:read_file_required("meshes/foo.nif") == "mesh payload")
+        assert(type(archive.read_file_required) == "function")
+        assert(archive.open_file_required == nil)
         assert(archive:read_entry(1) == "mesh payload")
         assert(archive:extract_entry(1) == "mesh payload")
         local entries = archive:entries()
