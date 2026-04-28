@@ -13,9 +13,9 @@ jobs:
       contents: write
       pages: write
       id-token: write
-    uses: DreamWeave-MP/StroggForge/.github/workflows/libGlobalBuild.yml@v14
+    uses: DreamWeave-MP/StroggForge/.github/workflows/libGlobalBuild.yml@v17
     secrets: inherit
     with:
       crate_names: '["dream_archive"]'
-      # dependent_repo_names: '[]'
+      dependent_repo_names: '["DreamWeave-MP/dream_archivetool"]'
       generate_benchmarks: true
