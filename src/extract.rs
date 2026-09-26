@@ -97,12 +97,12 @@ pub(crate) fn output_path_decoded_into<'a>(
 }
 
 pub(crate) fn ensure_parent_dir(path: &Path, last_parent: &mut PathBuf) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        if parent != last_parent.as_path() {
-            fs::create_dir_all(parent)?;
-            last_parent.clear();
-            last_parent.push(parent);
-        }
+    if let Some(parent) = path.parent()
+        && parent != last_parent.as_path()
+    {
+        fs::create_dir_all(parent)?;
+        last_parent.clear();
+        last_parent.push(parent);
     }
     Ok(())
 }
@@ -174,10 +174,10 @@ fn create_temp_file(path: &Path) -> io::Result<(PathBuf, fs::File)> {
 pub(crate) fn ensure_parent_dirs(paths: &[PathBuf]) -> io::Result<()> {
     let mut created_dirs = HashSet::new();
     for path in paths {
-        if let Some(parent) = path.parent() {
-            if created_dirs.insert(parent) {
-                fs::create_dir_all(parent)?;
-            }
+        if let Some(parent) = path.parent()
+            && created_dirs.insert(parent)
+        {
+            fs::create_dir_all(parent)?;
         }
     }
     Ok(())
