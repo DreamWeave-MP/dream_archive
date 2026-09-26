@@ -292,19 +292,29 @@ Default features enable BA2 and both BSA families.
 - `bsa-tes4`: TES4-family BSA support.
 - `bsa`: both BSA families.
 - `parallel`: parallel extraction with Rayon.
-- `lua`: enables the `mlua` bindings, `ba2`, `bsa`, and the re-exported
-  `dream_path`'s Lua companion helpers. It does not select an `mlua` runtime.
-- `standalone-lua`: selects vendored LuaJIT 5.2 through `mlua`; intended for this
-  crate's tests, examples, and documentation builds rather than normal downstream
-  library use.
+- `lua`: enables the `mlua` Luau bindings, `ba2`, `bsa`, and the re-exported
+  `dream_path`'s Luau companion helpers. It does not select an `mlua` runtime.
+- `standalone-lua`: selects `mlua`'s Luau backend (built from source); intended
+  for this crate's tests, examples, and documentation builds rather than normal
+  downstream library use.
 
-## Lua bindings
+## Luau bindings
 
 Enable it in `Cargo.toml`:
 
 ```toml
-dream_archive = { version = "0.1.6", features = ["lua"] }
+dream_archive = { version = "0.2", features = ["lua"] }
 ```
+
+As of 0.2.0 the bindings target [Luau](https://luau.org) instead of LuaJIT, and
+the whole Lua-facing surface follows the same conventions as DreamWeave's other
+Luau APIs: functions, methods, table fields, and enum-like string values are
+camelCase (`openPath`, `readFileRequired`, `folderHash`, `"bsaTes4"`,
+`"skyrimSe"`), types are PascalCase (`Builder`, `Dx10Builder`), and numeric
+constants are UPPER_SNAKE (`archiveTypes.MESHES`, `version.V8`). The
+conventional global is `dreamArchive`, next to `dreamPath`. Scripts written
+against 0.1's snake_case names need renaming; nothing else about the behaviour
+changed.
 
 Embedding applications must choose the `mlua` runtime centrally. If you just want
 to run this crate's examples or tests without an application's feature graph, use
@@ -312,50 +322,50 @@ to run this crate's examples or tests without an application's feature graph, us
 runtime selected is intentionally incomplete. Selecting runtimes in every
 lower-level crate is how you get one build graph wearing several fake moustaches.
 
-The `lua` feature exposes a byte-first Lua API through `dream_archive::lua` for
-Rust embedders. It does not install a standalone `require("dream_archive")` C Lua
+The `lua` feature exposes a byte-first Luau API through `dream_archive::lua` for
+Rust embedders. It does not install a standalone `require("@dreamArchive")` C
 module by itself; register the `mlua` table in your application. Use the
 `dream_archive::dream_path` re-export for companion path helpers instead of
 adding a separate `dream_path` dependency just to reach the same API. Lua strings
 are archive path bytes and payload bytes. Filesystem arguments are the exception:
-all `open_path`, `detect_path`, `write_path`, `extract_to*`,
-`extract_entry_to_path`, `add_dir`, and source paths such as `add_file` /
-`add_dds_file` are converted as UTF-8 host paths. Archive paths passed to
-`read_file`, `add_bytes`, `add_file`'s first argument, hash helpers, and
-`normalize_path` remain raw archive path bytes. `bsa.encode_filename()` and
-builder `add_encoded_path()` are the opposite boundary: they take UTF-8 text and
+all `openPath`, `detectPath`, `writePath`, `extractTo*`,
+`extractEntryToPath`, `addDir`, and source paths such as `addFile` /
+`addDdsFile` are converted as UTF-8 host paths. Archive paths passed to
+`readFile`, `addBytes`, `addFile`'s first argument, hash helpers, and
+`normalizePath` remain raw archive path bytes. `bsa.encodeFilename()` and
+builder `addEncodedPath()` are the opposite boundary: they take UTF-8 text and
 produce or insert legacy-encoded archive filename bytes. If your Unix filesystem
 path is not valid UTF-8, use the Rust API directly.
 Annoying, but less dishonest than pretending all paths are the same kind of
 string.
 
-Lua builders follow the Rust deferred-source behavior: `add_file` records a host
-path and reads it when `write_path` / `to_bytes` runs. Format-specific archive
+Luau builders follow the Rust deferred-source behavior: `addFile` records a host
+path and reads it when `writePath` / `toBytes` runs. Format-specific archive
 entry tables include both `index` and `id` fields; today they are the same
-1-based number. Pass that `id` to `builder:add_archive_entry(...)` to preserve an
+1-based number. Pass that `id` to `builder:addArchiveEntry(...)` to preserve an
 entry from an already-open archive without round-tripping it through a Lua
 string. BA2 and TES4 builders also expose
-`add_archive_entry_with_compression(path, archive, id, policy)`.
+`addArchiveEntryWithCompression(path, archive, id, policy)`.
 
 ```rust,no_run
 fn main() -> mlua::Result<()> {
 let lua = mlua::Lua::new();
 lua.globals().set(
-    "dream_path",
+    "dreamPath",
     dream_archive::dream_path::lua::create_module(&lua)?,
 )?;
 let module = dream_archive::lua::create_module(&lua)?;
-lua.globals().set("dream_archive", module)?;
+lua.globals().set("dreamArchive", module)?;
 
 lua.load(r#"
-    local builder = dream_archive.ba2.Builder.new()
-    builder:set_compression(dream_archive.ba2.compression.zip)
-    builder:add_bytes("meshes/example.nif", "payload")
+    local builder = dreamArchive.ba2.Builder.new()
+    builder:setCompression(dreamArchive.ba2.compression.zip)
+    builder:addBytes("meshes/example.nif", "payload")
 
-    -- to_bytes()/to_string() return raw archive bytes as a Lua string.
-    local archive = dream_archive.open_bytes(builder:to_bytes())
+    -- toBytes()/toString() return raw archive bytes as a Lua string.
+    local archive = dreamArchive.openBytes(builder:toBytes())
     assert(archive:format() == "ba2")
-    assert(archive:read_file_required("meshes/example.nif") == "payload")
+    assert(archive:readFileRequired("meshes/example.nif") == "payload")
 "#).exec()?;
 Ok(())
 }
@@ -363,161 +373,169 @@ Ok(())
 
 The module exposes:
 
-- top-level detection/open/read/extract facade: `open_path`, `open_bytes`,
-  `detect_path`, `guess_format`, archive `entries`, `read_file*`,
-  `extract_file*`, `read_entry`, `extract_entry`, `extract_entry_to_path`, and
-  `extract_to`;
+- top-level detection/open/read/extract facade: `openPath`, `openBytes`,
+  `detectPath`, `guessFormat`, archive `entries`, `readFile*`,
+  `extractFile*`, `readEntry`, `extractEntry`, `extractEntryToPath`, and
+  `extractTo`;
 - BA2-specific archive inspection, hashes, GNRL builder, and DX10 builder;
 - BSA encoding/decoding helpers and path normalization;
 - TES3/TES4 archive inspection, hashes, builders, TES4 profiles, name modes,
   compression policy, and archive type bits.
 
-Register `dream_archive::dream_path` next to `dream_archive` when scripts need
-the shared virtual path helpers. The re-exported `dream_path` handles path
-normalization/helpers; `dream_archive` handles open/list/read/extract/build
+Register `dream_archive::dream_path` next to `dreamArchive` when scripts need
+the shared virtual path helpers. The re-exported `dreamPath` handles path
+normalization/helpers; `dreamArchive` handles open/list/read/extract/build
 archive mechanics; `dream_archivetool` should remain the layer that decides
 filesystem rewrite, diff, and verification policy.
 
 Common calls look like this:
 
-| Lua call | Result |
+| Luau call | Result |
 | --- | --- |
-| `dream_archive.open_bytes(bytes)` | generic BA2/TES3/TES4 archive |
-| `dream_archive.guess_format(bytes)` | `"ba2"`, `"bsa-tes3"`, `"bsa-tes4"`, or `nil` |
+| `dreamArchive.openBytes(bytes)` | generic BA2/TES3/TES4 archive |
+| `dreamArchive.guessFormat(bytes)` | `"ba2"`, `"bsaTes3"`, `"bsaTes4"`, or `nil` |
 | `archive:entries()` | array-style table of copied entry metadata |
-| `archive:read_file(path)` | payload bytes or `nil` |
-| `archive:read_file_required(path)` | payload bytes or error |
-| `archive:extract_file(path)` | extracted payload bytes or `nil` |
-| `archive:extract_file_required(path)` | extracted payload bytes or error |
-| `archive:extract_to(target)` | writes files for side effect; errors throw |
-| `archive:read_entry(1)` | reads the first entry; entry indices are 1-based |
-| `builder:add_bytes(path, bytes)` | adds archive path bytes and payload bytes |
-| `builder:to_bytes()` | raw archive bytes |
+| `archive:readFile(path)` | payload bytes or `nil` |
+| `archive:readFileRequired(path)` | payload bytes or error |
+| `archive:extractFile(path)` | extracted payload bytes or `nil` |
+| `archive:extractFileRequired(path)` | extracted payload bytes or error |
+| `archive:extractTo(target)` | writes files for side effect; errors throw |
+| `archive:readEntry(1)` | reads the first entry; entry indices are 1-based |
+| `builder:addBytes(path, bytes)` | adds archive path bytes and payload bytes |
+| `builder:toBytes()` | raw archive bytes |
 
 `entries()` returns a fully materialized Lua table, copying entry metadata into
 Lua values. That is convenient for scripts and not a streaming iterator.
-`read_file*`, `extract_file*`, and `extract_entry` also materialize the complete
+`readFile*`, `extractFile*`, and `extractEntry` also materialize the complete
 payload as a Lua string; for large archives that means Rust buffering plus a Lua
 string copy. The Rust `open_file* -> Read` archive APIs are not exposed as Lua
-userdata readers. Lua gets byte strings or filesystem extraction; if you need an
-actual Rust `Read`, stay in Rust. `open_bytes(bytes)` copies the Lua archive
-string into Rust-owned storage, and builder `to_bytes()` / `to_string()` build a
+userdata readers. Luau gets byte strings or filesystem extraction; if you need an
+actual Rust `Read`, stay in Rust. `openBytes(bytes)` copies the Lua archive
+string into Rust-owned storage, and builder `toBytes()` / `toString()` build a
 Rust archive buffer and then copy it into Lua. For large archives, prefer
-`open_path()` and `write_path()`. Likewise TES4 `extract_to_with_paths()` copies
+`openPath()` and `writePath()`. Likewise TES4 `extractToWithPaths()` copies
 the supplied contiguous Lua sequence (`1..n`, no gaps) of candidate archive path
 byte strings before it starts matching hash-only entries. It is not a key/value
 dictionary; non-sequence keys are ignored.
 
-```lua
-local hash_only = dream_archive.bsa.tes4.open_path("HashOnly.bsa")
-hash_only:extract_to_with_paths("out", {
+```luau
+local hashOnly = dreamArchive.bsa.tes4.openPath("HashOnly.bsa")
+hashOnly:extractToWithPaths("out", {
     "meshes/foo.nif",
     "textures/foo.dds",
 })
 ```
 
-TES4 hash-only entries cannot expose names they do not have. Their Lua entry
-tables use `nil` for `path`, `folder`, and `name`; use `folder_hash.hex` and
-`file_hash.hex` when you need exact identity.
+TES4 hash-only entries cannot expose names they do not have. Their Luau entry
+tables use `nil` for `path`, `folder`, and `name`; use `folderHash.hex` and
+`fileHash.hex` when you need exact identity.
 
-Use `dream_archive.open_*` when you want one generic reader for BA2/TES3/TES4.
-Use `dream_archive.ba2.open_*`, `dream_archive.bsa.tes3.open_*`, or
-`dream_archive.bsa.tes4.open_*` when you need format-specific metadata or helper
-APIs such as BA2 `info()` or TES4 `extract_to_with_paths()`.
+Use `dreamArchive.open*` when you want one generic reader for BA2/TES3/TES4.
+Use `dreamArchive.ba2.open*`, `dreamArchive.bsa.tes3.open*`, or
+`dreamArchive.bsa.tes4.open*` when you need format-specific metadata or helper
+APIs such as BA2 `info()` or TES4 `extractToWithPaths()`.
 
 BA2 archive compression accepts `nil`, `"none"`/`"store"`, `"zip"`, or `"lz4"`.
 Per-file compression overrides accept `nil`, `"inherit"`, `"store"`, or
-`"compress"`. `set_zlib_level(level)` accepts `0..=9` and rejects other values at
-the setter call, not later during `to_bytes()`.
+`"compress"`. `setZlibLevel(level)` accepts `0..=9` and rejects other values at
+the setter call, not later during `toBytes()`.
 
-DX10 BA2 texture building needs either a DDS source (`add_dds_bytes` /
-`add_dds_file`) or a raw texture payload plus the BA2 texture metadata. The bytes
-passed to `add_texture_bytes()` are raw texture payload bytes, not a complete DDS
+TES4 builders take a profile through `setProfile`: `"oblivion"`, `"fallout3"`,
+`"falloutNewVegas"`, `"skyrimLe"`, or `"skyrimSe"`, and a name mode through
+`setNameMode`: `"strings"`, `"hashOnly"`, `"embedded"`, or
+`"stringsAndEmbedded"`. The `profile`, `nameMode`, `compression`, and `encoding`
+tables map each of those values to itself, so either spelling works:
+`builder:setProfile(dreamArchive.bsa.tes4.profile.skyrimSe)` or
+`builder:setProfile("skyrimSe")`.
+
+DX10 BA2 texture building needs either a DDS source (`addDdsBytes` /
+`addDdsFile`) or a raw texture payload plus the BA2 texture metadata. The bytes
+passed to `addTextureBytes()` are raw texture payload bytes, not a complete DDS
 file:
 
-```lua
-local dx10 = dream_archive.ba2.Dx10Builder.new()
-dx10:add_texture_bytes("textures/foo.dds", {
+```luau
+local dx10 = dreamArchive.ba2.Dx10Builder.new()
+dx10:addTextureBytes("textures/foo.dds", {
     height = 1,
     width = 1,
-    mip_count = 1,
+    mipCount = 1,
     format = 61,
     flags = 0,
-    tile_mode = 0,
-}, raw_texture_payload)
+    tileMode = 0,
+}, rawTexturePayload)
 ```
 
-TES4 archive type bits are numeric flags. Combine them with addition or your
-LuaJIT bit library of choice:
+TES4 archive type bits are numeric flags. Combine them with Luau's `bit32`
+library (or addition, when each flag appears once):
 
-```lua
-builder:set_archive_types(
-    dream_archive.bsa.tes4.archive_types.meshes
-  + dream_archive.bsa.tes4.archive_types.textures
-)
+```luau
+builder:setArchiveTypes(bit32.bor(
+    dreamArchive.bsa.tes4.archiveTypes.MESHES,
+    dreamArchive.bsa.tes4.archiveTypes.TEXTURES
+))
 ```
 
-Legacy BSA filenames must still be encoded explicitly from Lua:
+Legacy BSA filenames must still be encoded explicitly from Luau:
 
-```lua
-local path = dream_archive.bsa.encode_filename(
+```luau
+local path = dreamArchive.bsa.encodeFilename(
     "textures/zażółć.dds",
-    dream_archive.bsa.encoding.windows1250
+    dreamArchive.bsa.encoding.windows1250
 )
-local bytes = archive:read_file_required(path)
+local bytes = archive:readFileRequired(path)
 ```
 
 Optional read/extract APIs return `nil` when the archive does not contain the
-path. `detect_path` and `guess_format` return `nil` for unknown or unsupported
-headers. The `*_required` variants raise an error instead:
+path. `detectPath` and `guessFormat` return `nil` for unknown or unsupported
+headers. The `*Required` variants raise an error instead:
 
-```lua
-local maybe = archive:read_file("meshes/foo.nif")
+```luau
+local maybe = archive:readFile("meshes/foo.nif")
 if maybe == nil then
     -- absent from the archive
 end
 
 local ok, err = pcall(function()
-    archive:extract_file_required("missing.nif")
+    archive:extractFileRequired("missing.nif")
 end)
 if not ok then
     print(err)
 end
 ```
 
-`normalize_path` returns normalized archive path bytes, not a Unicode-cleaned OS
+`normalizePath` returns normalized archive path bytes, not a Unicode-cleaned OS
 path. It normalizes to forward slashes; stored entry names and hash helper
 `normalized` fields may display backslashes depending on the archive family.
 TES3/TES4 64-bit hashes are exposed as exact component fields plus a fixed width
-hexadecimal string; they are not exposed as Lua numbers because LuaJIT numbers
-are not a safe exact carrier for arbitrary `u64` values.
+hexadecimal string; they are not exposed as Lua numbers because Luau numbers are
+doubles, which are not a safe exact carrier for arbitrary `u64` values.
 
-```lua
-local ba2 = dream_archive.ba2.hash_file("Meshes/Foo.NIF")
+```luau
+local ba2 = dreamArchive.ba2.hashFile("Meshes/Foo.NIF")
 -- ba2.directory, ba2.file, ba2.extension, ba2.normalized
 
-local tes3 = dream_archive.bsa.tes3.hash_file("Meshes/Foo.NIF")
+local tes3 = dreamArchive.bsa.tes3.hashFile("Meshes/Foo.NIF")
 -- tes3.lo, tes3.hi, tes3.hex, tes3.normalized
 
-local tes4 = dream_archive.bsa.tes4.hash_file("Meshes/Foo.NIF")
+local tes4 = dreamArchive.bsa.tes4.hashFile("Meshes/Foo.NIF")
 -- tes4.last, tes4.last2, tes4.length, tes4.first, tes4.crc, tes4.hex
 -- no numeric u64 field; use hex for exact identity
 ```
 
-To support Lua's `require`, preload the module yourself:
+To support Luau's `require`, register the module yourself. Luau `require` looks
+registered modules up by an `@`-prefixed name:
 
 ```rust,no_run
 fn main() -> mlua::Result<()> {
 let lua = mlua::Lua::new();
-let package: mlua::Table = lua.globals().get("package")?;
-let preload: mlua::Table = package.get("preload")?;
-preload.set(
-    "dream_archive",
-    lua.create_function(|lua, ()| dream_archive::lua::create_module(lua))?,
+lua.register_module("@dreamArchive", dream_archive::lua::create_module(&lua)?)?;
+lua.register_module(
+    "@dreamPath",
+    dream_archive::dream_path::lua::create_module(&lua)?,
 )?;
 
-// Lua side:
-// local dream_archive = require("dream_archive")
+// Luau side:
+// local dreamArchive = require("@dreamArchive")
 Ok(())
 }
 ```

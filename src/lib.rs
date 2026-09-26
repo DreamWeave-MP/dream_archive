@@ -20,15 +20,16 @@
 //! families can be selected with `ba2`, `bsa-tes3`, and `bsa-tes4`; `bsa` enables
 //! both BSA generations. `parallel` enables Rayon-backed bulk extraction paths.
 //!
-//! The `lua` feature exposes an embedded [`mlua`] API through the
+//! The `lua` feature exposes an embedded [`mlua`] Luau API through the
 //! `dream_archive::lua` module. It enables BA2 and BSA support, and also enables
-//! the re-exported [`dream_path`]'s Lua companion helpers. It deliberately does
+//! the re-exported [`dream_path`]'s Luau companion helpers. It deliberately does
 //! not choose an `mlua` runtime for ordinary library consumers; embedding
 //! applications should select that once at their own top level. The
 //! `standalone-lua` feature is for this crate's tests, examples, and documentation
-//! builds, and selects vendored `LuaJIT` with Lua 5.2 compatibility through
-//! `mlua`. The crate does not install a standalone C module named
-//! `dream_archive`; the host application creates and registers the module table.
+//! builds, and selects `mlua`'s Luau backend. Since 0.2.0 the bindings target
+//! Luau instead of `LuaJIT`, and every Lua-facing name is camelCase. The crate
+//! does not install a standalone C module named `dreamArchive`; the host
+//! application creates and registers the module table.
 //! Building this crate by itself with `lua` but no `mlua` runtime selected is
 //! intentionally incomplete; use `standalone-lua` for local standalone checks.
 //!
@@ -147,26 +148,26 @@
 //! # fn main() {}
 //! ```
 //!
-//! # Lua bindings
+//! # Luau bindings
 //!
-//! Enable the `lua` feature to build an [`mlua`]-based module table:
+//! Enable the `lua` feature to build an [`mlua`]-based Luau module table:
 //!
-//! ```rust,no_run
+//! ```rust
 //! # #[cfg(feature = "lua")]
 //! # fn main() -> mlua::Result<()> {
 //! let lua = mlua::Lua::new();
 //! lua.globals().set(
-//!     "dream_path",
+//!     "dreamPath",
 //!     dream_archive::dream_path::lua::create_module(&lua)?,
 //! )?;
 //! let module = dream_archive::lua::create_module(&lua)?;
-//! lua.globals().set("dream_archive", module)?;
+//! lua.globals().set("dreamArchive", module)?;
 //!
 //! lua.load(r#"
-//!     local builder = dream_archive.ba2.Builder.new()
-//!     builder:add_bytes("meshes/example.nif", "payload")
-//!     local archive = dream_archive.open_bytes(builder:to_bytes())
-//!     assert(archive:read_file_required("meshes/example.nif") == "payload")
+//!     local builder = dreamArchive.ba2.Builder.new()
+//!     builder:addBytes("meshes/example.nif", "payload")
+//!     local archive = dreamArchive.openBytes(builder:toBytes())
+//!     assert(archive:readFileRequired("meshes/example.nif") == "payload")
 //! "#).exec()?;
 //! # Ok(())
 //! # }
@@ -177,7 +178,7 @@
 //! Lua strings are used as byte buffers for archive paths and payloads. Host
 //! filesystem paths are the explicit exception and must be valid UTF-8 when
 //! passed through Lua. Optional reads/extractions return `nil` for missing
-//! archive members; `*_required` methods raise Lua errors. See the `lua` module
+//! archive members; `*Required` methods raise Lua errors. See the `lua` module
 //! documentation for the full Lua-facing contract.
 
 #[cfg(feature = "ba2")]
