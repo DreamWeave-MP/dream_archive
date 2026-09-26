@@ -1173,6 +1173,31 @@ fn oblivion_archives_ignore_the_xmem_bit() {
 }
 
 #[test]
+fn accepts_nul_padding_after_the_file_names() {
+    // Fallout 3's voice archives leave NULs between the last file name and the file data.
+    const PADDING: u32 = 5;
+    let mut bytes = tiny_tes4_index();
+    let payload_start = bytes.len() - b"payload".len();
+    bytes.splice(payload_start..payload_start, [0; PADDING as usize]);
+    write_u32(
+        &mut bytes,
+        28,
+        u32::try_from(b"file.txt\0".len()).unwrap() + PADDING,
+    );
+    let data_offset = u32::from_le_bytes(bytes[70..74].try_into().unwrap());
+    write_u32(&mut bytes, 70, data_offset + PADDING);
+    let archive = Archive::from_slice(&bytes).unwrap();
+    assert_eq!(
+        archive.read_file("data/file.txt").unwrap().unwrap(),
+        b"payload"
+    );
+
+    // Anything else there isn't padding.
+    bytes[payload_start] = b'x';
+    assert!(Archive::from_slice(&bytes).is_err());
+}
+
+#[test]
 fn compression_toggle_enables_file_compression() {
     let compressed = zlib_compress(b"compressed payload");
     let mut payload = Vec::new();

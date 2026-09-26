@@ -153,7 +153,11 @@ fn read_entries(bytes: &[u8], info: ArchiveInfo) -> Result<Vec<Entry>> {
             ))
         })
         .collect::<Result<Vec<_>>>()?;
-    if names.position() != file_names_len {
+    // Fallout 3's voice archives pad the name block with NULs after the last name.
+    let padding = bytes
+        .get(file_names_offset + names.position()..file_names_end)
+        .ok_or(Error::OutOfBounds)?;
+    if padding.iter().any(|byte| *byte != 0) {
         return Err(Error::OutOfBounds);
     }
     for entry in &entries {
