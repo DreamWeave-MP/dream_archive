@@ -1157,6 +1157,22 @@ fn compression_toggle_disables_archive_default_compression() {
 }
 
 #[test]
+fn oblivion_archives_ignore_the_xmem_bit() {
+    // Oblivion's PC archives (v103) set 0x100, 0x200, and 0x400; only v104+ means XMem by 0x200.
+    let compressed = zlib_compress(b"compressed payload");
+    let mut payload = Vec::new();
+    push_u32(&mut payload, 18);
+    payload.extend_from_slice(&compressed);
+    let bytes = tiny_tes4_index_with_version_and_payload(103, (1 << 2) | 0x700, &payload);
+    let archive = Archive::from_slice(&bytes).unwrap();
+    assert!(!archive.info().uses_xmem());
+    assert_eq!(
+        archive.read_file("data/file.txt").unwrap().unwrap(),
+        b"compressed payload"
+    );
+}
+
+#[test]
 fn compression_toggle_enables_file_compression() {
     let compressed = zlib_compress(b"compressed payload");
     let mut payload = Vec::new();

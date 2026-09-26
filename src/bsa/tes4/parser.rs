@@ -38,7 +38,9 @@ fn read_header(bytes: &[u8]) -> Result<ArchiveInfo> {
     if archive_flags.contains(ArchiveFlags::XBOX_ARCHIVE) {
         return Err(Error::NotImplemented("TES4 Xbox archive layout"));
     }
-    if archive_flags.contains(ArchiveFlags::COMPRESSED)
+    // Oblivion's v103 archives set the XMem bit on PC too; it only means XMem from v104.
+    if version != ArchiveVersion::v103
+        && archive_flags.contains(ArchiveFlags::COMPRESSED)
         && archive_flags.contains(ArchiveFlags::XBOX_COMPRESSED)
     {
         return Err(Error::NotImplemented("TES4 XMem compression"));

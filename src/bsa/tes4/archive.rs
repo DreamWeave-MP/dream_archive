@@ -35,6 +35,17 @@ pub struct ArchiveInfo {
     pub archive_types: ArchiveTypes,
 }
 
+impl ArchiveInfo {
+    /// Whether entries are XMem-compressed (Xbox 360). Only v104 and later mean that by
+    /// [`ArchiveFlags::XBOX_COMPRESSED`]: Oblivion's v103 archives set that bit on PC too, and
+    /// `OpenMW` never reads it for them.
+    #[must_use]
+    pub fn uses_xmem(&self) -> bool {
+        self.version != ArchiveVersion::v103
+            && self.archive_flags.contains(ArchiveFlags::XBOX_COMPRESSED)
+    }
+}
+
 /// Stable identifier for an entry within one parsed TES4-family BSA archive.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct EntryId(usize);
@@ -726,11 +737,7 @@ impl Archive {
     }
 
     fn decompress_entry(&self, payload: &[u8], out: &mut Vec<u8>) -> Result<()> {
-        if self
-            .info
-            .archive_flags
-            .contains(ArchiveFlags::XBOX_COMPRESSED)
-        {
+        if self.info.uses_xmem() {
             return Err(Error::NotImplemented("TES4 XMem compression"));
         }
         if self.info.version == ArchiveVersion::v105 {
@@ -758,11 +765,7 @@ impl Archive {
         payload: &[u8],
         out: &mut impl std::io::Write,
     ) -> Result<u64> {
-        if self
-            .info
-            .archive_flags
-            .contains(ArchiveFlags::XBOX_COMPRESSED)
-        {
+        if self.info.uses_xmem() {
             return Err(Error::NotImplemented("TES4 XMem compression"));
         }
         if self.info.version == ArchiveVersion::v105 {
@@ -800,11 +803,7 @@ impl Archive {
         payload: &[u8],
         out: &mut impl std::io::Write,
     ) -> Result<u64> {
-        if self
-            .info
-            .archive_flags
-            .contains(ArchiveFlags::XBOX_COMPRESSED)
-        {
+        if self.info.uses_xmem() {
             return Err(Error::NotImplemented("TES4 XMem compression"));
         }
         if self.info.version == ArchiveVersion::v105 {
