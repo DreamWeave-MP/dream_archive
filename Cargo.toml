@@ -2,7 +2,7 @@
 name = "dream_archive"
 version = "0.2.0"
 edition = "2024"
-rust-version = "1.87"
+rust-version = "1.88"
 license = "GPL-3.0-only"
 repository = "https://github.com/DreamWeave-MP/dream-archive"
 documentation = "https://dreamweave-mp.github.io/dream-archive/"
