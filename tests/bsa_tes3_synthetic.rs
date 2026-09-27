@@ -2,7 +2,7 @@
 
 use dream_archive::bsa::{
     FilenameEncoding,
-    tes3::{Archive, Builder, Error},
+    tes3::{Archive, Builder, Entry, Error, hash_file},
 };
 use std::io::Read as _;
 use std::path::PathBuf;
@@ -50,7 +50,7 @@ fn extracts_synthetic_tes3_file() {
     assert_eq!(archive.len(), 1);
     assert_eq!(archive.entries()[0].path(), "Meshes/Foo.NIF");
     assert_eq!(archive.entries()[0].file().size, 5);
-    assert_eq!(archive.entries()[0].hash(), 0x0123_4567_89ab_cdef);
+    assert_eq!(archive.entries()[0].hash(), 0x89ab_cdef_0123_4567);
     assert!(archive.contains("meshes\\foo.nif"));
     assert!(archive.contains("/MESHES//foo.nif"));
     assert_eq!(
@@ -104,9 +104,41 @@ fn writes_tes3_archive_from_bytes() {
         archive.read_file("textures/bar.dds").unwrap().unwrap(),
         b"texture"
     );
-    assert_eq!(archive.entries()[0].hash(), 0xECDD_AD85_071D_1701);
+    assert_eq!(archive.entries()[0].hash(), 0x071D_1701_ECDD_AD85);
     assert_eq!(archive.entries()[0].path(), "textures\\bar.dds");
     assert_eq!(archive.entries()[1].path(), "meshes\\foo.nif");
+}
+
+#[test]
+fn tes3_entry_hash_matches_hash_file() {
+    let mut builder = Builder::new();
+    for path in [
+        "Meshes/Foo.NIF",
+        "textures/bar.dds",
+        "meshes/c/artifact_bloodring_01.nif",
+        "icons/m/misc_prongs00.dds",
+    ] {
+        builder.add_bytes(path, path.as_bytes()).unwrap();
+    }
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
+
+    assert_eq!(archive.len(), 4);
+    for entry in archive.entries() {
+        let (hash, normalized) = hash_file(entry.path());
+        assert_eq!(entry.path(), normalized.as_slice());
+        assert_eq!(entry.hash(), hash.numeric(), "{}", entry.path());
+    }
+    let hashes: Vec<_> = archive.entries().iter().map(Entry::hash).collect();
+    assert!(hashes.is_sorted(), "TES3 hash tables sort by (lo, hi)");
+}
+
+#[test]
+fn tes3_entry_hash_reads_low_then_high_u32() {
+    let archive = Archive::from_slice(&tiny_tes3_archive(b"a.nif", b"x")).unwrap();
+    let hash = archive.entries()[0].hash();
+    // The fixture stores 0x0123_4567_89ab_cdef little endian: low u32 first.
+    assert_eq!(hash >> 32, 0x89ab_cdef);
+    assert_eq!(hash & 0xffff_ffff, 0x0123_4567);
 }
 
 #[test]

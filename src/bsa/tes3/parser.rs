@@ -1,4 +1,4 @@
-use super::{Archive, ArchiveInfo, Entry, Error, FileRecord, Result};
+use super::{Archive, ArchiveInfo, Entry, Error, FileHash, FileRecord, Result};
 use crate::BString;
 use crate::{read::Cursor, storage::Storage};
 
@@ -136,7 +136,11 @@ fn read_hashes(bytes: &[u8], file_count: u32, hashes_offset: usize) -> Result<Ve
     let mut cursor = Cursor::new(bytes);
     cursor.seek(hashes_offset)?;
     for _ in 0..file_count {
-        hashes.push(cursor.u64()?);
+        // Stored as `{ u32 low; u32 high; }`; `Entry::hash` reports the
+        // `FileHash::numeric` value so it matches `hash_file` for the same path.
+        let lo = cursor.u32()?;
+        let hi = cursor.u32()?;
+        hashes.push(FileHash { lo, hi }.numeric());
     }
     Ok(hashes)
 }

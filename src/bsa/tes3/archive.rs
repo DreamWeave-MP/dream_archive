@@ -57,6 +57,8 @@ impl Entry {
         self.record
     }
 
+    /// The stored hash as [`FileHash::numeric`](super::FileHash::numeric), the
+    /// same value [`hash_file`](super::hash_file) returns for this entry's path.
     #[must_use]
     pub fn hash(&self) -> u64 {
         self.hash

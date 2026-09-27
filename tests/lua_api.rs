@@ -256,6 +256,12 @@ fn lua_builds_and_reads_tes3_and_encodes_paths() {
         assert(archive:entries()[1].path == "meshes\\foo.nif")
         assert(archive:readEntry(1) == "tes3 payload")
         assert(archive:extractFileRequired("meshes/foo.nif") == "tes3 payload")
+
+        local entryHash = archive:entries()[1].hash
+        local fileHash = dreamArchive.bsa.tes3.hashFile("Meshes/Foo.NIF")
+        assert(entryHash.lo == fileHash.lo, "entry lo matches hashFile lo")
+        assert(entryHash.hi == fileHash.hi, "entry hi matches hashFile hi")
+        assert(entryHash.hex == fileHash.hex, entryHash.hex .. " ~= " .. fileHash.hex)
     "#,
     )
     .exec()
