@@ -21,6 +21,7 @@ mlua = { version = "0.12.1", default-features = false, optional = true }
 rayon = { version = "1.12", optional = true }
 
 [dev-dependencies]
+criterion = { version = "0.8", default-features = false }
 walkdir = "2.5"
 
 [features]
@@ -128,3 +129,8 @@ required-features = ["ba2", "bsa-tes3", "bsa-tes4"]
 name = "parse"
 harness = false
 required-features = ["ba2", "bsa-tes3", "bsa-tes4"]
+
+[[bench]]
+name = "luau_boundary"
+harness = false
+required-features = ["standalone-lua"]
