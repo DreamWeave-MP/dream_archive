@@ -88,3 +88,18 @@ fn tes4_hashes_preserve_bethesda_tool_oddities() {
     let file_only = tes4::hash_file(b"test.txt").0;
     assert_eq!(with_parent, file_only);
 }
+
+#[test]
+fn tes4_hash_fields_round_trip_through_their_numeric_form() {
+    let (hash, _) = tes4::hash_file(b"elder_council_amulet_n.dds");
+    assert_eq!(tes4::HashFields::from_numeric(hash.numeric()), hash);
+    let all = tes4::HashFields {
+        last: 0xee,
+        last2: 0xdf,
+        length: 22,
+        first: b'e',
+        crc: 0xdc53_1e2f,
+    };
+    assert_eq!(all.numeric(), 0xdc53_1e2f_6516_dfee);
+    assert_eq!(tes4::HashFields::from_numeric(0xdc53_1e2f_6516_dfee), all);
+}

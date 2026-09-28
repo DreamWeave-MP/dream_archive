@@ -51,4 +51,9 @@ fn path_lookup_uses_normalized_hashes() {
     assert!(archive.contains("/LICENSE.TXT\\"));
     assert!(archive.contains("samplea.png"));
     assert!(archive.contains("SampleA.PNG"));
+    let (hash, _) = hash_file(b"SampleA.PNG".as_bstr());
+    assert!(archive.contains_hash(hash));
+    assert_eq!(archive.get_by_hash(hash).unwrap().name(), "SampleA.png");
+    let (missing, _) = hash_file(b"nothing.png".as_bstr());
+    assert!(!archive.contains_hash(missing));
 }

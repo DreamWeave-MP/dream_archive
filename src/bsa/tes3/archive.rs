@@ -80,6 +80,7 @@ pub struct Archive {
     entries: Vec<Entry>,
     data_offset: usize,
     lookup: HashMap<BString, usize>,
+    hash_lookup: HashMap<u64, usize>,
 }
 
 impl Archive {
@@ -188,6 +189,17 @@ impl Archive {
             .ok_or_else(|| Error::FileNotFound(BString::from(path)))
     }
 
+    /// Get an entry by its stored TES3 hash, the value [`Entry::hash`] and
+    /// [`hash_file`](super::hash_file)`(path).0.numeric()` report. Names are not
+    /// consulted, so a hash collision between two stored paths resolves to the
+    /// first entry in archive order.
+    #[must_use]
+    pub fn get_by_hash(&self, hash: u64) -> Option<&Entry> {
+        self.hash_lookup
+            .get(&hash)
+            .map(|&index| &self.entries[index])
+    }
+
     #[must_use]
     pub fn contains(&self, path: impl AsRef<[u8]>) -> bool {
         self.get(path).is_some()
@@ -196,6 +208,12 @@ impl Archive {
     #[must_use]
     pub fn contains_normalized(&self, path: &NormalizedPath) -> bool {
         self.get_normalized(path).is_some()
+    }
+
+    /// Whether an entry with this stored hash exists; see [`Self::get_by_hash`].
+    #[must_use]
+    pub fn contains_hash(&self, hash: u64) -> bool {
+        self.hash_lookup.contains_key(&hash)
     }
 
     #[must_use]
@@ -425,8 +443,10 @@ impl Archive {
         data_offset: usize,
     ) -> Self {
         let mut lookup = HashMap::with_capacity(entries.len());
+        let mut hash_lookup = HashMap::with_capacity(entries.len());
         for (index, entry) in entries.iter().enumerate() {
             lookup.entry(entry.lookup_path.clone()).or_insert(index);
+            hash_lookup.entry(entry.hash).or_insert(index);
         }
         Self {
             storage,
@@ -434,6 +454,7 @@ impl Archive {
             entries,
             data_offset,
             lookup,
+            hash_lookup,
         }
     }
 

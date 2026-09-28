@@ -11,6 +11,8 @@ pub struct HashFields {
 }
 
 impl HashFields {
+    /// The 64-bit on-disk form: `last`, `last2`, `length`, `first`, then `crc`,
+    /// little-endian, so it equals the `u64` stored in the archive.
     #[must_use]
     pub const fn numeric(self) -> u64 {
         (self.last as u64)
@@ -18,6 +20,19 @@ impl HashFields {
             | ((self.length as u64) << 16)
             | ((self.first as u64) << 24)
             | ((self.crc as u64) << 32)
+    }
+
+    /// The fields of a 64-bit on-disk hash; the inverse of [`Self::numeric`].
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
+    pub const fn from_numeric(value: u64) -> Self {
+        Self {
+            last: value as u8,
+            last2: (value >> 8) as u8,
+            length: (value >> 16) as u8,
+            first: (value >> 24) as u8,
+            crc: (value >> 32) as u32,
+        }
     }
 }
 

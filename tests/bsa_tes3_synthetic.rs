@@ -407,3 +407,17 @@ fn builder_can_defer_existing_archive_entry() {
         b"payload"
     );
 }
+
+#[test]
+fn tes3_entries_are_found_by_hash() {
+    let mut builder = Builder::new();
+    builder.add_bytes("meshes/a.nif", b"a").unwrap();
+    builder.add_bytes("textures/b.dds", b"b").unwrap();
+    let archive = Archive::from_vec(builder.to_vec().unwrap()).unwrap();
+    let (hash, _) = hash_file(b"Textures/B.DDS");
+    let entry = archive.get_by_hash(hash.numeric()).unwrap();
+    assert_eq!(entry.path(), "textures\\b.dds");
+    assert!(archive.contains_hash(hash.numeric()));
+    assert!(!archive.contains_hash(hash.numeric() ^ 1));
+    assert!(archive.get_by_hash(0).is_none());
+}

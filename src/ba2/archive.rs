@@ -297,6 +297,12 @@ impl Archive {
         self.get(path).is_some()
     }
 
+    /// Whether an entry with this BA2 hash exists; see [`Self::get_by_hash`].
+    #[must_use]
+    pub fn contains_hash(&self, hash: FileHash) -> bool {
+        self.lookup.contains_key(&hash)
+    }
+
     /// Size in bytes of the mapped or owned archive data.
     #[must_use]
     pub fn archive_size(&self) -> usize {

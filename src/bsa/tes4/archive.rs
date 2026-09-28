@@ -359,6 +359,14 @@ impl Archive {
         self.get(path).is_some()
     }
 
+    /// Whether an entry with these TES4 folder and file hashes exists; see
+    /// [`Self::get_by_hash`].
+    #[must_use]
+    pub fn contains_hash(&self, folder_hash: HashFields, file_hash: HashFields) -> bool {
+        self.hash_lookup
+            .contains_key(&(folder_hash.numeric(), file_hash.numeric()))
+    }
+
     #[must_use]
     pub fn contains_normalized(&self, path: &NormalizedPath) -> bool {
         self.get_normalized(path).is_some()
