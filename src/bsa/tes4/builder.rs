@@ -366,6 +366,8 @@ impl Builder {
         )
     }
 
+    /// Preserve an entry from another TES4-family archive with an explicit
+    /// compression policy for the new archive.
     ///
     /// # Errors
     ///
@@ -461,11 +463,8 @@ impl Builder {
     /// # Errors
     ///
     /// Returns an error if archive integer fields overflow their TES4 on-disk
-    /// sizes or output allocation fails.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if archive metadata overflows, output allocation fails, or a deferred source can not be read.
+    /// sizes, output allocation fails, a deferred source can not be read, or
+    /// embedded file names are asked of a version 103 archive.
     pub fn to_vec(&self) -> Result<Vec<u8>> {
         let mut out = Cursor::new(Vec::new());
         self.write_seek(&mut out)?;
@@ -476,12 +475,9 @@ impl Builder {
     ///
     /// # Errors
     ///
-    /// Returns an error if writing fails or archive integer fields overflow
-    /// their TES4 on-disk sizes.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if writing fails, archive metadata overflows, or a deferred source can not be read.
+    /// Returns an error if writing fails, archive integer fields overflow their
+    /// TES4 on-disk sizes, a deferred source can not be read, or embedded file
+    /// names are asked of a version 103 archive.
     pub fn write_seek<W: Write + Seek>(&self, mut out: W) -> Result<()> {
         if self.name_mode.embedded_file_names() && self.version == ArchiveVersion::v103 {
             return Err(Error::NotImplemented(
