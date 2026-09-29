@@ -1,0 +1,20 @@
+{
+  "id": "archives",
+  "title": "Three generations, one reader",
+  "description": "The header says which family an archive is. After that, listing, lookup, reading and extraction are the same calls for all of them.",
+  "mode": "flow",
+  "direction": "horizontal",
+  "nodes": [
+    { "id": "archives", "kind": "source", "title": "Any supported archive", "detail": "Morrowind's BSA, the TES4 BSA of Oblivion through Skyrim SE, and the BA2 of Fallout 4 through Starfield." },
+    { "id": "archive", "kind": "tool", "title": "Archive", "detail": "Detects the family, indexes every entry by path and hash, and reads straight from a memory-mapped file.", "page": "@/docs/reading.md" },
+    { "id": "out", "kind": "result", "title": "Bytes, readers, files", "detail": "A Vec, a std::io::Read, or a directory tree written one file at a time, each file atomically.", "page": "@/docs/extracting.md" },
+    { "id": "builders", "kind": "service", "role": "support", "title": "Builders", "detail": "Write TES3, TES4 and BA2 archives from bytes, files, directories, or entries of another archive.", "page": "@/docs/building.md" },
+    { "id": "scripts", "kind": "service", "role": "support", "title": "Luau scripts", "detail": "require(\"@dream/archive\") gives scripts the same reader and builders through l3i.", "page": "@/docs/luau-hosts.md" }
+  ],
+  "edges": [
+    { "from": "archives", "to": "archive" },
+    { "from": "archive", "to": "out" },
+    { "from": "builders", "to": "archives", "kind": "support", "label": "write" },
+    { "from": "scripts", "to": "archive", "kind": "support", "label": "@dream/archive" }
+  ]
+}

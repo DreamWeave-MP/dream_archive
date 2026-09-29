@@ -1,0 +1,153 @@
+# dream_archive. Structured facts only: the name and summary are `title` and `description` in
+# index.md. Every key is explained at
+# https://dreamweave-mp.github.io/DreamWeave-Mod-Template/guide/mod-toml/
+
+# Permanent identity. Never changes, whatever the crate is called or wherever it is hosted.
+id = "a8ec99fb-1938-42cc-8b9f-87994e046594"
+
+slug = "dream_archive"
+type = "library"
+status = "active"
+license = "GPL-3.0-only"
+
+[[maintainers]]
+name = "DreamWeave"
+url = "https://github.com/DreamWeave-MP"
+
+[links]
+documentation = "@/docs/_index.md"
+donate = "https://ko-fi.com/magicaldave"
+
+# A Rust library. StroggForge's library workflow (.github/workflows/ci.yml) tests it on every push;
+# pushing a bare version tag, like 1.0.0, publishes that version to crates.io and records it here.
+[package]
+format = "crate"
+crate = "dream_archive"
+
+# Every version on crates.io, oldest first. To release, add the next one here with the day you
+# publish it, set the same version in Cargo.toml, commit, and push its tag: git tag 1.0.1.
+
+[[releases]]
+version = "0.1.0"
+date = 2026-04-27
+summary = "First release: read, extract and write BA2, TES3 BSA and TES4 BSA archives in pure Rust."
+added = [
+    "`Archive`, which detects the family of any supported archive and lists, reads and extracts it.",
+    "BA2 GNRL and DX10 reading and extraction; DX10 textures come out as DDS files with headers rebuilt from the archive's metadata. GNMF archives are identified, not extracted.",
+    "TES3 BSA reading, extraction and writing.",
+    "TES4 BSA reading, extraction and writing for versions 103, 104 and 105: zlib and LZ4 frames, string tables, embedded names, and hash-only archives through `extract_to_with_paths`.",
+    "BA2 GNRL writing, and DX10 writing from DDS files or from texture metadata and raw payloads.",
+    "Legacy filename code pages: `encode_filename`, `decode_filename_lossy` and `extract_to_with_encoding`.",
+    "Parallel extraction behind the `parallel` feature.",
+    "Lua bindings through `mlua` and vendored LuaJIT, behind the `lua` feature.",
+]
+
+[[releases]]
+version = "0.1.1"
+date = 2026-04-27
+summary = "Builders read files when they write, and can copy entries from an opened archive."
+added = [
+    "`add_archive_entry` on every builder, and `add_archive_entry_with_compression` on the BA2 and TES4 builders: an entry of an opened archive of the same family, copied when the archive is written.",
+    "Stable entry ids: `entries_with_ids`, `entry_by_id`, `entry_by_id_required` and `extract_entry_by_id`; `extracted_len` and `extracted_len_by_id` for BA2 and TES4.",
+]
+changed = [
+    "`add_file` and `add_dir` record each source's path and size and read it when the archive is written. A source that changed size in between fails the write.",
+]
+breaking = ["Builders write with `write_seek`, to any `Write + Seek`; `write_to` is gone."]
+
+[[releases]]
+version = "0.1.2"
+date = 2026-04-27
+changed = [
+    "The `lua` feature no longer picks a Lua runtime: the host chooses one through its own `mlua`. `standalone-lua` selects vendored LuaJIT.",
+    "Rust 1.87.",
+]
+added = ["`dream_path` is re-exported."]
+
+[[releases]]
+version = "0.1.3"
+date = 2026-04-27
+changed = ["`bstr` comes through `dream_path` and is re-exported as `dream_archive::bstr`; the crate no longer depends on it directly."]
+
+[[releases]]
+version = "0.1.4"
+date = 2026-04-27
+added = [
+    "A host can add its own Lua methods to the archive userdata: `lua::LuaArchive` with `archive()` and `path()`, `create_module_with_archive_methods`, `register_archive_methods` and `add_archive_methods`.",
+]
+
+[[releases]]
+version = "0.1.5"
+date = 2026-04-28
+added = [
+    "`Dx10Builder::add_archive_entry` copies a DX10 texture's header, chunk records and stored bytes unchanged, instead of rebuilding them.",
+]
+
+[[releases]]
+version = "0.1.6"
+date = 2026-04-28
+added = [
+    "`open_file`, `open_file_required` and `open_entry`: a member as a `std::io::Read`, borrowed straight from the archive when it is stored uncompressed.",
+]
+
+[[releases]]
+version = "0.2.0"
+date = 2026-09-26
+summary = "The Lua API runs on Luau, with camelCase names, and Oblivion's archives open."
+breaking = [
+    "The Lua bindings build against `mlua` 0.12; `standalone-lua` selects Luau instead of LuaJIT.",
+    "Lua names are camelCase (`dreamArchive.openPath`, `archive:readFileRequired`), and so are enum values (`\"bsaTes4\"`, `\"skyrimSe\"`); constants are UPPER_SNAKE.",
+    "`dream_path` 0.2 and `lz4_flex` 0.14.",
+]
+fixed = [
+    "Oblivion's BSAs open. Their version 103 headers set the bit that means XMem compression from version 104 on; it is now ignored for 103, as OpenMW ignores it.",
+]
+
+# 0.2.1 was tagged but never published to crates.io; its changes are in 0.2.2.
+
+[[releases]]
+version = "0.2.2"
+date = 2026-09-26
+fixed = ["Fallout 3's voice archives open: their file name block is padded with NUL bytes after the last name."]
+changed = ["Rust 1.88, as `mlua` 0.12 requires."]
+
+[[releases]]
+version = "0.2.3"
+date = 2026-09-27
+fixed = [
+    "TES3 entry hashes are read low half first, so `Entry::hash` equals `hash_file(path).0.numeric()` for the same path.",
+]
+
+# 0.3.0, 0.3.1 and 0.3.2 were version bumps on the way to 1.0.0 and were never tagged or
+# published; their changes are in 1.0.0.
+
+# Declared ahead of its tag: the page lists it as unreleased until 1.0.0 is pushed. Set the date
+# to the day you publish it.
+[[releases]]
+version = "1.0.0"
+date = 2026-09-29
+summary = "First stable release: the Luau binding is an l3i extension providing @dream/archive, every archive family looks entries up by hash, and lookups and zlib reads allocate less."
+breaking = [
+    "The `luau` feature (`lua` is the old name of the same feature) binds the crate as an l3i extension, `luau::ArchiveExtension`, providing `@dream/archive`. `dream_archive::lua`, the `mlua` types and the `standalone-lua` feature are gone.",
+    "Building with the `luau` feature needs l3i's toolchain: clang, lld and cross-language thin LTO.",
+    "Every `open*` in Luau returns the one `Archive` type; `archive:entries()` is a view of entry handles, not a table of tables.",
+    "Luau entry hashes are integers: `entry.hash` and `entry.folderHash` replace the old tables and fields, with `hashHex` and `folderHashHex` for the hex spelling. BA2 hashes are `directoryHash`, `fileHash` and `extensionHash`; sizes and offsets are `size`, `storedSize` and `offset` on every format.",
+    "Luau integer arguments must be exact: `readEntry(1.5)` is an error instead of a rounded read.",
+]
+added = [
+    "`get_by_hash`, `get_id_by_hash` and `contains_hash` on every archive family, `get_id` by path, and `HashFields::from_numeric`.",
+    "`archive:readInto(entry, buffer, offset)` in Luau decodes a member straight into a `buffer`, and `archive:getByHash` and `archive:containsHash` take the family's hash shape.",
+    "Luau type definitions for the whole module, checked by Luau's own type checker in the tests behind the `luau-analysis` feature.",
+]
+changed = [
+    "Path lookups normalize into a stack buffer instead of allocating: `contains` over 4096 distinct paths takes 0.39 ms instead of 1.03 ms (TES3) and 1.43 ms (TES4).",
+    "zlib members inflate from the archive through one inflater per thread: a 64 KiB TES4 member reads in 18 µs instead of 68 µs.",
+    "Walking entries from Luau is 5 to 23 times faster than with `mlua`, and small calls such as `contains` and `readEntry` take about half as long: 4096 TES3 entries take 0.73 ms instead of 6.15 ms.",
+]
+migration = """
+Compose `dream_archive::luau::ArchiveExtension` into the host's l3i `RuntimePlan`. A host that
+still wants the `dreamArchive` global adds
+`RuntimePolicy::compat_global("@dream/archive", "dreamArchive")`.
+[Embedding Luau](https://dreamweave-mp.github.io/dream_archive/docs/luau-hosts/#from-0-2) lists
+what scripts must change.
+"""
