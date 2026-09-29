@@ -58,8 +58,10 @@ Every file below a host directory. Not on the DX10 builder.
 
 {{ api_signature(value="builder:toString(): string") }}
 
-Write the archive to a host file, or return it as a string; `toBytes` and `toString` are the same
-call.
+{{ api_signature(value="builder:toBuffer(): buffer") }}
+
+Write the archive to a host file, or return it as a string or as a new `buffer`; `toBytes` and
+`toString` are the same call.
 
 ## ba2.Builder
 
@@ -82,10 +84,6 @@ call.
 {{ api_signature(value="builder:addArchiveEntryWithCompression(archivePath: string, archive: dream_archive_Archive, id: number, compression: string?)") }}
 
 With a per-member override: `"inherit"` (or `nil`), `"store"` or `"compress"`.
-
-{{ api_signature(value="builder:toBuffer(): buffer") }}
-
-The archive as a new `buffer`. Only this builder has it.
 
 ## ba2.Dx10Builder
 

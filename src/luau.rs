@@ -1339,10 +1339,7 @@ fn describe_ba2_builders(d: &mut ExtensionDescriptor) {
         .signature("(self): string");
     builder
         .method("toBuffer", |b: &Ba2Builder, call: &Call| {
-            let bytes = b.0.borrow().to_vec().map_err(archive_error)?;
-            let buffer = l3i::convert::new_buffer(call, bytes.len())?;
-            buffer.write(0, &bytes)?;
-            l3i::value::Value::store(call.top_value())
+            archive_buffer(call, &b.0.borrow().to_vec().map_err(archive_error)?)
         })
         .signature("(self): buffer");
 
@@ -1435,6 +1432,17 @@ fn describe_ba2_builders(d: &mut ExtensionDescriptor) {
         b.0.borrow().to_vec().map_err(archive_error)
     })
     .signature("(self): string");
+    dx10.method("toBuffer", |b: &Ba2Dx10Builder, call: &Call| {
+        archive_buffer(call, &b.0.borrow().to_vec().map_err(archive_error)?)
+    })
+    .signature("(self): buffer");
+}
+
+/// A written archive as a new `buffer` on the script's stack.
+fn archive_buffer(call: &Call, bytes: &[u8]) -> Result<l3i::value::Value> {
+    let buffer = l3i::convert::new_buffer(call, bytes.len())?;
+    buffer.write(0, bytes)?;
+    l3i::value::Value::store(call.top_value())
 }
 
 fn describe_tes3_builder(d: &mut ExtensionDescriptor) {
@@ -1509,6 +1517,11 @@ fn describe_tes3_builder(d: &mut ExtensionDescriptor) {
             b.0.borrow().to_vec().map_err(archive_error)
         })
         .signature("(self): string");
+    builder
+        .method("toBuffer", |b: &Tes3Builder, call: &Call| {
+            archive_buffer(call, &b.0.borrow().to_vec().map_err(archive_error)?)
+        })
+        .signature("(self): buffer");
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1645,6 +1658,11 @@ fn describe_tes4_builder(d: &mut ExtensionDescriptor) {
             b.0.borrow().to_vec().map_err(archive_error)
         })
         .signature("(self): string");
+    builder
+        .method("toBuffer", |b: &Tes4Builder, call: &Call| {
+            archive_buffer(call, &b.0.borrow().to_vec().map_err(archive_error)?)
+        })
+        .signature("(self): buffer");
 }
 
 fn open_path(path: &str) -> Result<Owned<Archive>> {

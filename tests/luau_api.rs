@@ -383,6 +383,45 @@ fn payloads_accept_buffers_and_strings() {
 }
 
 #[test]
+fn every_builder_returns_its_archive_as_a_buffer() {
+    run(r#"
+        local dds = buffer.create(148 + 16)
+        buffer.writestring(dds, 0, "DDS ")
+        buffer.writeu32(dds, 4, 124)
+        buffer.writeu32(dds, 8, 0x000A1007)
+        buffer.writeu32(dds, 12, 4)
+        buffer.writeu32(dds, 16, 4)
+        buffer.writeu32(dds, 28, 1)
+        buffer.writeu32(dds, 76, 32)
+        buffer.writeu32(dds, 80, 4)
+        buffer.writestring(dds, 84, "DX10")
+        buffer.writeu32(dds, 108, 0x1000)
+        buffer.writeu32(dds, 128, 98)
+        buffer.writeu32(dds, 132, 3)
+        buffer.writeu32(dds, 140, 1)
+        local dx10 = dreamArchive.ba2.Dx10Builder.new()
+        dx10:addDdsBytes("textures/tiny.dds", dds)
+        local builders = {
+            { dreamArchive.ba2.Builder.new(), "ba2", "meshes/foo.nif" },
+            { dx10, "ba2", "textures/tiny.dds" },
+            { dreamArchive.bsa.tes3.Builder.new(), "bsaTes3", "meshes/foo.nif" },
+            { dreamArchive.bsa.tes4.Builder.new(), "bsaTes4", "meshes/foo.nif" },
+        }
+        for _, case in builders do
+            local builder, format, path = case[1], case[2], case[3]
+            if builder ~= dx10 then
+                builder:addBytes(path, "payload")
+            end
+            local bytes = builder:toBuffer()
+            assert(typeof(bytes) == "buffer", format)
+            assert(buffer.tostring(bytes) == builder:toBytes(), format)
+            local archive = dreamArchive.openBytes(bytes)
+            assert(archive:format() == format and archive:contains(path), format)
+        end
+    "#);
+}
+
+#[test]
 fn ba2_stringless_entries_report_nil_paths() {
     run_with(
         &[(

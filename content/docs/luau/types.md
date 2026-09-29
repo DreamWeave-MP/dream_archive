@@ -94,6 +94,7 @@ declare extern type dream_archive_Ba2Dx10Builder with
     function writePath(self, path: string)
     function toBytes(self): string
     function toString(self): string
+    function toBuffer(self): buffer
 end
 
 -- dream.archive.Entries (owned by dream.archive; untagged)
@@ -153,6 +154,7 @@ declare extern type dream_archive_Tes3Builder with
     function writePath(self, path: string)
     function toBytes(self): string
     function toString(self): string
+    function toBuffer(self): buffer
 end
 
 -- dream.archive.Tes4Builder (owned by dream.archive; untagged)
@@ -177,6 +179,7 @@ declare extern type dream_archive_Tes4Builder with
     function writePath(self, path: string)
     function toBytes(self): string
     function toString(self): string
+    function toBuffer(self): buffer
 end
 
 -- module @dream/archive/ba2 (provided by dream.archive)
