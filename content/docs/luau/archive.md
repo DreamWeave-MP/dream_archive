@@ -139,7 +139,7 @@ handles of the same entry are `==`.
 | `format` | `string` | `"bsaTes3"` | `"bsaTes4"` | `"ba2"` |
 | `path` | `string?` | the stored path | the path, or `nil` without names | the stored name, or `nil` without a string table |
 | `name` | `string?` | the path after its last separator | the stored file name, or `nil` | the name after its last separator, or `nil` without a string table |
-| `folder` | `string?` | the path before its last separator, or `nil` without one | the stored folder, `""` for the root, or `nil` | the name before its last separator, or `nil` without one |
+| `folder` | `string?` | the path before its last separator, `""` for the root | the stored folder, `""` for the root, or `nil` | the name before its last separator, `""` for the root, or `nil` without a string table |
 | `size` | `number?` | the member's size | the decoded size | the decoded size, DDS header included; `nil` for GNMF |
 | `storedSize` | `number` | the member's size | the stored size, prefix and embedded name included | the sum of its chunks' stored sizes |
 | `offset` | `number?` | from the start of the data section | from the start of the file | the first chunk's, from the start of the file; `nil` without chunks |

@@ -242,7 +242,7 @@ fn builds_and_reads_ba2_through_the_top_level_module() {
 }
 
 #[test]
-fn entry_names_are_the_last_path_component_in_every_family() {
+fn entry_names_and_folders_split_the_path_the_same_way_in_every_family() {
     run(r#"
         local builders = {
             dreamArchive.bsa.tes3.Builder.new(),
@@ -260,6 +260,7 @@ fn entry_names_are_the_last_path_component_in_every_family() {
             assert(nested.name == "foo.nif", format .. ": " .. tostring(nested.name))
             assert(nested.folder == "meshes\\x", format .. ": " .. tostring(nested.folder))
             assert(root.name == "readme.txt", format .. ": " .. tostring(root.name))
+            assert(root.folder == "", format .. ": " .. tostring(root.folder))
         end
     "#);
 }

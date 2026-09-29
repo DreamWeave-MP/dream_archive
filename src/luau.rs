@@ -429,15 +429,9 @@ impl Entry {
     fn folder(&self) -> Option<&[u8]> {
         match self.row() {
             Row::Ba2(_, entry) => {
-                let name = entry.name().as_bytes();
-                let end = name.iter().rposition(|byte| matches!(byte, b'/' | b'\\'))?;
-                Some(&name[..end])
+                (!entry.name().is_empty()).then(|| parent_folder(entry.name().as_bytes()))
             }
-            Row::Tes3(_, entry) => {
-                let path = entry.path().as_bytes();
-                let end = path.iter().rposition(|byte| matches!(byte, b'/' | b'\\'))?;
-                Some(&path[..end])
-            }
+            Row::Tes3(_, entry) => Some(parent_folder(entry.path().as_bytes())),
             Row::Tes4(_, entry) => entry.folder().map(|folder| folder.as_bytes()),
         }
     }
@@ -514,6 +508,16 @@ fn last_component(path: &[u8]) -> &[u8] {
         .rposition(|byte| matches!(byte, b'/' | b'\\'))
         .map_or(0, |pos| pos + 1);
     &path[start..]
+}
+
+/// The part of a stored path before its last separator: empty for a path at the root, as a
+/// TES4 archive stores the root folder.
+fn parent_folder(path: &[u8]) -> &[u8] {
+    let end = path
+        .iter()
+        .rposition(|byte| matches!(byte, b'/' | b'\\'))
+        .unwrap_or(0);
+    &path[..end]
 }
 
 struct IndexField;
@@ -1155,7 +1159,8 @@ fn describe_entry(d: &mut ExtensionDescriptor) {
         .doc("The path after its last separator; nil for hash-only entries.");
     entry
         .getter("folder", |e: &Entry| e.folder().map(<[u8]>::to_vec))
-        .signature("string?");
+        .signature("string?")
+        .doc("The path before its last separator, \"\" at the root; nil for hash-only entries.");
     entry
         .getter("size", |e: &Entry| e.size().ok().map(number))
         .signature("number?")

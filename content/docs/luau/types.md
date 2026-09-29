@@ -117,6 +117,7 @@ declare extern type dream_archive_Entry with
     path: string?
     -- The path after its last separator; nil for hash-only entries.
     name: string?
+    -- The path before its last separator, "" at the root; nil for hash-only entries.
     folder: string?
     -- Decoded payload size; nil when the format cannot tell (BA2 GNMF).
     size: number?
