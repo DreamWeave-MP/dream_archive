@@ -1730,31 +1730,12 @@ const ENCODE_FILENAME: &str = "(text: string, encoding: string) -> string";
 const DECODE_FILENAME: &str = "(bytes: string, encoding: string) -> string";
 const BSA_ENCODING: &str = "{ utf8: \"utf8\", windows1250: \"windows1250\", windows1251: \"windows1251\", windows1252: \"windows1252\", cp437: \"cp437\" }";
 
-fn ba2_module_type() -> String {
-    format!(
-        "{{ openPath: {OPEN_PATH}, openBytes: {OPEN_BYTES}, hashFile: {BA2_HASH_FILE}, Builder: {BA2_BUILDER}, Dx10Builder: {BA2_DX10_BUILDER}, compression: {BA2_COMPRESSION}, version: {BA2_VERSION} }}"
-    )
-}
-
-fn tes3_module_type() -> String {
-    format!(
-        "{{ openPath: {OPEN_PATH}, openBytes: {OPEN_BYTES}, hashFile: {TES3_HASH_FILE}, Builder: {TES3_BUILDER} }}"
-    )
-}
-
-fn tes4_module_type() -> String {
-    format!(
-        "{{ openPath: {OPEN_PATH}, openBytes: {OPEN_BYTES}, hashDirectory: {TES4_HASH}, hashFile: {TES4_HASH}, Builder: {TES4_BUILDER}, nameMode: {TES4_NAME_MODE}, profile: {TES4_PROFILE}, archiveTypes: {TES4_ARCHIVE_TYPES} }}"
-    )
-}
-
-fn bsa_module_type() -> String {
-    format!(
-        "{{ encodeFilename: {ENCODE_FILENAME}, decodeFilenameLossy: {DECODE_FILENAME}, normalizePath: {NORMALIZE_PATH}, encoding: {BSA_ENCODING}, tes3: {}, tes4: {} }}",
-        tes3_module_type(),
-        tes4_module_type()
-    )
-}
+/// The generated module types the definitions declare (`Module_` plus the module path with
+/// every other character as `_`); a member may reference a module declared later in the plan.
+const BA2_MODULE_TYPE: &str = "Module__dream_archive_ba2";
+const BSA_MODULE_TYPE: &str = "Module__dream_archive_bsa";
+const TES3_MODULE_TYPE: &str = "Module__dream_archive_bsa_tes3";
+const TES4_MODULE_TYPE: &str = "Module__dream_archive_bsa_tes4";
 
 #[allow(clippy::too_many_lines)]
 fn describe_modules(d: &mut ExtensionDescriptor) {
@@ -1774,10 +1755,10 @@ fn describe_modules(d: &mut ExtensionDescriptor) {
         })
         .signature(NORMALIZE_PATH)
         .installed("ba2")
-        .signature(ba2_module_type())
+        .signature(BA2_MODULE_TYPE)
         .doc("The @dream/archive/ba2 module.")
         .installed("bsa")
-        .signature(bsa_module_type())
+        .signature(BSA_MODULE_TYPE)
         .doc("The @dream/archive/bsa module.");
 
     d.module(BA2_MODULE)
@@ -1830,10 +1811,10 @@ fn describe_modules(d: &mut ExtensionDescriptor) {
         .installed("encoding")
         .signature(BSA_ENCODING)
         .installed("tes3")
-        .signature(tes3_module_type())
+        .signature(TES3_MODULE_TYPE)
         .doc("The @dream/archive/bsa/tes3 module.")
         .installed("tes4")
-        .signature(tes4_module_type())
+        .signature(TES4_MODULE_TYPE)
         .doc("The @dream/archive/bsa/tes4 module.");
 
     d.module(TES3_MODULE)
