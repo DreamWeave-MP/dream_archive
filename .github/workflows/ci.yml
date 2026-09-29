@@ -10,12 +10,16 @@ on:
 jobs:
   build-lib:
     permissions:
+      actions: write
       contents: write
       pages: write
       id-token: write
-    uses: DreamWeave-MP/StroggForge/.github/workflows/libGlobalBuild.yml@v42
+    uses: DreamWeave-MP/StroggForge/.github/workflows/libGlobalBuild.yml@v51
     secrets: inherit
     with:
       crate_names: '["dream_archive"]'
       dependent_repo_names: '["DreamWeave-MP/dream_archivetool"]'
       generate_benchmarks: true
+      # StroggForge records each version crates.io has in content/home/mod.lock and deploys the
+      # documentation site in content/ instead of rustdoc.
+      mod_template: true
