@@ -146,6 +146,7 @@ changed = [
 ]
 fixed = [
     "`Dx10Builder::add_dds_bytes` and `add_dds_file` take DDS files whose depth field is 1, as many tools write for ordinary textures. A DDS file is a volume texture only when its flags have `DDSD_DEPTH` or its caps have `DDSCAPS2_VOLUME`.",
+    "A cubemap's extended `DX10` DDS header has an array size of 1, one cube, as the DDS format and DirectXTex count it: extraction wrote 6, which DirectXTex-based tools read as six cubes, and `add_dds_bytes` and `add_dds_file` refused cubemaps saved by texconv. Cubemaps extracted by earlier versions, which say 6 over one cube's data, are still accepted.",
 ]
 migration = """
 Compose `dream_archive::luau::ArchiveExtension` into the host's l3i `RuntimePlan`. A host that

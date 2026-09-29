@@ -561,7 +561,6 @@ fn dx10_cubemap_dds(
     let mut bytes = dx10_dds(width, height, mip_count, format, payload);
     set_u32(&mut bytes, 112, 0xFE00);
     set_u32(&mut bytes, 136, 4);
-    set_u32(&mut bytes, 140, 6);
     bytes
 }
 
@@ -927,8 +926,37 @@ fn ba2_dx10_writer_ingests_dx10_cubemap_dds() {
     let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
     let data = archive.read_file("textures/cube.dds").unwrap().unwrap();
     assert_eq!(u32::from_le_bytes(data[136..140].try_into().unwrap()), 4);
-    assert_eq!(u32::from_le_bytes(data[140..144].try_into().unwrap()), 6);
+    assert_eq!(u32::from_le_bytes(data[140..144].try_into().unwrap()), 1);
     assert_eq!(&data[148..], payload);
+}
+
+#[test]
+fn ba2_dx10_writer_counts_cubes_not_faces_in_the_dx10_array_size() {
+    let one_cube = [0x56u8; 96];
+    let mut face_count = dx10_cubemap_dds(4, 4, 1, 98, &one_cube);
+    set_u32(&mut face_count, 140, 6);
+    let mut builder = Dx10Builder::new();
+    builder
+        .add_dds_bytes("textures/face-count.dds", &face_count)
+        .unwrap();
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
+    let data = archive
+        .read_file("textures/face-count.dds")
+        .unwrap()
+        .unwrap();
+    assert_eq!(u32::from_le_bytes(data[140..144].try_into().unwrap()), 1);
+    assert_eq!(&data[148..], one_cube);
+
+    let mut six_cubes = dx10_cubemap_dds(4, 4, 1, 98, &[0x56; 96 * 6]);
+    set_u32(&mut six_cubes, 140, 6);
+    let mut two_cubes = dx10_cubemap_dds(4, 4, 1, 98, &[0x56; 96 * 2]);
+    set_u32(&mut two_cubes, 140, 2);
+    for cube_array in [six_cubes, two_cubes] {
+        assert!(matches!(
+            builder.add_dds_bytes("textures/cube-array.dds", &cube_array),
+            Err(Error::Dds("unsupported DDS array size"))
+        ));
+    }
 }
 
 #[test]
@@ -1320,7 +1348,7 @@ fn synthetic_cubemap_sets_dds_cube_metadata() {
         0xFE00
     );
     assert_eq!(u32::from_le_bytes(data[136..140].try_into().unwrap()), 4);
-    assert_eq!(u32::from_le_bytes(data[140..144].try_into().unwrap()), 6);
+    assert_eq!(u32::from_le_bytes(data[140..144].try_into().unwrap()), 1);
 }
 
 #[test]

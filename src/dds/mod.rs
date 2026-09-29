@@ -55,6 +55,7 @@ struct ParsedHeader {
     mip_count: u32,
     pixel_format: PixelFormat,
     caps2: u32,
+    array_size: u32,
     payload_offset: usize,
 }
 
@@ -130,7 +131,6 @@ struct HeaderFields {
     caps2: u32,
     dxgi_format: u32,
     misc_flags: u32,
-    array_size: u32,
 }
 
 /// Append an OpenMW-compatible DDS header for a BA2 DX10 texture record.
@@ -208,8 +208,27 @@ pub(crate) fn parse_dds_for_dx10(bytes: &[u8]) -> Result<DdsTexture<'_>> {
     let payload = bytes
         .get(parsed.payload_offset..)
         .ok_or(Error::Dds("truncated DDS payload"))?;
+    validate_array_size(parsed, header, payload.len())?;
     validate_payload_size(header, payload.len())?;
     Ok(DdsTexture { header, payload })
+}
+
+/// A DX10 header's `arraySize` counts textures, and for a cubemap whole cubes, and a BA2 holds
+/// one of either. Versions before 1.0.0 wrote a cubemap's face count, 6, there; a file that
+/// declares 6 but holds one cube's data is one of theirs.
+fn validate_array_size(
+    parsed: ParsedHeader,
+    header: TextureHeader,
+    payload_len: usize,
+) -> Result<()> {
+    let written_by_earlier_versions = parsed.array_size == 6
+        && header.flags & 1 != 0
+        && payload_len == texture_payload_size(header)?;
+    if parsed.array_size == 1 || written_by_earlier_versions {
+        Ok(())
+    } else {
+        Err(Error::Dds("unsupported DDS array size"))
+    }
 }
 
 fn parse_header(bytes: &[u8]) -> Result<ParsedHeader> {
@@ -240,13 +259,13 @@ fn parse_header(bytes: &[u8]) -> Result<ParsedHeader> {
         b_mask: read_u32_at(bytes, 100)?,
         a_mask: read_u32_at(bytes, 104)?,
     };
-    let payload_offset = if pixel_format.fourcc == fourcc(*b"DX10") {
+    let (payload_offset, array_size) = if pixel_format.fourcc == fourcc(*b"DX10") {
         if bytes.len() < 148 {
             return Err(Error::Dds("truncated DDS DX10 header"));
         }
-        148
+        (148, read_u32_at(bytes, 140)?)
     } else {
-        128
+        (128, 1)
     };
     Ok(ParsedHeader {
         height: read_u32_at(bytes, 12)?,
@@ -254,6 +273,7 @@ fn parse_header(bytes: &[u8]) -> Result<ParsedHeader> {
         mip_count: read_u32_at(bytes, 28)?.max(1),
         pixel_format,
         caps2,
+        array_size,
         payload_offset,
     })
 }
@@ -284,14 +304,8 @@ fn parse_dx10_format(bytes: &[u8], payload_offset: usize) -> Result<u8> {
     debug_assert_eq!(payload_offset, 148);
     let format = read_u32_at(bytes, 128)?;
     let dimension = read_u32_at(bytes, 132)?;
-    let array_size = read_u32_at(bytes, 140)?;
     if dimension != DDS_DIMENSION_TEXTURE2D {
         return Err(Error::Dds("unsupported DDS resource dimension"));
-    }
-    let misc_flags = read_u32_at(bytes, 136)?;
-    let cube = misc_flags & DDS_RESOURCE_MISC_TEXTURECUBE != 0;
-    if (cube && array_size != 6) || (!cube && array_size != 1) {
-        return Err(Error::Dds("unsupported DDS array size"));
     }
     let format = u8::try_from(format).map_err(|_| Error::Dds("unsupported DXGI format"))?;
     let _ = texture_layout(format)?;
@@ -484,7 +498,6 @@ fn base_fields(header: DdsHeader) -> HeaderFields {
     let mut fields = HeaderFields {
         flags: DDSD_CAPS | DDSD_PIXELFORMAT | DDSD_WIDTH | DDSD_HEIGHT | DDSD_MIPMAPCOUNT,
         caps: DDSCAPS_TEXTURE,
-        array_size: 1,
         ..HeaderFields::default()
     };
     if header.mip_count > 1 {
@@ -500,7 +513,6 @@ fn base_fields(header: DdsHeader) -> HeaderFields {
             | DDSCAPS2_POSITIVEZ
             | DDSCAPS2_NEGATIVEZ;
         fields.misc_flags = DDS_RESOURCE_MISC_TEXTURECUBE;
-        fields.array_size = 6;
     }
     fields
 }
@@ -731,7 +743,7 @@ fn emit_header(
         push_u32(out, fields.dxgi_format);
         push_u32(out, DDS_DIMENSION_TEXTURE2D);
         push_u32(out, fields.misc_flags);
-        push_u32(out, fields.array_size);
+        push_u32(out, 1);
         push_u32(out, 0);
     }
 }

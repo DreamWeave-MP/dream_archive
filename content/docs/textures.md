@@ -36,8 +36,8 @@ each chunk's size must match its mips. An archive that fails any of these does n
 Reading or extracting a DX10 entry produces a complete DDS file: a header built from the
 `TextureHeader`, followed by the chunks decoded in order. Formats the original DDS header can
 describe get it (`DXT1`, `DXT5`, RGB masks and the like); sRGB, BC6H, BC7 and integer formats get
-the extended `DX10` header, which for a cubemap gives an array size of 6. `extracted_len` counts
-the header.
+the extended `DX10` header, whose array size is 1: one texture, or for a cubemap one cube of six
+faces, as the DDS format counts them. `extracted_len` counts the header.
 
 Only what the archive stores can be put back. A DDS file that went into a BA2 comes out with the
 same pixel data, but fields the archive never kept, such as the reserved words some tools write
@@ -80,9 +80,10 @@ written. A DDS file is refused, with a `Dds` error, when:
 - it is a volume texture: its flags have `DDSD_DEPTH`, or its caps have `DDSCAPS2_VOLUME`.
   Without either, the depth field means nothing and is ignored; many tools write 1 there for
   ordinary textures;
-- its extended `DX10` header describes anything but a 2D texture with an array size of 1, or a
-  cubemap with an array size of 6. The DDS specification counts cubes, not faces, in that field,
-  so a cubemap saved by a tool that follows it, with an array size of 1, is refused;
+- its extended `DX10` header describes anything but a 2D texture or cubemap with an array size
+  of 1. That field counts cubes, not faces, so an array size of 1 is one cubemap. Versions before
+  1.0.0 wrote 6 there for a cubemap; a file that says 6 but holds one cube's data is accepted as
+  theirs;
 - its pixel format is not one of the supported formats;
 - its width or height is above 65535, or it has more than 255 mips;
 - the data after the header is not exactly as long as its dimensions, format, mips and faces
