@@ -136,3 +136,8 @@ required-features = ["ba2", "bsa-tes3", "bsa-tes4"]
 name = "luau_boundary"
 harness = false
 required-features = ["luau"]
+
+[[bench]]
+name = "core"
+harness = false
+required-features = ["ba2", "bsa-tes3", "bsa-tes4"]
