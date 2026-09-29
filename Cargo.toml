@@ -1,6 +1,6 @@
 [package]
 name = "dream_archive"
-version = "0.3.2"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.88"
 license = "GPL-3.0-only"
@@ -13,7 +13,7 @@ categories = ["game-development", "filesystem"]
 
 [dependencies]
 dream-path = "0.2"
-l3i = { path = "../dream-binder", optional = true }
+l3i = { version = "1.0.0", path = "../dream-binder", optional = true }
 encoding_rs = { version = "0.8.42", optional = true }
 flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"], optional = true }
 lz4_flex = { version = "0.14", default-features = false, optional = true }

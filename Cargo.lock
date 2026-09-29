@@ -330,7 +330,7 @@ dependencies = [
 
 [[package]]
 name = "dream_archive"
-version = "0.3.2"
+version = "1.0.0"
 dependencies = [
  "criterion",
  "dream-path",
@@ -447,7 +447,7 @@ dependencies = [
 
 [[package]]
 name = "l3i"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "cc",
  "dream-net",
