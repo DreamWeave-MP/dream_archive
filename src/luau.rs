@@ -327,10 +327,7 @@ impl Archive {
                 .get(path)
                 .ok_or_else(|| archive_error(crate::Error::FileNotFound(path.into())));
         }
-        Err(Error::runtime(format!(
-            "expected an entry handle or an archive path, got {}",
-            target.type_of().name()
-        )))
+        Err(target.type_error_expecting("an entry handle or an archive path"))
     }
 
     /// Decodes `entry` into `out`, which must hold its whole payload.
@@ -722,15 +719,12 @@ fn string_array(call: &Call<'_>, table: &Table) -> Result<Vec<Vec<u8>>> {
     call.with_frame(|frame| {
         let view = table.push_to(frame)?;
         let mut owned = Vec::with_capacity(view.raw_len());
-        for index in 1..=i64::try_from(view.raw_len()).unwrap_or(i64::MAX) {
-            frame.with_frame(|step| {
-                let value = view.raw_get_index(step, index)?;
-                if value.is_string() {
-                    owned.push(value.read::<&[u8]>()?.to_vec());
-                }
-                Ok(())
-            })?;
-        }
+        view.for_each_array(frame, |_, _, value| {
+            if value.is_string() {
+                owned.push(value.read::<&[u8]>()?.to_vec());
+            }
+            Ok(())
+        })?;
         Ok(owned)
     })
 }
