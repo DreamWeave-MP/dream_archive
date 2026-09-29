@@ -940,12 +940,16 @@ const DUMP_FRAGMENT = /* glsl */ `
   varying vec2 vUv;
   ${SCRUB}
 
+  // The cell coordinate jumps at every cell edge, so the gradients are given, not derived: a
+  // derived one would pick the coarsest mip along each edge and outline every glyph.
   float glyphAlpha(float code, vec2 cell) {
     float index = code - 32.0;
     vec2 tile = vec2(mod(index, 16.0), floor(index / 16.0));
     vec2 inner = vec2(0.06, 0.04) + cell * vec2(0.88, 0.92);
     vec2 uv = vec2((tile.x + inner.x) / 16.0, 1.0 - (tile.y + inner.y) / 6.0);
-    return texture2D(tAtlas, uv).a;
+    vec2 gradX = vec2(0.88 / (16.0 * uCell.x), 0.0);
+    vec2 gradY = vec2(0.0, 0.92 / (6.0 * uCell.y));
+    return textureGrad(tAtlas, uv, gradX, gradY).a;
   }
   float hexCode(float nibble) {
     return nibble < 10.0 ? 48.0 + nibble : 87.0 + nibble;
@@ -996,8 +1000,10 @@ const DUMP_FRAGMENT = /* glsl */ `
       weight = value >= 32.0 && value < 127.0 ? 0.72 : 0.22;
     }
     float alpha = code > 32.5 ? glyphAlpha(code, cell) : 0.0;
-    bool hot = byteIndex >= 0.0 && inside(byteIndex, uSpan);
-    bool warm = byteIndex >= 0.0 && inside(byteIndex, uSpan2);
+    float blockLeft = block * 82.0 * uCell.x - uPan.x;
+    bool whole = blockLeft >= 0.0 && blockLeft + 78.0 * uCell.x <= uResolution.x;
+    bool hot = whole && byteIndex >= 0.0 && inside(byteIndex, uSpan);
+    bool warm = whole && byteIndex >= 0.0 && inside(byteIndex, uSpan2);
     vec2 screen = gl_FragCoord.xy;
     float focus = exp(-dot(screen - uFocus.xy, screen - uFocus.xy) / max(uFocus.z * uFocus.z, 1.0));
     vec2 p = gl_FragCoord.xy;
@@ -1246,7 +1252,7 @@ function placement(root) {
     { x0: shell.left - 8, x1: shell.right + 8, y0: box.top + 6, y1: top - 10, above: true },
   ].map((region) => ({ ...region, height: Math.max(0, Math.min(region.y1 - region.y0, (region.x1 - region.x0) / ASPECT)) }));
   const best = candidates.reduce((a, b) => (b.height > a.height ? b : a));
-  const height = Math.min(best.height * 0.96, 470);
+  const height = Math.min(best.height, 470);
   const width = height * ASPECT;
   const x = best.above ? (best.x0 + best.x1) / 2 : Math.min(best.x1 - width / 2, (best.x0 + best.x1) / 2 + (best.x1 - best.x0 - width) * 0.3);
   const textBox = {
@@ -1349,6 +1355,59 @@ const SCENE_HEIGHT = 2.4;
 const CART_X = -0.82;
 const STACK = { x: 0.46, y: 0.5, pitch: 0.36, depth: 0.2, turn: -0.26, keep: 4 };
 const SECRET_WORD = 'btdx';
+
+// Everything the scene can draw, in the rig's units, at its extremes: the cartridge at every lean
+// with its lower shell dropped, the card stack and a card in flight, the lookup tag, and the
+// secret's mip chain and eruption. Points, not boxes: the camera's perspective is applied to them.
+function sceneReach() {
+  const points = [];
+  const euler = new THREE.Euler();
+  const add = (x, y, z) => points.push(new THREE.Vector3(x, y, z));
+  // The crown sways a little; the lower shell, dropped by the secret, also tilts.
+  const tilt = new THREE.Euler();
+  for (const [y, rz] of [[CART.h / 2 + 0.39, 0.015], [-CART.h / 2 - 0.07 - 0.4, 0.06]]) {
+    for (const x of [-0.53, 0.53]) for (const z of [-0.26, 0.26]) for (const sway of [-rz, rz]) {
+      tilt.set(0, 0, sway);
+      const corner = new THREE.Vector3(x, y, z).applyEuler(tilt);
+      for (const rx of [-0.17, 0, 0.17]) for (const ry of [-0.76, -0.55, -0.32, -0.1, 0.12]) {
+        euler.set(rx, ry, 0.012);
+        const v = corner.clone().applyEuler(euler);
+        add(v.x + CART_X, v.y + 0.025, v.z);
+      }
+    }
+  }
+  const cardHalf = { w: 0.61, h: 0.61 * (CARD.h / CARD.w) };
+  const cardCorners = (center, size, turn) => {
+    euler.set(0.03, turn, 0);
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+      const v = new THREE.Vector3(sx * cardHalf.w * size, sy * cardHalf.h * size, 0).applyEuler(euler);
+      add(center.x + v.x, center.y + v.y, center.z + v.z);
+    }
+  };
+  for (let k = 0; k <= STACK.keep; k++) cardCorners(new THREE.Vector3(STACK.x + k * 0.07, STACK.y - k * STACK.pitch, 0.22 - k * STACK.depth), 1 - k * 0.07, STACK.turn);
+  for (const ry of [-0.76, 0.12]) {
+    euler.set(0, ry, 0);
+    const start = new THREE.Vector3(CART.w / 2, 0.6, 0.05).applyEuler(euler);
+    start.x += CART_X;
+    const slot = new THREE.Vector3(STACK.x, STACK.y, 0.22);
+    for (let step = 0; step <= 10; step++) {
+      const out = easeOut(step / 10);
+      const at = start.clone().lerp(slot, out);
+      at.y += Math.sin(out * Math.PI) * 0.28;
+      at.z += Math.sin(out * Math.PI) * 0.4;
+      cardCorners(at, 0.3 + 0.7 * out, STACK.turn * out);
+    }
+  }
+  for (const x of [-0.85, 0.85]) for (const y of [-0.13, 0.13]) add(CART_X + 0.12 + x, -CART.h / 2 - 0.2 + y, 0.45);
+  for (const x of [-1.42, 1.3]) for (const y of [0.98, -0.86]) add(x, y, 0.62);
+  for (let i = 0; i < 24; i++) {
+    const angle = (i / 24) * Math.PI * 2;
+    const x = Math.cos(angle) * 1.1 * 1.2;
+    const z = Math.sin(angle) * 1.1 * 0.45 + 0.3;
+    for (const dx of [-0.14, 0.14]) for (const y of [-0.42, 0.84]) for (const dz of [-0.14, 0.14]) add(x + dx, y, z + dz);
+  }
+  return points;
+}
 const SECRET_LENGTH = 9.4;
 
 // The scene ------------------------------------------------------------------------------------------------
@@ -2086,6 +2145,52 @@ async function mount(root) {
   const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
   const ndc = new THREE.Vector2();
   const quality = { level: 1, slow: 0 };
+  const reach = sceneReach();
+  const projected = new THREE.Vector3();
+
+  // Places the rig so its whole reach, seen through the camera, fills the box `place` gives.
+  function fitRig() {
+    const boxWidth = place.height * ASPECT;
+    const target = { x: place.x, y: place.y, width: boxWidth, height: place.height };
+    let cx = place.x;
+    let cy = place.y;
+    const unitsPerPixel = (at) => 2 * camera.position.distanceTo(at) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / height;
+    const aim = () => {
+      ndc.set(cx / width * 2 - 1, -(cy / height * 2 - 1));
+      raycaster.setFromCamera(ndc, camera);
+      raycaster.ray.intersectPlane(plane, anchor);
+    };
+    aim();
+    scale = Math.max(0.05, place.height * unitsPerPixel(anchor) / SCENE_HEIGHT);
+    for (let pass = 0; pass < 6; pass++) {
+      rig.position.copy(anchor);
+      rig.scale.setScalar(scale);
+      rig.updateMatrixWorld(true);
+      let left = Infinity;
+      let right = -Infinity;
+      let top = Infinity;
+      let bottom = -Infinity;
+      for (const point of reach) {
+        projected.copy(point).applyMatrix4(rig.matrixWorld).project(camera);
+        const px = (projected.x + 1) / 2 * width;
+        const py = (1 - projected.y) / 2 * height;
+        left = Math.min(left, px);
+        right = Math.max(right, px);
+        top = Math.min(top, py);
+        bottom = Math.max(bottom, py);
+      }
+      const k = Math.min(target.width / (right - left), target.height / (bottom - top));
+      const settled = pass >= 3 && Math.abs(k - 1) < 0.002 && Math.abs((left + right) / 2 - target.x) < 0.5 && Math.abs((top + bottom) / 2 - target.y) < 0.5;
+      if (settled) break;
+      const factor = pass < 5 ? k : Math.min(k, 1) * 0.995;
+      scale *= factor;
+      cx = target.x - ((left + right) / 2 - cx) * factor;
+      cy = target.y - ((top + bottom) / 2 - cy) * factor;
+      aim();
+    }
+    rig.position.copy(anchor);
+    rig.scale.setScalar(scale);
+  }
 
   function layout() {
     const rect = root.getBoundingClientRect();
@@ -2107,12 +2212,7 @@ async function mount(root) {
 
     place = placement(root);
     placeStill();
-    ndc.set(place.x / width * 2 - 1, -(place.y / height * 2 - 1));
-    raycaster.setFromCamera(ndc, camera);
-    raycaster.ray.intersectPlane(plane, anchor);
-    const unitsPerPixel = 2 * camera.position.distanceTo(anchor) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / height;
-    scale = Math.max(0.05, place.height * unitsPerPixel / SCENE_HEIGHT);
-    rig.scale.setScalar(scale);
+    fitRig();
     const cellPx = Math.max(7, Math.min(10, width / 150)) * dpr;
     dumpUniforms.uCell.value.set(cellPx, cellPx * 1.78);
     dumpUniforms.uResolution.value.set(w, h);
@@ -2254,9 +2354,7 @@ async function mount(root) {
     if (!reduceMotion) secret += dt;
     const t = secret;
     const open = ease(window01(t, 0.25, 1.0)) - ease(window01(t, 8.2, 9.0));
-    upperShell.position.y = open * 0.16;
-    lowerShell.position.y = -open * 0.34;
-    upperShell.rotation.z = open * 0.05;
+    lowerShell.position.y = -open * 0.4;
     lowerShell.rotation.z = -open * 0.04;
     const assembled = ease(window01(t, 2.4, 3.6)) - ease(window01(t, 6.6, 7.6));
     cartridge.position.z = -0.9 * assembled;
@@ -2269,8 +2367,8 @@ async function mount(root) {
       const seed = tiles.seeds[index];
       const erupt = easeOut(window01(t, 0.8 + index * 0.006, 2.4 + index * 0.004));
       const angle = seed * Math.PI * 2 + erupt * 5.5;
-      const radius = 0.15 + erupt * (1.0 + seed * 0.5);
-      const spiral = new THREE.Vector3(Math.cos(angle) * radius * 1.2, origin.y + erupt * 1.2 - erupt * erupt * 0.45 + seed * 0.3, Math.sin(angle) * radius * 0.6 + 0.4);
+      const radius = 0.15 + erupt * (0.8 + seed * 0.15);
+      const spiral = new THREE.Vector3(Math.cos(angle) * radius * 1.2, origin.y + erupt * 1.05 - erupt * erupt * 0.4 + seed * 0.25, Math.sin(angle) * radius * 0.45 + 0.3);
       const settle = ease(window01(t, 2.6 + spec.level * 0.18 + (index % 8) * 0.025, 3.9 + spec.level * 0.18 + (index % 8) * 0.025));
       const rank = tiles.repackRank[index];
       const repack = ease(window01(t, 6.6 + rank * 0.018, 7.2 + rank * 0.018));
