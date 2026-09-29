@@ -1,12 +1,17 @@
 //! The `dream.archive` extension: the plan's declared types check with Luau's own frontend, a
-//! strict script requiring `@dream/archive` type checks, and the behaviour contracts ported
-//! from the mlua bindings hold in tagged and untagged runtimes.
+//! strict script requiring `@dream/archive` type checks (both under the `luau-analysis`
+//! feature), and the behaviour contracts ported from the mlua bindings hold in tagged and
+//! untagged runtimes.
 
+#[cfg(feature = "luau-analysis")]
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use dream_archive::luau::{ARCHIVE_KEY, Archive, ArchiveExtension, ENTRIES_KEY, ENTRY_KEY};
+#[cfg(feature = "luau-analysis")]
+use dream_archive::luau::ENTRIES_KEY;
+use dream_archive::luau::{ARCHIVE_KEY, Archive, ArchiveExtension, ENTRY_KEY};
+#[cfg(feature = "luau-analysis")]
 use l3i::analysis::{Mode, ModuleConfig, SourceCode, SourceProvider};
 use l3i::extension::{Extension, ExtensionDescriptor, RuntimePlan, RuntimePolicy};
 use l3i::{Runtime, TAG_LIMIT};
@@ -89,8 +94,10 @@ const FAILS_WITH: &str = r"
     end
 ";
 
+#[cfg(feature = "luau-analysis")]
 struct Scripts(HashMap<&'static str, &'static str>);
 
+#[cfg(feature = "luau-analysis")]
 impl SourceProvider for Scripts {
     fn read_source(&self, name: &str) -> Option<SourceCode> {
         self.0.get(name).map(|text| SourceCode {
@@ -109,6 +116,7 @@ impl SourceProvider for Scripts {
     }
 }
 
+#[cfg(feature = "luau-analysis")]
 const STRICT_SCRIPT: &str = "--!strict
 local dreamArchive = require('@dream/archive')
 local ba2 = require('@dream/archive/ba2')
@@ -147,6 +155,7 @@ local folder: integer = tes4.hash
 print(count, hit, found, data, n, other, hash, folder, dreamArchive.bsa.tes4.archiveTypes.MESHES)
 ";
 
+#[cfg(feature = "luau-analysis")]
 #[test]
 fn the_plan_type_checks_and_strict_scripts_pass() {
     let plan = plan();
@@ -442,6 +451,7 @@ fn the_archive_type_can_be_augmented() {
         .extension(ArchiveExtension)
         .finalize()
         .unwrap();
+    #[cfg(feature = "luau-analysis")]
     plan.check_definitions().unwrap();
     let runtime = Runtime::from_plan(&plan).unwrap();
     runtime

@@ -340,7 +340,11 @@ The plan renders `.d.luau` definitions for the whole surface
 (`RuntimePlan::type_definitions`), and `plan.check_definitions()` (l3i feature
 `analysis`) is the gate this crate's tests run: every member is typed in Luau's
 own checker, and a strict script that does `require("@dream/archive")` type
-checks against the module stubs.
+checks against the module stubs, indexing and iterating `archive:entries()` as
+the view declares it. That gate is the `luau-analysis` feature (`luau` plus
+`l3i/analysis`), so `cargo test --features luau` skips it and never builds the
+analysis frontend; `cargo test --features luau-analysis --test luau_api` or
+`--all-features` runs it.
 
 ### Module shape
 
