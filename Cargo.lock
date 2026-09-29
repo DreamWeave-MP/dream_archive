@@ -322,6 +322,8 @@ dependencies = [
 [[package]]
 name = "dream-path"
 version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "141f666f9371f98d5e88a37bc388413a5acc77fae4f82d8d114e0297683010de"
 dependencies = [
  "bstr",
 ]
@@ -446,6 +448,8 @@ dependencies = [
 [[package]]
 name = "l3i"
 version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "134fabf2180017b64f9d361f2e42374aed00c22257285cc5030743aa29fbc11d"
 dependencies = [
  "cc",
  "dream-net",
