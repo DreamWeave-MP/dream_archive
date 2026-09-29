@@ -24,8 +24,12 @@ const DDSD_WIDTH: u32 = 0x0000_0004;
 const DDSD_PIXELFORMAT: u32 = 0x0000_1000;
 const DDSD_MIPMAPCOUNT: u32 = 0x0002_0000;
 const DDSD_LINEARSIZE: u32 = 0x0008_0000;
+const DDSD_DEPTH: u32 = 0x0080_0000;
+const DDSD_TEXTURE_FLAGS: u32 =
+    DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT | DDSD_MIPMAPCOUNT | DDSD_LINEARSIZE;
 const DDPF_FOURCC: u32 = 0x0000_0004;
 const DDSCAPS_TEXTURE: u32 = 0x0000_1000;
+const DDSCAPS2_VOLUME: u32 = 0x0020_0000;
 const DDS_DIMENSION_TEXTURE2D: u32 = 3;
 
 fn push_u16(out: &mut Vec<u8>, value: u16) {
@@ -955,12 +959,48 @@ fn ba2_dx10_writer_rejects_dds_arrays_and_volumes() {
         Err(Error::Dds("unsupported DDS resource dimension"))
     ));
 
-    let mut legacy_volume = legacy_fourcc_dds(4, 4, 1, u32::from_le_bytes(*b"DXT1"), &[0; 8]);
-    set_u32(&mut legacy_volume, 24, 1);
+    let mut legacy_volume = legacy_fourcc_dds(4, 4, 1, u32::from_le_bytes(*b"DXT1"), &[0; 16]);
+    set_u32(&mut legacy_volume, 8, DDSD_TEXTURE_FLAGS | DDSD_DEPTH);
+    set_u32(&mut legacy_volume, 24, 2);
     assert!(matches!(
         builder.add_dds_bytes("textures/legacy-volume.dds", &legacy_volume),
         Err(Error::Dds("unsupported DDS volume texture"))
     ));
+
+    let mut caps_volume = legacy_fourcc_dds(4, 4, 1, u32::from_le_bytes(*b"DXT1"), &[0; 16]);
+    set_u32(&mut caps_volume, 24, 2);
+    set_u32(&mut caps_volume, 112, DDSCAPS2_VOLUME);
+    assert!(matches!(
+        builder.add_dds_bytes("textures/caps-volume.dds", &caps_volume),
+        Err(Error::Dds("unsupported DDS volume texture"))
+    ));
+}
+
+#[test]
+fn ba2_dx10_writer_ignores_the_depth_field_of_a_texture_that_is_not_a_volume() {
+    let payload = [0x21u8; 8];
+    let mut legacy = legacy_fourcc_dds(4, 4, 1, u32::from_le_bytes(*b"DXT1"), &payload);
+    set_u32(&mut legacy, 24, 1);
+    let mut extended = dx10_dds(4, 4, 1, 98, &[0x43; 16]);
+    set_u32(&mut extended, 24, 1);
+
+    let mut builder = Dx10Builder::new();
+    builder
+        .add_dds_bytes("textures/legacy.dds", &legacy)
+        .unwrap();
+    builder
+        .add_dds_bytes("textures/extended.dds", &extended)
+        .unwrap();
+
+    let archive = Archive::from_slice(&builder.to_vec().unwrap()).unwrap();
+    let legacy_out = archive.read_file("textures/legacy.dds").unwrap().unwrap();
+    assert_eq!(
+        u32::from_le_bytes(legacy_out[24..28].try_into().unwrap()),
+        0
+    );
+    assert_eq!(&legacy_out[128..], payload);
+    let extended_out = archive.read_file("textures/extended.dds").unwrap().unwrap();
+    assert_eq!(&extended_out[148..], [0x43; 16]);
 }
 
 #[test]

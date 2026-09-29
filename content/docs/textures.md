@@ -77,9 +77,9 @@ holding every mip. `add_dds_file` reads the file when it is called, not when the
 written. A DDS file is refused, with a `Dds` error, when:
 
 - it is not a DDS file: no `DDS ` magic, or a header or pixel-format size that is not 124 or 32;
-- its depth field is anything but 0, which is read as a volume texture even when the header's
-  flags do not say it is one. Some tools write 1 there for ordinary textures, and their files are
-  refused;
+- it is a volume texture: its flags have `DDSD_DEPTH`, or its caps have `DDSCAPS2_VOLUME`.
+  Without either, the depth field means nothing and is ignored; many tools write 1 there for
+  ordinary textures;
 - its extended `DX10` header describes anything but a 2D texture with an array size of 1, or a
   cubemap with an array size of 6. The DDS specification counts cubes, not faces, in that field,
   so a cubemap saved by a tool that follows it, with an array size of 1, is refused;

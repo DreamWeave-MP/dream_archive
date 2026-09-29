@@ -2,7 +2,10 @@ mod common;
 
 use dream_archive::{
     FileFormat,
-    ba2::{Archive, ArchiveVersion, Ba2CompressionFormat, Error, FileHeader, PayloadFormat},
+    ba2::{
+        Archive, ArchiveVersion, Ba2CompressionFormat, Dx10Builder, Error, FileHeader,
+        PayloadFormat,
+    },
 };
 use std::{fs, io::Read as _};
 use walkdir::WalkDir;
@@ -134,6 +137,42 @@ fn reconstructs_dx10_dds() {
     assert_eq!(u32::from_le_bytes(data[140..144].try_into().unwrap()), 1);
     assert_eq!(u32::from_le_bytes(data[68..72].try_into().unwrap()), 0);
     assert_eq!(u32::from_le_bytes(data[144..148].try_into().unwrap()), 0);
+}
+
+#[test]
+fn dx10_builder_ingests_a_2d_dds_whose_unused_depth_field_is_one() {
+    let source = common::ba2_fixture("dds/Fence006_1K_Roughness.dds");
+    let dds = fs::read(&source).unwrap();
+    assert_eq!(u32::from_le_bytes(dds[24..28].try_into().unwrap()), 1);
+
+    let mut builder = Dx10Builder::new();
+    builder
+        .add_dds_bytes("textures/fence_roughness.dds", &dds)
+        .unwrap();
+    builder
+        .add_dds_file("textures/fence_roughness_file.dds", &source)
+        .unwrap();
+
+    let archive = Archive::from_vec(builder.to_vec().unwrap()).unwrap();
+    for path in [
+        "textures/fence_roughness.dds",
+        "textures/fence_roughness_file.dds",
+    ] {
+        let FileHeader::DX10(texture) = archive.get(path).unwrap().file().header else {
+            panic!("expected DX10 texture header");
+        };
+        assert_eq!(
+            (
+                texture.width,
+                texture.height,
+                texture.mip_count,
+                texture.format
+            ),
+            (1024, 1024, 11, 98)
+        );
+        let data = archive.read_file(path).unwrap().unwrap();
+        assert_eq!(&data[148..], &dds[148..]);
+    }
 }
 
 #[test]

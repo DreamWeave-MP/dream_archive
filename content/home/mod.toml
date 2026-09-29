@@ -144,6 +144,9 @@ changed = [
     "zlib members inflate from the archive through one inflater per thread: a 64 KiB TES4 member reads in 18 µs instead of 68 µs.",
     "Walking entries from Luau is 5 to 23 times faster than with `mlua`, and small calls such as `contains` and `readEntry` take about half as long: 4096 TES3 entries take 0.73 ms instead of 6.15 ms.",
 ]
+fixed = [
+    "`Dx10Builder::add_dds_bytes` and `add_dds_file` take DDS files whose depth field is 1, as many tools write for ordinary textures. A DDS file is a volume texture only when its flags have `DDSD_DEPTH` or its caps have `DDSCAPS2_VOLUME`.",
+]
 migration = """
 Compose `dream_archive::luau::ArchiveExtension` into the host's l3i `RuntimePlan`. A host that
 still wants the `dreamArchive` global adds

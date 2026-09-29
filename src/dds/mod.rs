@@ -7,6 +7,7 @@ const DDSD_PITCH: u32 = 0x0000_0008;
 const DDSD_PIXELFORMAT: u32 = 0x0000_1000;
 const DDSD_MIPMAPCOUNT: u32 = 0x0002_0000;
 const DDSD_LINEARSIZE: u32 = 0x0008_0000;
+const DDSD_DEPTH: u32 = 0x0080_0000;
 
 const DDSCAPS_COMPLEX: u32 = 0x0000_0008;
 const DDSCAPS_TEXTURE: u32 = 0x0000_1000;
@@ -224,9 +225,9 @@ fn parse_header(bytes: &[u8]) -> Result<ParsedHeader> {
     if read_u32_at(bytes, 76)? != 32 {
         return Err(Error::Dds("invalid DDS pixel format size"));
     }
-    let depth = read_u32_at(bytes, 24)?;
+    let flags = read_u32_at(bytes, 8)?;
     let caps2 = read_u32_at(bytes, 112)?;
-    if depth != 0 || caps2 & DDSCAPS2_VOLUME != 0 {
+    if flags & DDSD_DEPTH != 0 || caps2 & DDSCAPS2_VOLUME != 0 {
         return Err(Error::Dds("unsupported DDS volume texture"));
     }
 
