@@ -287,6 +287,12 @@ fn parses_hash_only_tes4_index_for_hash_lookup() {
             .get_by_hash(hash_directory(b"data").0, hash_file(b"file.txt").0)
             .is_some()
     );
+    let (folder, file) = (hash_directory(b"data").0, hash_file(b"file.txt").0);
+    assert!(archive.contains_hash(folder, file));
+    assert!(!archive.contains_hash(file, folder));
+    let id = archive.get_id_by_hash(folder, file).unwrap();
+    assert_eq!(archive.get_id("DATA\\file.txt"), Some(id));
+    assert!(std::ptr::eq(archive.entry_by_id(id).unwrap(), entry));
     assert_eq!(
         archive.read_file("data/file.txt").unwrap().unwrap(),
         b"payload"

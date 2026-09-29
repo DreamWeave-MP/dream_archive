@@ -268,16 +268,32 @@ impl Archive {
         self.lookup.get(&hash).map(|&index| &self.entries[index])
     }
 
+    /// The stable id of the entry [`Self::get_by_hash`] would return.
+    #[must_use]
+    pub fn get_id_by_hash(&self, hash: FileHash) -> Option<EntryId> {
+        self.lookup.get(&hash).map(|&index| EntryId(index))
+    }
+
     /// Get an entry by path. The path is normalized using BA2 rules.
     #[must_use]
     pub fn get(&self, path: impl AsRef<[u8]>) -> Option<&Entry> {
-        let (hash, normalized) = hash_file(path.as_ref().as_bstr());
-        let index = if self.name_lookup.is_empty() {
-            self.lookup.get(&hash)
+        self.index_for_path(path.as_ref())
+            .map(|index| &self.entries[index])
+    }
+
+    /// The stable id of the entry [`Self::get`] would return.
+    #[must_use]
+    pub fn get_id(&self, path: impl AsRef<[u8]>) -> Option<EntryId> {
+        self.index_for_path(path.as_ref()).map(EntryId)
+    }
+
+    fn index_for_path(&self, path: &[u8]) -> Option<usize> {
+        let (hash, normalized) = hash_file(path.as_bstr());
+        if self.name_lookup.is_empty() {
+            self.lookup.get(&hash).copied()
         } else {
-            self.name_lookup.get(&normalized)
-        }?;
-        Some(&self.entries[*index])
+            self.name_lookup.get(&normalized).copied()
+        }
     }
 
     /// Get an entry by path, returning an error when it is absent.

@@ -189,6 +189,21 @@ impl Archive {
             .ok_or_else(|| Error::FileNotFound(BString::from(path)))
     }
 
+    /// The stable id of the entry [`Self::get`] would return.
+    #[must_use]
+    pub fn get_id(&self, path: impl AsRef<[u8]>) -> Option<EntryId> {
+        let normalized = normalize_lookup_path(path.as_ref());
+        self.lookup
+            .get(normalized.as_slice())
+            .map(|&index| EntryId(index))
+    }
+
+    /// The stable id of the entry [`Self::get_by_hash`] would return.
+    #[must_use]
+    pub fn get_id_by_hash(&self, hash: u64) -> Option<EntryId> {
+        self.hash_lookup.get(&hash).map(|&index| EntryId(index))
+    }
+
     /// Get an entry by its stored TES3 hash, the value [`Entry::hash`] and
     /// [`hash_file`](super::hash_file)`(path).0.numeric()` report. Names are not
     /// consulted, so a hash collision between two stored paths resolves to the

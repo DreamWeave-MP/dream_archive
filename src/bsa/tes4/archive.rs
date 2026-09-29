@@ -345,6 +345,25 @@ impl Archive {
             .ok_or_else(|| Error::FileNotFound(BString::from(path)))
     }
 
+    /// The stable id of the entry [`Self::get`] would return.
+    #[must_use]
+    pub fn get_id(&self, path: impl AsRef<[u8]>) -> Option<EntryId> {
+        self.index_for_path(path.as_ref())
+            .map(|&index| EntryId(index))
+    }
+
+    /// The stable id of the entry [`Self::get_by_hash`] would return.
+    #[must_use]
+    pub fn get_id_by_hash(
+        &self,
+        folder_hash: HashFields,
+        file_hash: HashFields,
+    ) -> Option<EntryId> {
+        self.hash_lookup
+            .get(&(folder_hash.numeric(), file_hash.numeric()))
+            .map(|&index| EntryId(index))
+    }
+
     /// Get an entry by TES4 folder and file hashes.
     #[must_use]
     pub fn get_by_hash(&self, folder_hash: HashFields, file_hash: HashFields) -> Option<&Entry> {

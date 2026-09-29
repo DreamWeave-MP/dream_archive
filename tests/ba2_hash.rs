@@ -56,4 +56,11 @@ fn path_lookup_uses_normalized_hashes() {
     assert_eq!(archive.get_by_hash(hash).unwrap().name(), "SampleA.png");
     let (missing, _) = hash_file(b"nothing.png".as_bstr());
     assert!(!archive.contains_hash(missing));
+    let id = archive.get_id("SampleA.PNG").unwrap();
+    assert_eq!(archive.get_id_by_hash(hash), Some(id));
+    assert!(std::ptr::eq(
+        archive.entry_by_id(id).unwrap(),
+        archive.get_by_hash(hash).unwrap()
+    ));
+    assert!(archive.get_id("nothing.png").is_none());
 }

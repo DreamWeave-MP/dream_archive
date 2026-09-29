@@ -420,4 +420,8 @@ fn tes3_entries_are_found_by_hash() {
     assert!(archive.contains_hash(hash.numeric()));
     assert!(!archive.contains_hash(hash.numeric() ^ 1));
     assert!(archive.get_by_hash(0).is_none());
+    let id = archive.get_id_by_hash(hash.numeric()).unwrap();
+    assert_eq!(archive.get_id("TEXTURES\\B.dds"), Some(id));
+    assert!(std::ptr::eq(archive.entry_by_id(id).unwrap(), entry));
+    assert!(archive.get_id("nothing").is_none());
 }
