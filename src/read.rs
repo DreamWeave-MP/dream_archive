@@ -60,6 +60,7 @@ impl<'a> Cursor<'a> {
         Ok(u32::from_le_bytes(self.bytes(4)?.try_into().unwrap()))
     }
 
+    #[cfg(any(feature = "ba2", feature = "bsa-tes4"))]
     pub(crate) fn u64(&mut self) -> Result<u64> {
         Ok(u64::from_le_bytes(self.bytes(8)?.try_into().unwrap()))
     }

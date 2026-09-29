@@ -153,6 +153,7 @@ fixed = [
     "Every family matches a lookup path the same way, with dream-path's normalization. BA2 lookups kept repeated separators and dropped a trailing one, so `meshes//door.nif` missed and `meshes/door.nif/` found a member a BSA answered the other way round; hash-only TES4 lookups missed `a//b/c.nif`. Archives without names now hash the normalized path.",
     "Luau `entry.name` is the part of the path after its last separator in every family. For a BA2 entry it was the whole stored path, the same as `entry.path`.",
     "Luau `entry.folder` is `\"\"` for an entry at the root of a TES3 archive or a BA2, as it was for TES4, instead of `nil`; `nil` means the archive stores no names.",
+    "The crate builds with only the `ba2` feature: it now enables the `lz4_flex` feature its compressor needs, which only `bsa-tes4` turned on before. Builds with one BSA family alone no longer carry dead code.",
 ]
 migration = """
 Compose `dream_archive::luau::ArchiveExtension` into the host's l3i `RuntimePlan`. A host that

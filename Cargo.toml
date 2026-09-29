@@ -26,7 +26,7 @@ walkdir = "2.5"
 
 [features]
 default = ["ba2", "bsa"]
-ba2 = ["dep:flate2", "dep:lz4_flex", "dep:memmap2"]
+ba2 = ["dep:flate2", "dep:lz4_flex", "dep:memmap2", "lz4_flex/alloc"]
 bsa = ["bsa-tes3", "bsa-tes4"]
 bsa-tes3 = ["dep:encoding_rs", "dep:memmap2"]
 bsa-tes4 = ["dep:encoding_rs", "dep:flate2", "dep:lz4_flex", "dep:memmap2", "lz4_flex/frame"]
