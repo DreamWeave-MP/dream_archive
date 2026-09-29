@@ -86,6 +86,23 @@ fn lookups(c: &mut Criterion) {
         });
     }
     group.finish();
+
+    // One hot path repeated: what a script loop pays per call without cache misses.
+    let mut group = c.benchmark_group("contains_one");
+    let hit = entry_path(7);
+    let miss = "missing/nothing.nif".to_owned();
+    for (case, path) in [("hit", &hit), ("miss", &miss)] {
+        group.bench_function(format!("ba2/{case}"), |b| {
+            b.iter(|| ba2.contains(black_box(path)))
+        });
+        group.bench_function(format!("tes3/{case}"), |b| {
+            b.iter(|| tes3.contains(black_box(path)))
+        });
+        group.bench_function(format!("tes4/{case}"), |b| {
+            b.iter(|| tes4.contains(black_box(path)))
+        });
+    }
+    group.finish();
 }
 
 fn decode(c: &mut Criterion) {
