@@ -8,3 +8,48 @@
 //
 // Token names are in sass/_tokens.sass. Prefer tokens over new selectors: they keep the
 // template's components, docs and diagrams consistent with each other.
+
+// The hero's art is static/js/dream-archive-hero.js: an archive opened, beside the text. Until its
+// first frame, and without WebGL, the script shows a still in the same place. Without JavaScript
+// the still stands to the right of the text, or above it on a phone.
+.dw-hero__art
+  > .da-hero__canvas
+    opacity: 0
+    transition: opacity .6s var(--dw-ease)
+
+  > .da-hero__still
+    position: absolute
+    object-fit: contain
+    opacity: 0
+    transition: opacity .6s var(--dw-ease)
+    pointer-events: none
+
+  &.is-placed > .da-hero__still
+    opacity: 1
+
+  &.is-live > .da-hero__canvas
+    opacity: 1
+
+  &.is-live > .da-hero__still
+    opacity: 0
+
+html:not(.dw-js) .dw-hero--art .dw-hero__art::before
+  content: ""
+  position: absolute
+  top: 50%
+  right: max(1rem, calc((100% - var(--dw-width-page)) / 2 + 1rem))
+  width: min(34rem, 42%)
+  aspect-ratio: 1.4
+  transform: translateY(-50%)
+  background: url("img/dream-archive-still.webp") center / contain no-repeat
+
+// On a phone or a tablet the text needs the width, so the archive stands above it.
+@media (max-width: 900px)
+  .dw-hero--art .dw-hero__text
+    padding-top: 15rem
+
+  html:not(.dw-js) .dw-hero--art .dw-hero__art::before
+    top: .5rem
+    right: 50%
+    width: min(21rem, 92%)
+    transform: translateX(50%)
