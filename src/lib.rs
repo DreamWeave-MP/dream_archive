@@ -20,18 +20,12 @@
 //! families can be selected with `ba2`, `bsa-tes3`, and `bsa-tes4`; `bsa` enables
 //! both BSA generations. `parallel` enables Rayon-backed bulk extraction paths.
 //!
-//! The `lua` feature exposes an embedded [`mlua`] Luau API through the
-//! `dream_archive::lua` module. It enables BA2 and BSA support, and also enables
-//! the re-exported [`dream_path`]'s Luau companion helpers. It deliberately does
-//! not choose an `mlua` runtime for ordinary library consumers; embedding
-//! applications should select that once at their own top level. The
-//! `standalone-lua` feature is for this crate's tests, examples, and documentation
-//! builds, and selects `mlua`'s Luau backend. Since 0.2.0 the bindings target
-//! Luau instead of `LuaJIT`, and every Lua-facing name is camelCase. The crate
-//! does not install a standalone C module named `dreamArchive`; the host
-//! application creates and registers the module table.
-//! Building this crate by itself with `lua` but no `mlua` runtime selected is
-//! intentionally incomplete; use `standalone-lua` for local standalone checks.
+//! The `luau` feature exposes the Luau bindings as an [l3i](https://github.com/DreamWeave-MP/l3i)
+//! extension through the [`luau`] module (`dream.archive`, module `@dream/archive`,
+//! type `dream.archive.Archive`). It enables BA2 and BSA support. The crate never
+//! creates a VM: the host composes [`luau::ArchiveExtension`] into a runtime plan
+//! and decides whether to expose the module as a global. `lua` is the old name of
+//! the same feature.
 //!
 //! # Capability summary
 //!
@@ -150,36 +144,37 @@
 //!
 //! # Luau bindings
 //!
-//! Enable the `lua` feature to build an [`mlua`]-based Luau module table:
+//! Enable the `luau` feature and compose [`luau::ArchiveExtension`] into an l3i
+//! `RuntimePlan`:
 //!
 //! ```rust
-//! # #[cfg(feature = "lua")]
-//! # fn main() -> mlua::Result<()> {
-//! let lua = mlua::Lua::new();
-//! lua.globals().set(
-//!     "dreamPath",
-//!     dream_archive::dream_path::lua::create_module(&lua)?,
-//! )?;
-//! let module = dream_archive::lua::create_module(&lua)?;
-//! lua.globals().set("dreamArchive", module)?;
+//! # #[cfg(feature = "luau")]
+//! # fn main() -> l3i::Result<()> {
+//! use l3i::Runtime;
+//! use l3i::extension::{RuntimePlan, RuntimePolicy};
 //!
-//! lua.load(r#"
+//! let plan = RuntimePlan::builder()
+//!     .policy(RuntimePolicy::new().compat_global("@dream/archive", "dreamArchive"))
+//!     .extension(dream_archive::luau::ArchiveExtension)
+//!     .finalize()?;
+//! let runtime = Runtime::from_plan(&plan)?;
+//! runtime.exec(r#"
 //!     local builder = dreamArchive.ba2.Builder.new()
 //!     builder:addBytes("meshes/example.nif", "payload")
 //!     local archive = dreamArchive.openBytes(builder:toBytes())
 //!     assert(archive:readFileRequired("meshes/example.nif") == "payload")
-//! "#).exec()?;
+//! "#)?;
 //! # Ok(())
 //! # }
-//! # #[cfg(not(feature = "lua"))]
+//! # #[cfg(not(feature = "luau"))]
 //! # fn main() {}
 //! ```
 //!
-//! Lua strings are used as byte buffers for archive paths and payloads. Host
-//! filesystem paths are the explicit exception and must be valid UTF-8 when
-//! passed through Lua. Optional reads/extractions return `nil` for missing
-//! archive members; `*Required` methods raise Lua errors. See the `lua` module
-//! documentation for the full Lua-facing contract.
+//! Lua strings are byte buffers for archive paths; payloads are Luau buffers or
+//! strings. Host filesystem paths are the explicit exception and must be valid
+//! UTF-8. Optional reads return `nil` for missing archive members; `*Required`
+//! methods raise Lua errors. See the [`luau`] module documentation for the full
+//! Lua-facing contract.
 
 #[cfg(feature = "ba2")]
 pub mod ba2;
@@ -191,8 +186,8 @@ mod builder_fs;
 mod dds;
 #[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
 mod extract;
-#[cfg(feature = "lua")]
-pub mod lua;
+#[cfg(feature = "luau")]
+pub mod luau;
 #[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
 mod read;
 #[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
@@ -200,8 +195,7 @@ mod storage;
 #[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
 mod stream;
 
-/// Re-export of the virtual path helper crate used by archive lookup and Lua
-/// companion bindings.
+/// Re-export of the virtual path helper crate used by archive lookup.
 ///
 /// Downstream embedders should use this re-export rather than adding a separate
 /// direct dependency when they only need the path API that belongs with

@@ -8,7 +8,10 @@
 use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
+use dream_archive::luau::ArchiveExtension;
 use dream_archive::{Ba2Builder, Tes3BsaBuilder, Tes4BsaBuilder};
+use l3i::Runtime;
+use l3i::extension::{RuntimePlan, RuntimePolicy};
 
 const ENTRY_COUNT: usize = 4096;
 const BIG_PAYLOAD: usize = 64 * 1024;
@@ -154,29 +157,29 @@ fn chunk(opener: &str, body: &str) -> String {
 }
 
 fn luau_boundary(c: &mut Criterion) {
-    let lua = mlua::Lua::new();
-    let module = dream_archive::lua::create_module(&lua).unwrap();
-    lua.globals().set("dreamArchive", module).unwrap();
+    let plan = RuntimePlan::builder()
+        .policy(RuntimePolicy::new().compat_global("@dream/archive", "dreamArchive"))
+        .extension(ArchiveExtension)
+        .finalize()
+        .unwrap();
+    let runtime = Runtime::from_plan(&plan).unwrap();
     for fixture in fixtures() {
-        lua.globals()
-            .set("archiveBytes", lua.create_string(&fixture.bytes).unwrap())
-            .unwrap();
+        runtime.set_global("archiveBytes", &fixture.bytes).unwrap();
         let mut group = c.benchmark_group(fixture.name);
         let (scripts, post) = if fixture.big {
             (BIG_SCRIPTS, POST_MIGRATION_BIG_SCRIPTS)
         } else {
             (SCRIPTS, POST_MIGRATION_SCRIPTS)
         };
-        for (name, body) in scripts {
-            let function: mlua::Function = lua.load(chunk(fixture.opener, body)).eval().unwrap();
-            group.bench_function(*name, |b| b.iter(|| function.call::<f64>(()).unwrap()));
-        }
-        for (name, body) in post {
-            let function: mlua::Function = lua.load(chunk(fixture.opener, body)).eval().unwrap();
-            if function.call::<f64>(()).is_err() {
+        for (name, body) in scripts.iter().chain(post) {
+            let function = runtime.load_function(&chunk(fixture.opener, body)).unwrap();
+            let stack = runtime.stack();
+            if function.invoke::<f64, _>(&stack, ()).is_err() {
                 continue;
             }
-            group.bench_function(*name, |b| b.iter(|| function.call::<f64>(()).unwrap()));
+            group.bench_function(*name, |b| {
+                b.iter(|| function.invoke::<f64, _>(&stack, ()).unwrap())
+            });
         }
         group.finish();
     }
