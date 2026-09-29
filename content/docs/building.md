@@ -81,8 +81,9 @@ bit set, as the format intends. A BA2 member forced to `Compress` in an archive 
 `None` is compressed with zlib. Asking for LZ4 in a BA2 that is not version 3 fails when it is
 written, with `NotImplemented("BA2 LZ4 writer requires version 3")`.
 
-`set_zlib_level` takes a `flate2::Compression`; the default is level 6. `flate2` is not
-re-exported, so naming a level needs `flate2` 1 in your own `Cargo.toml`.
+`set_zlib_level` takes a `flate2::Compression`; the default is level 6. `flate2` is re-exported
+as `dream_archive::flate2`, so `dream_archive::flate2::Compression::best()` names a level without
+a `flate2` dependency of your own.
 
 ```rust
 use dream_archive::{Ba2Builder, CompressionOverride, ba2::Ba2CompressionFormat};

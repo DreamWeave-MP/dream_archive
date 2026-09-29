@@ -152,6 +152,12 @@ The four builders, named at the root. [BA2 builders](@/docs/api/ba2-builders.md)
 [dream-path](https://DreamWeave-MP.github.io/dream_path/), whose normalization every lookup
 uses. Depend on it through this re-export and the versions cannot drift apart.
 
+{{ api_signature(value="pub use flate2") }}
+
+The zlib crate whose `Compression` the builders' `set_zlib_level` takes, with the `ba2` or
+`bsa-tes4` feature. `dream_archive::flate2::Compression::best()` names a level without a `flate2`
+dependency of your own.
+
 {{ api_signature(value="pub use dream_path::bstr") }}
 
 {{ api_signature(value="pub use dream_path::bstr::{BStr, BString, ByteSlice, ByteVec}") }}

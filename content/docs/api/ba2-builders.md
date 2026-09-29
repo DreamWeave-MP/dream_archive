@@ -43,7 +43,8 @@ LZ4 blocks. Writing an LZ4-compressed member into an archive that is not version
 
 {{ api_signature(value="fn set_zlib_level(&mut self, level: Compression) -> &mut Self") }}
 
-The `flate2::Compression` level for zlib.
+The `flate2::Compression` level for zlib, 6 unless set. `flate2` is re-exported as
+`dream_archive::flate2`.
 
 {{ api_signature(value="fn len(&self) -> usize") }}
 

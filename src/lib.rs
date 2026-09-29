@@ -211,6 +211,12 @@ mod stream;
 /// `dream_archive`.
 pub use dream_path;
 
+/// Re-export of the zlib crate whose [`flate2::Compression`] the builders'
+/// `set_zlib_level` takes, so naming a level needs no direct dependency on a
+/// matching `flate2`: `dream_archive::flate2::Compression::best()`.
+#[cfg(any(feature = "ba2", feature = "bsa-tes4"))]
+pub use flate2;
+
 use std::io::{self, Read};
 
 /// Makes a deep copy of the input in APIs that support owned data.

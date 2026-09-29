@@ -73,7 +73,8 @@ How paths are stored. An embedded mode fails at write time on version 103.
 
 {{ api_signature(value="fn set_zlib_level(&mut self, level: Compression) -> &mut Self") }}
 
-The `flate2::Compression` level for versions 103 and 104.
+The `flate2::Compression` level for versions 103 and 104, 6 unless set. `flate2` is
+re-exported as `dream_archive::flate2`.
 
 {{ api_signature(value="fn len(&self) -> usize") }}
 

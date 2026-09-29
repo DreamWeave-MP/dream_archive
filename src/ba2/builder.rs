@@ -99,6 +99,8 @@ impl Builder {
         self.zlib_level
     }
 
+    /// The level zlib compresses members at, 6 unless set. [`Compression`] is
+    /// `flate2`'s, re-exported as `dream_archive::flate2`.
     pub fn set_zlib_level(&mut self, level: Compression) -> &mut Self {
         self.zlib_level = level;
         self

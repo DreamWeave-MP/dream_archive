@@ -338,6 +338,33 @@ fn writes_ba2_v3_archive_from_bytes() {
 }
 
 #[test]
+fn ba2_builders_take_a_zlib_level_named_through_the_crate() {
+    use dream_archive::flate2::Compression as ZlibLevel;
+
+    let payload = b"payload ".repeat(512);
+    let written = |level: ZlibLevel| {
+        let mut builder = Builder::new();
+        builder
+            .set_compression(Some(Ba2CompressionFormat::Zip))
+            .set_zlib_level(level);
+        builder.add_bytes("data/file.txt", &payload).unwrap();
+        builder.to_vec().unwrap()
+    };
+    let fastest = written(ZlibLevel::none());
+    let best = written(ZlibLevel::best());
+    assert!(best.len() < fastest.len());
+    let archive = Archive::from_vec(best).unwrap();
+    assert_eq!(
+        archive.read_file("data/file.txt").unwrap().unwrap(),
+        payload
+    );
+
+    let mut dx10 = Dx10Builder::new();
+    dx10.set_zlib_level(ZlibLevel::best());
+    assert_eq!(dx10.zlib_level(), ZlibLevel::best());
+}
+
+#[test]
 fn writes_zlib_compressed_ba2_gnrl_archive() {
     let mut builder = Builder::new();
     builder.set_compression(Some(Ba2CompressionFormat::Zip));

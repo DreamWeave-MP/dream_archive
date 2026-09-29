@@ -658,6 +658,28 @@ fn string_tables_take_precedence_over_disagreeing_embedded_names() {
 }
 
 #[test]
+fn tes4_builder_takes_a_zlib_level_named_through_the_crate() {
+    use dream_archive::flate2::Compression as ZlibLevel;
+
+    let payload = b"payload ".repeat(512);
+    let written = |level: ZlibLevel| {
+        let mut builder = Builder::new();
+        builder.set_compressed(true);
+        builder.set_zlib_level(level);
+        builder.add_bytes("data/file.txt", &payload).unwrap();
+        builder.to_vec().unwrap()
+    };
+    let fastest = written(ZlibLevel::none());
+    let best = written(ZlibLevel::best());
+    assert!(best.len() < fastest.len());
+    let archive = Archive::from_vec(best).unwrap();
+    assert_eq!(
+        archive.read_file("data/file.txt").unwrap().unwrap(),
+        payload
+    );
+}
+
+#[test]
 fn writes_compressed_embedded_name_tes4_archive() {
     let mut builder = Builder::new();
     builder.set_compressed(true);
