@@ -418,15 +418,10 @@ impl Entry {
 
     fn name(&self) -> Option<&[u8]> {
         match self.row() {
-            Row::Ba2(_, entry) => (!entry.name().is_empty()).then(|| entry.name().as_bytes()),
-            Row::Tes3(_, entry) => {
-                let path = entry.path().as_bytes();
-                let start = path
-                    .iter()
-                    .rposition(|byte| matches!(byte, b'/' | b'\\'))
-                    .map_or(0, |pos| pos + 1);
-                Some(&path[start..])
+            Row::Ba2(_, entry) => {
+                (!entry.name().is_empty()).then(|| last_component(entry.name().as_bytes()))
             }
+            Row::Tes3(_, entry) => Some(last_component(entry.path().as_bytes())),
             Row::Tes4(_, entry) => entry.name().map(|name| name.as_bytes()),
         }
     }
@@ -510,6 +505,15 @@ impl Entry {
             _ => None,
         }
     }
+}
+
+/// The part of a stored path after its last separator.
+fn last_component(path: &[u8]) -> &[u8] {
+    let start = path
+        .iter()
+        .rposition(|byte| matches!(byte, b'/' | b'\\'))
+        .map_or(0, |pos| pos + 1);
+    &path[start..]
 }
 
 struct IndexField;
@@ -1147,7 +1151,8 @@ fn describe_entry(d: &mut ExtensionDescriptor) {
         .doc("Raw archive path bytes; nil for hash-only entries.");
     entry
         .getter("name", |e: &Entry| e.name().map(<[u8]>::to_vec))
-        .signature("string?");
+        .signature("string?")
+        .doc("The path after its last separator; nil for hash-only entries.");
     entry
         .getter("folder", |e: &Entry| e.folder().map(<[u8]>::to_vec))
         .signature("string?");

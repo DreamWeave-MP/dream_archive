@@ -235,9 +235,32 @@ fn builds_and_reads_ba2_through_the_top_level_module() {
         local ba2 = dreamArchive.ba2.openBytes(bytes)
         assert(ba2:info().format == "gnrl")
         assert(ba2:entries()[1].path == "meshes\\foo.nif")
-        assert(ba2:entries()[1].name == "meshes\\foo.nif")
+        assert(ba2:entries()[1].name == "foo.nif")
         assert(ba2:entries()[1].folder == "meshes")
         assert(tostring(archive):find("dream.archive.Archive(ba2", 1, true))
+    "#);
+}
+
+#[test]
+fn entry_names_are_the_last_path_component_in_every_family() {
+    run(r#"
+        local builders = {
+            dreamArchive.bsa.tes3.Builder.new(),
+            dreamArchive.bsa.tes4.Builder.new(),
+            dreamArchive.ba2.Builder.new(),
+        }
+        for _, builder in builders do
+            builder:addBytes("Meshes/X/Foo.NIF", "nested")
+            builder:addBytes("readme.txt", "root")
+            local archive = dreamArchive.openBytes(builder:toBytes())
+            local nested = archive:get("meshes/x/foo.nif")
+            local root = archive:get("readme.txt")
+            local format = archive:format()
+            assert(nested.path == "meshes\\x\\foo.nif", format)
+            assert(nested.name == "foo.nif", format .. ": " .. tostring(nested.name))
+            assert(nested.folder == "meshes\\x", format .. ": " .. tostring(nested.folder))
+            assert(root.name == "readme.txt", format .. ": " .. tostring(root.name))
+        end
     "#);
 }
 
