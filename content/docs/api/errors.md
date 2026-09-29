@@ -102,7 +102,6 @@ Shared by TES3 and TES4, and re-exported from `bsa::tes3` and `bsa::tes4`.
 | `DuplicatePath` | duplicate normalized archive path | a builder was given a path it already has |
 | `FileNotFound(BString)` | archive member not found: *path* | a `_required` call found nothing |
 | `FilenameEncoding(FilenameEncodeError)` | filename can not be represented losslessly as *encoding* | `add_encoded_path` got text the code page cannot hold |
-| `InvalidFileRecordFlags(u32)` | invalid or unsupported file record flags: *0x…* | never returned by this version |
 | `NotImplemented(&'static str)` | support for this feature is not implemented: *feature* | `TES4 Xbox archive layout` and `TES4 XMem compression` when an archive opens or a member is read; `TES4 embedded file names require version 104 or 105` when a builder writes |
 | `Io(io::Error)` | *error*'s | reading, writing, or an extraction path that is unsafe |
 

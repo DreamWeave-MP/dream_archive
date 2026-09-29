@@ -71,7 +71,6 @@ pub enum Error {
     ArchivePathsUnavailable,
     DuplicatePath,
     FileNotFound(crate::BString),
-    InvalidFileRecordFlags(u32),
     IntegralTruncation,
     Capacity,
     DecompressionSizeMismatch { expected: usize, actual: usize },
@@ -105,9 +104,6 @@ impl fmt::Display for Error {
             }
             Self::DuplicatePath => f.write_str("duplicate normalized archive path"),
             Self::FileNotFound(path) => write!(f, "archive member not found: {path}"),
-            Self::InvalidFileRecordFlags(value) => {
-                write!(f, "invalid or unsupported file record flags: {value:#010x}")
-            }
             Self::IntegralTruncation => {
                 f.write_str("archive integer field can not fit on this platform")
             }

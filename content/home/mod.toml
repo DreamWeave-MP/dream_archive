@@ -133,6 +133,7 @@ breaking = [
     "Every `open*` in Luau returns the one `Archive` type; `archive:entries()` is a view of entry handles, not a table of tables.",
     "Luau entry hashes are integers: `entry.hash` and `entry.folderHash` replace the old tables and fields, with `hashHex` and `folderHashHex` for the hex spelling. BA2 hashes are `directoryHash`, `fileHash` and `extensionHash`; sizes and offsets are `size`, `storedSize` and `offset` on every format.",
     "Luau integer arguments must be exact: `readEntry(1.5)` is an error instead of a rounded read.",
+    "`bsa::Error::InvalidFileRecordFlags` is gone. Nothing returned it: both flag bits of a TES4 file record are read as the format defines them.",
 ]
 added = [
     "`get_by_hash`, `get_id_by_hash` and `contains_hash` on every archive family, `get_id` by path, and `HashFields::from_numeric`.",
