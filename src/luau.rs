@@ -757,6 +757,7 @@ impl Extension for ArchiveExtension {
         describe_archive(d);
         describe_entry(d);
         d.sequence::<Entries>(ENTRIES_KEY)
+            .item_type("dream_archive_Entry")
             .tag(TagPolicy::Never)
             .doc("The entries of an archive: `#`, `[i]`, `for`, `:toTable()`.");
         describe_ba2_builders(d);

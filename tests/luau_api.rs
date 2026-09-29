@@ -118,11 +118,15 @@ builder:addBytes('meshes/example.nif', buffer.create(4))
 local archive = dreamArchive.openBytes(builder:toBytes())
 local other = ba2.openPath('x.ba2')
 local entries = archive:entries()
--- A sequence view's `#`, `[i]`, and `for` are metamethods the generated definitions do not
--- declare; strict code materialises or casts.
-local rows = entries:toTable()
-local first: dream_archive_Entry? = rows[1]
-local count: number = #rows + archive:len()
+-- The view declares its element type: `#`, `[i]`, and `for` type check without `:toTable()`.
+local first: dream_archive_Entry? = entries[1]
+local count: number = #entries + archive:len()
+for i, row in entries do
+    local position: number = i + row.index
+    count += position
+end
+local rows: { dream_archive_Entry } = entries:toTable()
+count += #rows
 local hit: boolean = archive:contains('meshes/example.nif') and archive:containsHash(1, 2, 3)
 local found = archive:getByHash(1, 2, 3)
 local data: string? = archive:readFile('meshes/example.nif')
