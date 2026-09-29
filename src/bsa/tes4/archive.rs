@@ -774,17 +774,7 @@ impl Archive {
             return Err(Error::OutOfBounds);
         };
         let expected = u32::from_le_bytes(*expected_bytes).try_into()?;
-        let before = out.len();
-        let mut decoder = ZlibDecoder::new(compressed);
-        read_decompressed(&mut decoder, expected, out, |error| {
-            Error::Zlib(error.to_string())
-        })?;
-        if decoder.total_in() == u64::try_from(compressed.len())? {
-            Ok(())
-        } else {
-            out.truncate(before);
-            Err(Error::TrailingCompressedData)
-        }
+        crate::inflate::inflate_exact(compressed, expected, out).map_err(inflate_error)
     }
 
     fn decompress_entry_to_writer(
@@ -802,17 +792,10 @@ impl Archive {
             return Err(Error::OutOfBounds);
         };
         let expected = u32::from_le_bytes(*expected_bytes).try_into()?;
-        let mut decoder = ZlibDecoder::new(compressed);
         let mut buffer = Vec::new();
-        read_decompressed(&mut decoder, expected, &mut buffer, |error| {
-            Error::Zlib(error.to_string())
-        })?;
-        if decoder.total_in() == u64::try_from(compressed.len())? {
-            out.write_all(&buffer)?;
-            Ok(buffer.len().try_into()?)
-        } else {
-            Err(Error::TrailingCompressedData)
-        }
+        crate::inflate::inflate_exact(compressed, expected, &mut buffer).map_err(inflate_error)?;
+        out.write_all(&buffer)?;
+        Ok(buffer.len().try_into()?)
     }
 
     fn extract_entry_streaming(&self, entry: &Entry, mut out: impl std::io::Write) -> Result<u64> {
@@ -849,6 +832,17 @@ impl Archive {
         } else {
             Err(Error::TrailingCompressedData)
         }
+    }
+}
+
+fn inflate_error(error: crate::inflate::InflateError) -> Error {
+    match error {
+        crate::inflate::InflateError::Corrupt(message) => Error::Zlib(message),
+        crate::inflate::InflateError::SizeMismatch { expected, actual } => {
+            Error::DecompressionSizeMismatch { expected, actual }
+        }
+        crate::inflate::InflateError::Trailing => Error::TrailingCompressedData,
+        crate::inflate::InflateError::Capacity => Error::Capacity,
     }
 }
 

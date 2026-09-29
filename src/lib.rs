@@ -186,6 +186,8 @@ mod builder_fs;
 mod dds;
 #[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
 mod extract;
+#[cfg(any(feature = "ba2", feature = "bsa-tes4"))]
+mod inflate;
 #[cfg(feature = "luau")]
 pub mod luau;
 #[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]

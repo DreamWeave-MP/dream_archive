@@ -94,14 +94,7 @@ impl Chunk {
         let before = out.len();
         match compression {
             Ba2CompressionFormat::Zip => {
-                let mut decoder = ZlibDecoder::new(stored);
-                read_decompressed(&mut decoder, expected, out, |error| {
-                    Error::Zlib(error.to_string())
-                })?;
-                if decoder.total_in() != u64::try_from(stored.len())? {
-                    out.truncate(before);
-                    return Err(Error::TrailingCompressedData);
-                }
+                return crate::inflate::inflate_exact(stored, expected, out).map_err(inflate_error);
             }
             Ba2CompressionFormat::LZ4 => {
                 out.try_reserve_exact(expected)?;
@@ -141,17 +134,11 @@ impl Chunk {
         let expected: usize = self.size.try_into()?;
         match compression {
             Ba2CompressionFormat::Zip => {
-                let mut decoder = ZlibDecoder::new(stored);
                 let mut buffer = Vec::new();
-                read_decompressed(&mut decoder, expected, &mut buffer, |error| {
-                    Error::Zlib(error.to_string())
-                })?;
-                if decoder.total_in() == u64::try_from(stored.len())? {
-                    out.write_all(&buffer)?;
-                    Ok(buffer.len().try_into()?)
-                } else {
-                    Err(Error::TrailingCompressedData)
-                }
+                crate::inflate::inflate_exact(stored, expected, &mut buffer)
+                    .map_err(inflate_error)?;
+                out.write_all(&buffer)?;
+                Ok(buffer.len().try_into()?)
             }
             Ba2CompressionFormat::LZ4 => {
                 let mut buffer = Vec::new();
@@ -212,25 +199,14 @@ impl Chunk {
     }
 }
 
-fn read_decompressed(
-    decoder: &mut impl std::io::Read,
-    expected: usize,
-    out: &mut Vec<u8>,
-    map_error: impl FnOnce(std::io::Error) -> Error,
-) -> Result<()> {
-    let before = out.len();
-    out.try_reserve_exact(expected)?;
-    let mut limited = decoder.take(expected as u64 + 1);
-    if let Err(error) = limited.read_to_end(out) {
-        out.truncate(before);
-        return Err(map_error(error));
-    }
-    let actual = out.len() - before;
-    if actual == expected {
-        Ok(())
-    } else {
-        out.truncate(before);
-        Err(Error::DecompressionSizeMismatch { expected, actual })
+fn inflate_error(error: crate::inflate::InflateError) -> Error {
+    match error {
+        crate::inflate::InflateError::Corrupt(message) => Error::Zlib(message),
+        crate::inflate::InflateError::SizeMismatch { expected, actual } => {
+            Error::DecompressionSizeMismatch { expected, actual }
+        }
+        crate::inflate::InflateError::Trailing => Error::TrailingCompressedData,
+        crate::inflate::InflateError::Capacity => Error::Capacity,
     }
 }
 
