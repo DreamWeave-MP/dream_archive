@@ -34,5 +34,4 @@ rustflags = ["-Clinker-plugin-lto", "-Clinker=lld-link"]
 # names: the campaign builds against the sibling checkouts. Delete this table once the registry
 # releases are authoritative; the manifest never changes.
 [patch.crates-io]
-l3i = { path = "../dream-binder" }
 dream-path = { path = "../dream-path" }
