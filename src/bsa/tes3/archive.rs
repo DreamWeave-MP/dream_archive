@@ -1,5 +1,8 @@
 use super::{Error, Result, parser};
-use crate::bsa::{FilenameEncoding, NormalizedPath, decode_filename_lossy, normalize_lookup_path};
+use crate::bsa::{
+    FilenameEncoding, NormalizedPath, decode_filename_lossy, normalize_lookup_path,
+    with_lookup_path,
+};
 use crate::{BStr, BString};
 use crate::{
     Copied,
@@ -164,10 +167,8 @@ impl Archive {
 
     #[must_use]
     pub fn get(&self, path: impl AsRef<[u8]>) -> Option<&Entry> {
-        let normalized = normalize_lookup_path(path.as_ref());
-        self.lookup
-            .get(normalized.as_slice())
-            .map(|&index| &self.entries[index])
+        self.index_for_path(path.as_ref())
+            .map(|index| &self.entries[index])
     }
 
     /// Get an entry by a path that was normalized once for repeated lookup.
@@ -192,10 +193,11 @@ impl Archive {
     /// The stable id of the entry [`Self::get`] would return.
     #[must_use]
     pub fn get_id(&self, path: impl AsRef<[u8]>) -> Option<EntryId> {
-        let normalized = normalize_lookup_path(path.as_ref());
-        self.lookup
-            .get(normalized.as_slice())
-            .map(|&index| EntryId(index))
+        self.index_for_path(path.as_ref()).map(EntryId)
+    }
+
+    fn index_for_path(&self, path: &[u8]) -> Option<usize> {
+        with_lookup_path(path, |normalized| self.lookup.get(normalized).copied())
     }
 
     /// The stable id of the entry [`Self::get_by_hash`] would return.

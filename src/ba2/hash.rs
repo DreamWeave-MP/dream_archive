@@ -98,8 +98,53 @@ pub fn hash_file_in_place(path: &mut BString) -> FileHash {
         path.clear();
         path.push(b'.');
     }
+    hash_normalized(path)
+}
 
-    let bytes = path.as_bstr();
+/// The longest normalized BA2 path; anything longer hashes as `.`.
+const MAX_NORMALIZED: usize = 259;
+
+/// Runs `body` on the normalized form of `path` and its hash without allocating: the same
+/// result as [`hash_file`], computed in a stack buffer (a normalized path is at most
+/// [`MAX_NORMALIZED`] bytes, so the buffer always suffices).
+pub(crate) fn with_normalized<R>(path: &[u8], body: impl FnOnce(&[u8], FileHash) -> R) -> R {
+    let mut stack = [0u8; MAX_NORMALIZED];
+    let mut len = 0;
+    // Separators are written only when a name byte follows them, which drops leading and
+    // trailing runs exactly as the in-place form does.
+    let mut pending_separators = 0usize;
+    let mut too_long = false;
+    for &byte in path {
+        let byte = normalize_byte(byte);
+        if byte == b'\\' {
+            if len != 0 {
+                pending_separators += 1;
+            }
+            continue;
+        }
+        if len + pending_separators + 1 > MAX_NORMALIZED {
+            too_long = true;
+            break;
+        }
+        for _ in 0..pending_separators {
+            stack[len] = b'\\';
+            len += 1;
+        }
+        pending_separators = 0;
+        stack[len] = byte;
+        len += 1;
+    }
+    let normalized: &[u8] = if too_long || len == 0 {
+        b"."
+    } else {
+        &stack[..len]
+    };
+    body(normalized, hash_normalized(normalized))
+}
+
+/// The hash of an already normalized path.
+fn hash_normalized(bytes: &[u8]) -> FileHash {
+    let bytes = bytes.as_bstr();
     let stem_pos = bytes.iter().rposition(|&b| b == b'\\');
     let parent = stem_pos.map_or(&[][..], |pos| &bytes[..pos]);
     let first = stem_pos.map_or(0, |pos| pos + 1);
@@ -140,5 +185,41 @@ impl From<&[u8]> for FileHash {
 impl From<&str> for FileHash {
     fn from(value: &str) -> Self {
         Self::from(value.as_bytes())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{hash_file, with_normalized};
+    use crate::ByteSlice as _;
+
+    #[test]
+    fn stack_normalisation_matches_the_owned_form() {
+        let long = format!("{}.nif", "a".repeat(300));
+        let cases = [
+            "",
+            "\\",
+            "\\\\Meshes//Foo.NIF\\\\",
+            "Textures\\CreationClub\\BGSFO4001\\AnimObjects\\PipBoy\\PipBoy02(Black)_d.DDS",
+            "no_extension",
+            ".hidden",
+            "dir\\.hidden",
+            "a\\b\\c.longext",
+            long.as_str(),
+            "\\\\\\",
+        ];
+        for case in cases {
+            let (expected_hash, expected) = hash_file(case.as_bytes().as_bstr());
+            with_normalized(case.as_bytes(), |normalized, hash| {
+                assert_eq!(normalized, expected.as_slice(), "{case:?}");
+                assert_eq!(hash, expected_hash, "{case:?}");
+            });
+        }
+        let trimmed = format!("{}{}", "a".repeat(259), "\\".repeat(50));
+        let (expected_hash, expected) = hash_file(trimmed.as_bytes().as_bstr());
+        with_normalized(trimmed.as_bytes(), |normalized, hash| {
+            assert_eq!(normalized, expected.as_slice());
+            assert_eq!(hash, expected_hash);
+        });
     }
 }

@@ -1,7 +1,7 @@
 use super::{Error, HashFields, Result, hash_directory, hash_file, parser};
 use crate::bsa::{
     FilenameEncoding, NormalizedPath, decode_filename_lossy, normalize_lookup_path,
-    normalize_lookup_path_into,
+    with_lookup_path,
 };
 use crate::{BStr, BString};
 use crate::{
@@ -583,10 +583,9 @@ impl Archive {
         let mut output_path = PathBuf::new();
         let mut last_parent = PathBuf::new();
         let mut extracted = HashSet::new();
-        let mut normalized = Vec::new();
         for path in paths {
             let path = path.as_ref();
-            let Some(&index) = self.index_for_path_with_scratch(path, &mut normalized) else {
+            let Some(&index) = self.index_for_path(path) else {
                 continue;
             };
             if !extracted.insert(index) {
@@ -735,24 +734,10 @@ impl Archive {
     }
 
     fn index_for_path(&self, path: &[u8]) -> Option<&usize> {
-        let normalized = normalize_lookup_path(path);
         if self.lookup.is_empty() {
             self.hash_lookup.get(&path_hash(path))
         } else {
-            self.lookup.get(normalized.as_slice())
-        }
-    }
-
-    fn index_for_path_with_scratch<'a>(
-        &'a self,
-        path: &[u8],
-        normalized: &mut Vec<u8>,
-    ) -> Option<&'a usize> {
-        normalize_lookup_path_into(normalized, path);
-        if self.lookup.is_empty() {
-            self.hash_lookup.get(&path_hash(path))
-        } else {
-            self.lookup.get(normalized.as_slice())
+            with_lookup_path(path, |normalized| self.lookup.get(normalized))
         }
     }
 

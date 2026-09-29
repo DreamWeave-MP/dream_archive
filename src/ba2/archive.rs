@@ -288,12 +288,13 @@ impl Archive {
     }
 
     fn index_for_path(&self, path: &[u8]) -> Option<usize> {
-        let (hash, normalized) = hash_file(path.as_bstr());
-        if self.name_lookup.is_empty() {
-            self.lookup.get(&hash).copied()
-        } else {
-            self.name_lookup.get(&normalized).copied()
-        }
+        super::hash::with_normalized(path, |normalized, hash| {
+            if self.name_lookup.is_empty() {
+                self.lookup.get(&hash).copied()
+            } else {
+                self.name_lookup.get(normalized).copied()
+            }
+        })
     }
 
     /// Get an entry by path, returning an error when it is absent.

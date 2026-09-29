@@ -54,8 +54,53 @@ pub use dream_path::NormalizedPath;
 pub use encoding::{FilenameEncodeError, FilenameEncoding, decode_filename_lossy, encode_filename};
 
 use dream_path::normalize_path as normalize_lookup_path;
-#[cfg(feature = "bsa-tes4")]
-use dream_path::normalize_path_into as normalize_lookup_path_into;
+
+/// Runs `body` on the lookup-normalized form of `path` (the [`dream_path`] rules: `\\` to
+/// `/`, ASCII lowercase, leading and repeated separators dropped) without allocating for
+/// paths up to 512 bytes, which is every archive path in practice.
+pub(crate) fn with_lookup_path<R>(path: &[u8], body: impl FnOnce(&[u8]) -> R) -> R {
+    let mut stack = [0u8; 512];
+    if path.len() > stack.len() {
+        return body(&normalize_lookup_path(path));
+    }
+    let mut len = 0;
+    for &byte in path {
+        let byte = match byte {
+            b'\\' => b'/',
+            b'A'..=b'Z' => byte + 32,
+            _ => byte,
+        };
+        if byte == b'/' && (len == 0 || stack[len - 1] == b'/') {
+            continue;
+        }
+        stack[len] = byte;
+        len += 1;
+    }
+    body(&stack[..len])
+}
+
+#[cfg(test)]
+mod lookup_path_tests {
+    use super::with_lookup_path;
+
+    #[test]
+    fn matches_dream_path_for_every_length() {
+        let long = "A\\".repeat(400);
+        for path in [
+            "",
+            "/",
+            "\\\\Meshes//Foo.NIF",
+            "a/b/",
+            "MIXED\\Case/x.dds",
+            long.as_str(),
+        ] {
+            let expected = dream_path::normalize_path(path.as_bytes());
+            with_lookup_path(path.as_bytes(), |normalized| {
+                assert_eq!(normalized, expected.as_slice(), "{path}");
+            });
+        }
+    }
+}
 use std::{collections::TryReserveError, fmt, io, num::TryFromIntError};
 
 /// Result type for BSA operations.
