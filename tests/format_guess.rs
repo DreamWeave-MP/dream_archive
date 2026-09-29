@@ -186,6 +186,73 @@ fn top_level_hash_only_tes4_entry_has_no_path() {
     );
 }
 
+#[cfg(all(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
+#[test]
+fn top_level_lookups_match_a_path_the_same_way_in_every_family() {
+    let mut tes3 = dream_archive::Tes3BsaBuilder::new();
+    tes3.add_bytes("meshes/x/door.nif", b"tes3").unwrap();
+    let mut tes4 = dream_archive::Tes4BsaBuilder::new();
+    tes4.add_bytes("meshes/x/door.nif", b"tes4").unwrap();
+    let mut hash_only_tes4 = dream_archive::Tes4BsaBuilder::new();
+    hash_only_tes4.set_name_mode(dream_archive::bsa::tes4::NameMode::HashOnly);
+    hash_only_tes4
+        .add_bytes("meshes/x/door.nif", b"hash-only tes4")
+        .unwrap();
+    let mut ba2 = dream_archive::Ba2Builder::new();
+    ba2.add_bytes("meshes/x/door.nif", b"ba2").unwrap();
+    let archives = [
+        dream_archive::Archive::from_vec(tes3.to_vec().unwrap()).unwrap(),
+        dream_archive::Archive::from_vec(tes4.to_vec().unwrap()).unwrap(),
+        dream_archive::Archive::from_vec(hash_only_tes4.to_vec().unwrap()).unwrap(),
+        dream_archive::Archive::from_vec(ba2.to_vec().unwrap()).unwrap(),
+    ];
+    for (index, archive) in archives.iter().enumerate() {
+        for found in [
+            "meshes/x/door.nif",
+            r"\Meshes\X\DOOR.NIF",
+            "meshes//x//door.nif",
+            r"//meshes\\x/door.nif",
+        ] {
+            assert!(
+                archive.read_file(found).unwrap().is_some(),
+                "archive {index}: {found}"
+            );
+        }
+        for missing in [
+            "meshes/x/door.nif/",
+            r"meshes\x\door.nif\",
+            "meshes/x/door",
+            "",
+        ] {
+            assert!(
+                archive.read_file(missing).unwrap().is_none(),
+                "archive {index}: {missing}"
+            );
+        }
+    }
+
+    let stringless_ba2 = dream_archive::ba2::Archive::open_path(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/ba2/missing_string_table/in.ba2"
+    ))
+    .unwrap();
+    for found in [
+        "misc/example.txt",
+        r"\MISC\Example.TXT",
+        "misc//example.txt",
+    ] {
+        assert!(stringless_ba2.contains(found), "{found}");
+    }
+    for missing in [
+        "misc/example.txt/",
+        r"misc\example.txt\",
+        "misc/example",
+        "",
+    ] {
+        assert!(!stringless_ba2.contains(missing), "{missing}");
+    }
+}
+
 #[cfg(feature = "ba2")]
 #[test]
 fn top_level_required_read_reports_missing_member() {

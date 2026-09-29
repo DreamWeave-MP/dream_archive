@@ -48,7 +48,8 @@ fn hash_normalization_edges_are_stable() {
 #[test]
 fn path_lookup_uses_normalized_hashes() {
     let archive = Archive::open_path(common::ba2_fixture("next_gen/gnrl_v8.ba2")).unwrap();
-    assert!(archive.contains("/LICENSE.TXT\\"));
+    assert!(archive.contains("/LICENSE.TXT"));
+    assert!(!archive.contains("LICENSE.TXT\\"));
     assert!(archive.contains("samplea.png"));
     assert!(archive.contains("SampleA.PNG"));
     let (hash, _) = hash_file(b"SampleA.PNG".as_bstr());

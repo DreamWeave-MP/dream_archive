@@ -1,6 +1,5 @@
-use super::{
-    ArchiveVersion, Ba2CompressionFormat, Error, FileHash, PayloadFormat, Result, hash_file, parser,
-};
+use super::{ArchiveVersion, Ba2CompressionFormat, Error, FileHash, PayloadFormat, Result, parser};
+use crate::lookup::{names_a_file, with_lookup_path};
 use crate::{BStr, BString, ByteSlice as _};
 use crate::{
     Copied,
@@ -274,7 +273,10 @@ impl Archive {
         self.lookup.get(&hash).map(|&index| EntryId(index))
     }
 
-    /// Get an entry by path. The path is normalized using BA2 rules.
+    /// Get an entry by path, matched as every family matches one: [`dream_path`]'s
+    /// normalization, so `\` and `/` are one separator, ASCII case is ignored, leading and
+    /// repeated separators are dropped, and a trailing separator matches no file. An archive
+    /// without a string table is looked up by the BA2 hash of that normalized path.
     #[must_use]
     pub fn get(&self, path: impl AsRef<[u8]>) -> Option<&Entry> {
         self.index_for_path(path.as_ref())
@@ -288,11 +290,13 @@ impl Archive {
     }
 
     fn index_for_path(&self, path: &[u8]) -> Option<usize> {
-        super::hash::with_normalized(path, |normalized, hash| {
-            if self.name_lookup.is_empty() {
-                self.lookup.get(&hash).copied()
-            } else {
+        with_lookup_path(path, |normalized| {
+            if !self.name_lookup.is_empty() {
                 self.name_lookup.get(normalized).copied()
+            } else if names_a_file(normalized) {
+                super::hash::with_normalized(normalized, |_, hash| self.lookup.get(&hash).copied())
+            } else {
+                None
             }
         })
     }
@@ -634,8 +638,10 @@ impl Archive {
         for (index, entry) in entries.iter().enumerate() {
             lookup.entry(entry.hash).or_insert(index);
             if !entry.name.is_empty() {
-                let (_, normalized) = hash_file(entry.name.as_bstr());
-                name_lookup.entry(normalized).or_insert(index);
+                let normalized = dream_path::normalize_path(&entry.name);
+                name_lookup
+                    .entry(BString::from(normalized))
+                    .or_insert(index);
             }
         }
         Self {

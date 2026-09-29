@@ -31,7 +31,7 @@ them, and writes new archives. The command-line tool built on it is
 
 - **[Reading archives](@/docs/reading.md)**: opening, entries and ids, lookups, and the three ways
   to read a member.
-- **[Archive paths](@/docs/paths.md)**: why paths are bytes, how each family matches them, and
+- **[Archive paths](@/docs/paths.md)**: why paths are bytes, how every family matches them, and
   legacy code pages.
 - **[Hashes and hash-only archives](@/docs/hashes.md)**: every family's hash, lookup by hash, and
   extracting a TES4 archive that stored no names.

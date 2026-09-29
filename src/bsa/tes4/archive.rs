@@ -1,8 +1,6 @@
 use super::{Error, HashFields, Result, hash_directory, hash_file, parser};
-use crate::bsa::{
-    FilenameEncoding, NormalizedPath, decode_filename_lossy, normalize_lookup_path,
-    with_lookup_path,
-};
+use crate::bsa::{FilenameEncoding, NormalizedPath, decode_filename_lossy, normalize_lookup_path};
+use crate::lookup::{names_a_file, with_lookup_path};
 use crate::{BStr, BString};
 use crate::{
     Copied,
@@ -734,11 +732,15 @@ impl Archive {
     }
 
     fn index_for_path(&self, path: &[u8]) -> Option<&usize> {
-        if self.lookup.is_empty() {
-            self.hash_lookup.get(&path_hash(path))
-        } else {
-            with_lookup_path(path, |normalized| self.lookup.get(normalized))
-        }
+        with_lookup_path(path, |normalized| {
+            if !self.lookup.is_empty() {
+                self.lookup.get(normalized)
+            } else if names_a_file(normalized) {
+                self.hash_lookup.get(&path_hash(normalized))
+            } else {
+                None
+            }
+        })
     }
 
     fn slice(&self, start: usize, len: usize) -> Result<&[u8]> {
@@ -964,8 +966,9 @@ impl Entry {
     }
 }
 
+/// The folder and file hashes of a lookup-normalized path.
 fn path_hash(path: &[u8]) -> (u64, u64) {
-    let separator = path.iter().rposition(|byte| matches!(*byte, b'/' | b'\\'));
+    let separator = path.iter().rposition(|byte| *byte == b'/');
     let folder = separator.map_or(&[][..], |end| &path[..end]);
     let name = separator.map_or(path, |end| &path[end + 1..]);
     (

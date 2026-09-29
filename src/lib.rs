@@ -14,6 +14,11 @@
 //! the BSA filename helpers to encode that text explicitly before lookup rather
 //! than guessing a code page.
 //!
+//! Every family matches a lookup path the same way, with [`dream_path`]'s
+//! normalization: `\` and `/` are one separator, ASCII case is ignored, leading
+//! and repeated separators are dropped, and a trailing separator names a folder,
+//! so it matches no file. Archives that store no names hash the normalized path.
+//!
 //! # Feature flags
 //!
 //! The default feature set enables BA2 and BSA support. Individual format
@@ -188,6 +193,8 @@ mod dds;
 mod extract;
 #[cfg(any(feature = "ba2", feature = "bsa-tes4"))]
 mod inflate;
+#[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]
+mod lookup;
 #[cfg(feature = "luau")]
 pub mod luau;
 #[cfg(any(feature = "ba2", feature = "bsa-tes3", feature = "bsa-tes4"))]

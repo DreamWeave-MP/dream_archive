@@ -69,8 +69,8 @@ names: `entry_by_id_required` returns `OutOfBounds` for an id past the end.
 
 The entry at a path, its id, the entry or `FileNotFound`, and whether it is there. The path is
 normalized with dream-path's rules and compared with the stored paths normalized the same way. In
-an archive with no names at all, the path is split at its last separator and the two halves
-hashed instead.
+an archive with no names at all, the normalized path is split at its last separator and the two
+halves hashed instead.
 
 {{ api_signature(value="fn get_normalized(&self, path: &NormalizedPath) -> Option<&Entry>") }}
 

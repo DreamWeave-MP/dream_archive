@@ -1,8 +1,6 @@
 use super::{Error, Result, parser};
-use crate::bsa::{
-    FilenameEncoding, NormalizedPath, decode_filename_lossy, normalize_lookup_path,
-    with_lookup_path,
-};
+use crate::bsa::{FilenameEncoding, NormalizedPath, decode_filename_lossy, normalize_lookup_path};
+use crate::lookup::with_lookup_path;
 use crate::{BStr, BString};
 use crate::{
     Copied,

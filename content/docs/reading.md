@@ -68,8 +68,8 @@ archive means nothing to another.
 ## Lookups
 
 `get(path)` finds an entry by path, `get_id(path)` its id, and `contains(path)` whether it is
-there. `get_required` turns a miss into `FileNotFound`. Paths are bytes, and each family matches
-them its own way: [Archive paths](@/docs/paths.md#lookups) has the rules. When two entries match
+there. `get_required` turns a miss into `FileNotFound`. Paths are bytes, and every family matches
+them the same way: [Archive paths](@/docs/paths.md#lookups) has the rules. When two entries match
 the same path, the first in archive order wins.
 
 The BSA archives also take a `NormalizedPath`, normalized once, for lookups repeated in a loop:

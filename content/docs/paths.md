@@ -1,6 +1,6 @@
 +++
 title = "Archive paths"
-description = "Why archive paths are bytes, how each family matches a lookup, what builders store, and legacy code pages."
+description = "Why archive paths are bytes, how every family matches a lookup, what builders store, and legacy code pages."
 weight = 30
 
 [extra]
@@ -20,22 +20,20 @@ byte string or a `Vec<u8>` all work, and every entry path is a `&BStr` from the
 
 ## Lookups
 
-A lookup normalizes the path it is given and compares bytes. The BSA families and BA2 normalize
-differently, because each follows the rules its games do:
+A lookup normalizes the path it is given, and the stored paths, and compares bytes. Every family
+normalizes the same way, with [dream-path](https://DreamWeave-MP.github.io/dream_path/)'s rules,
+as OpenMW's VFS does, so one string finds the same member in a BSA and a BA2:
 
-| The query's | TES3 and TES4 BSA | BA2 |
-|---|---|---|
-| `\` and `/` | the same | the same |
-| ASCII `A` to `Z` | lowercase | lowercase |
-| Leading separators | dropped | dropped |
-| Repeated separators | collapsed to one | kept |
-| A trailing separator | kept, so the path matches no file | dropped |
-| Anything else, including non-ASCII | kept exactly | kept exactly |
+| The query's | Becomes |
+|---|---|
+| `\` and `/` | the same separator |
+| ASCII `A` to `Z` | lowercase |
+| Leading separators | dropped |
+| Repeated separators | collapsed to one |
+| A trailing separator | kept, so the path names a folder and matches no file |
+| Anything else, including non-ASCII | kept exactly |
 
-BSA lookups use [dream-path](https://DreamWeave-MP.github.io/dream_path/)'s normalization, as
-OpenMW's VFS does. BA2 lookups use the normalization BA2 hashes are computed from, in which a
-path of 260 bytes or more becomes `.`. Non-ASCII letters are never case-folded: `É` and `é` are
-different bytes and different paths.
+Non-ASCII letters are never case-folded: `É` and `é` are different bytes and different paths.
 
 ```rust
 use dream_archive::{Archive, Ba2Builder, Tes3BsaBuilder};
@@ -51,17 +49,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for archive in [&bsa, &ba2] {
         assert!(archive.read_file(r"\Meshes\DOOR.NIF")?.is_some());
+        assert!(archive.read_file("meshes//door.nif")?.is_some());
+        assert!(archive.read_file("meshes/door.nif/")?.is_none());
     }
-    assert!(bsa.read_file("meshes//door.nif")?.is_some());
-    assert!(ba2.read_file("meshes//door.nif")?.is_none());
-    assert!(ba2.read_file("meshes/door.nif/")?.is_some());
-    assert!(bsa.read_file("meshes/door.nif/")?.is_none());
     Ok(())
 }
 ```
 
 A TES4 archive without names, and a BA2 without a string table, are looked up by hashing the
-query instead; the hash normalizations are in [Hashes](@/docs/hashes.md).
+normalized query instead, which finds what a name lookup would; a query with a trailing
+separator still matches nothing. The hash normalizations are in [Hashes](@/docs/hashes.md).
 
 ### Normalizing once
 

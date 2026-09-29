@@ -113,8 +113,8 @@ A TES4 archive can store neither folder nor file names: written that way on purp
 the facade reports no path.
 
 Lookups still work. When an archive has no names at all, `get`, `contains` and the `read_file`
-family hash the path they are given and look the hash up, so code that knows what it wants never
-notices. What cannot work is anything that needs the archive to say what is in it: `extract_to`
+family normalize the path they are given as a name lookup would, hash it and look the hash up, so
+code that knows what it wants never notices. What cannot work is anything that needs the archive to say what is in it: `extract_to`
 on a hash-only TES4 archive fails with `ArchivePathsUnavailable` before it writes anything, and on
 a BA2 without names with an I/O error saying the entry has no file name.
 

@@ -67,8 +67,9 @@ The entries in archive order, alone or with their ids, and the entry an id names
 {{ api_signature(value="fn contains(&self, path: impl AsRef<[u8]>) -> bool") }}
 
 The entry at a path, its id, the entry or `Error::FileNotFound`, and whether it is there. The
-path is normalized as BA2 hashes are ([Archive paths](@/docs/paths.md#lookups)) and matched
-against the string table's names, or, in an archive without one, hashed and matched by hash.
+path is normalized with dream-path's rules and compared with the string table's names normalized
+the same way ([Archive paths](@/docs/paths.md#lookups)). In an archive without a string table,
+the normalized path is hashed and matched by hash.
 
 {{ api_signature(value="fn get_by_hash(&self, hash: FileHash) -> Option<&Entry>") }}
 

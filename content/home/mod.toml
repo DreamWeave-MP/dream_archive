@@ -147,6 +147,7 @@ changed = [
 fixed = [
     "`Dx10Builder::add_dds_bytes` and `add_dds_file` take DDS files whose depth field is 1, as many tools write for ordinary textures. A DDS file is a volume texture only when its flags have `DDSD_DEPTH` or its caps have `DDSCAPS2_VOLUME`.",
     "A cubemap's extended `DX10` DDS header has an array size of 1, one cube, as the DDS format and DirectXTex count it: extraction wrote 6, which DirectXTex-based tools read as six cubes, and `add_dds_bytes` and `add_dds_file` refused cubemaps saved by texconv. Cubemaps extracted by earlier versions, which say 6 over one cube's data, are still accepted.",
+    "Every family matches a lookup path the same way, with dream-path's normalization. BA2 lookups kept repeated separators and dropped a trailing one, so `meshes//door.nif` missed and `meshes/door.nif/` found a member a BSA answered the other way round; hash-only TES4 lookups missed `a//b/c.nif`. Archives without names now hash the normalized path.",
 ]
 migration = """
 Compose `dream_archive::luau::ArchiveExtension` into the host's l3i `RuntimePlan`. A host that

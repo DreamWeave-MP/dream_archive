@@ -149,8 +149,8 @@ The four builders, named at the root. [BA2 builders](@/docs/api/ba2-builders.md)
 
 {{ api_signature(value="pub use dream_path") }}
 
-[dream-path](https://DreamWeave-MP.github.io/dream_path/), whose normalization the BSA lookups
-use. Depend on it through this re-export and the versions cannot drift apart.
+[dream-path](https://DreamWeave-MP.github.io/dream_path/), whose normalization every lookup
+uses. Depend on it through this re-export and the versions cannot drift apart.
 
 {{ api_signature(value="pub use dream_path::bstr") }}
 
