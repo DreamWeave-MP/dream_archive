@@ -146,6 +146,7 @@ changed = [
     "Path lookups normalize into a stack buffer instead of allocating: `contains` over 4096 distinct paths takes 0.39 ms instead of 1.03 ms (TES3) and 1.43 ms (TES4).",
     "zlib members inflate from the archive through one inflater per thread: a 64 KiB TES4 member reads in 18 µs instead of 68 µs.",
     "Walking entries from Luau is 5 to 23 times faster than with `mlua`, and small calls such as `contains` and `readEntry` take about half as long: 4096 TES3 entries take 0.73 ms instead of 6.15 ms.",
+    "dream-path 1.0 and l3i 1.0.0 come from crates.io; Rust 1.92.",
 ]
 fixed = [
     "`Dx10Builder::add_dds_bytes` and `add_dds_file` take DDS files whose depth field is 1, as many tools write for ordinary textures. A DDS file is a volume texture only when its flags have `DDSD_DEPTH` or its caps have `DDSCAPS2_VOLUME`.",
