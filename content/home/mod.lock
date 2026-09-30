@@ -388,6 +388,41 @@
       "groups": [],
       "extensions": {},
       "critical_extensions": []
+    },
+    {
+      "version": "1.1.0",
+      "locked_from": "6cf4005005b596751006c41f9cfd3de5bb354059",
+      "artifacts": [
+        {
+          "id": "crate",
+          "format": "crate",
+          "filename": "dream_archive-1.1.0.crate",
+          "media_type": "application/gzip",
+          "size": 7404128,
+          "digests": {
+            "sha256": "ef05ce9b63b87ff34e29708aa5d58829608063a64cf236420adbba101dbc24c7"
+          }
+        }
+      ],
+      "runtimes": {},
+      "platforms": [],
+      "provides": [],
+      "relationships": [],
+      "components": [
+        {
+          "id": "main",
+          "name": "dream_archive",
+          "path": ".",
+          "required": true,
+          "default": true,
+          "requires": [],
+          "conflicts": [],
+          "suggested_with": []
+        }
+      ],
+      "groups": [],
+      "extensions": {},
+      "critical_extensions": []
     }
   ]
 }
