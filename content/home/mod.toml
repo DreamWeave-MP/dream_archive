@@ -8,7 +8,7 @@ id = "a8ec99fb-1938-42cc-8b9f-87994e046594"
 slug = "dream_archive"
 type = "library"
 status = "active"
-license = "GPL-3.0-only"
+license = "MIT OR Apache-2.0"
 
 [[maintainers]]
 name = "DreamWeave"

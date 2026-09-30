@@ -37,7 +37,7 @@ github_username = "DreamWeave-MP"
 github_project = "dream_archive"
 
 logo_text = "dream_archive"
-footer_text = "dream_archive · GPL-3.0-only · DreamWeave contributors"
+footer_text = "dream_archive · MIT OR Apache-2.0 · DreamWeave contributors"
 # The DreamWeave logo.
 favicon = "img/dreamweave-logo.png"
 

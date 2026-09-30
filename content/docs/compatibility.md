@@ -20,7 +20,7 @@ The error enums, `Error`, `ba2::Error` and `bsa::Error`, and `FilenameEncoding` 
 
 - **Rust 1.88** or newer, edition 2024, declared as `rust-version`. It is l3i's floor, and it
   applies with or without the `luau` feature.
-- **GPL-3.0-only**, for every release so far.
+- **MIT OR Apache-2.0**, at your option. Releases up to and including 1.0.0 were GPL-3.0-only.
 
 ## Features
 

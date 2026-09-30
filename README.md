@@ -108,7 +108,8 @@ it with `zola serve`.
 
 ## License
 
-GPL-3.0-only.
+dream_archive is licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at
+your option. Releases up to and including 1.0.0 were GPL-3.0-only.
 
 ## Support
 

@@ -6,4 +6,4 @@ generation under `tests/fixtures/bsa/`.
 
 The upstream fixture corpus is licensed under the BSD Zero Clause License
 (`0BSD`), which permits reuse, modification, and redistribution. This repository
-is licensed as `GPL-3.0-only`.
+is licensed as `MIT OR Apache-2.0`.
