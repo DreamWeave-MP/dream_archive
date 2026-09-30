@@ -1,6 +1,6 @@
 [package]
 name = "dream_archive"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
@@ -12,8 +12,8 @@ keywords = ["bethesda", "archive", "ba2", "bsa", "morrowind"]
 categories = ["game-development", "filesystem"]
 
 [dependencies]
-dream-path = "1.0"
-l3i = { version = "1.0.0", optional = true }
+dream-path = "1.1"
+l3i = { version = "1.1.0", optional = true }
 encoding_rs = { version = "0.8.42", optional = true }
 flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"], optional = true }
 lz4_flex = { version = "0.14", default-features = false, optional = true }

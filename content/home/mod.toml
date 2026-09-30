@@ -163,3 +163,13 @@ still wants the `dreamArchive` global adds
 [Embedding Luau](https://dreamweave-mp.github.io/dream_archive/docs/luau-hosts/#from-0-2) lists
 what scripts must change.
 """
+
+[[releases]]
+version = "1.1.0"
+date = 2026-09-30
+summary = "Relicensed as MIT OR Apache-2.0 and built on l3i 1.1.0."
+changed = [
+    "Relicensed from GPL-3.0 to MIT OR Apache-2.0: this is the first release under the new terms, and releases up to and including 1.0.0 stay GPL.",
+    "Requires dream-path 1.1, its first MIT OR Apache-2.0 release.",
+    "l3i 1.1.0 comes from crates.io; the `@dream/archive` module is unchanged.",
+]
