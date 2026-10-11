@@ -13,7 +13,6 @@ local util = require './util'
 type Source = types.Source
 
 local fail, Messages = util.fail, util.Messages
-local writeu32 = buffer.writeu32
 
 type Member = { path: string, low: number, high: number, source: Source }
 
@@ -60,17 +59,17 @@ local function new()
     if hashOffset > 0xffffffff then fail(Messages.integral) end
 
     local head = buffer.create(12 + hashOffset + 8 * count)
-    writeu32(head, 0, 0x100)
-    writeu32(head, 4, hashOffset)
-    writeu32(head, 8, count)
+    buffer.writeu32(head, 0, 0x100)
+    buffer.writeu32(head, 4, hashOffset)
+    buffer.writeu32(head, 8, count)
     local dataOffset = 0
     for position, member in list do
       local length = member.source.length
       if length > 0xffffffff then fail(Messages.integral) end
 
       local record = 12 + 8 * (position - 1)
-      writeu32(head, record, length)
-      writeu32(head, record + 4, dataOffset)
+      buffer.writeu32(head, record, length)
+      buffer.writeu32(head, record + 4, dataOffset)
       dataOffset += length
       if dataOffset > 0xffffffff then fail(Messages.outOfBounds) end
     end
@@ -78,15 +77,15 @@ local function new()
     local nameOffset = 0
     local names = 12 + 12 * count
     for position, member in list do
-      writeu32(head, 12 + 8 * count + 4 * (position - 1), nameOffset)
+      buffer.writeu32(head, 12 + 8 * count + 4 * (position - 1), nameOffset)
       buffer.writestring(head, names + nameOffset, member.path)
       nameOffset += #member.path + 1
     end
 
     local hashes = names + namesLength
     for position, member in list do
-      writeu32(head, hashes + 8 * (position - 1), member.low)
-      writeu32(head, hashes + 8 * (position - 1) + 4, member.high)
+      buffer.writeu32(head, hashes + 8 * (position - 1), member.low)
+      buffer.writeu32(head, hashes + 8 * (position - 1) + 4, member.high)
     end
 
     return head

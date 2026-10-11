@@ -13,8 +13,6 @@ type Backend = types.Backend
 type Store = types.Store
 
 local fail, Messages = util.fail, util.Messages
-local readu32, readu16, readu8 = buffer.readu32, buffer.readu16, buffer.readu8
-local band = bit32.band
 
 local Magic = 0x00415342
 local HeaderSize = 0x24
@@ -87,8 +85,8 @@ local function hashNormalizedFile(path: string): Hash
 
   local known = if extension == '' then 0 else Extensions[four]
   if known then
-    hash.first = (hash.first + 32 * band(known, 0xfc)) % 256
-    hash.last = (hash.last + band(known, 0xfe) * 64) % 256
+    hash.first = (hash.first + 32 * bit32.band(known, 0xfc)) % 256
+    hash.last = (hash.last + bit32.band(known, 0xfe) * 64) % 256
     hash.last2 = (hash.last2 + known * 128) % 256
   end
 
@@ -156,40 +154,42 @@ local function open(store: Store): Backend
   end
 
   need(4)
-  local magic = readu32(index, 0)
+  local magic = buffer.readu32(index, 0)
   if magic ~= Magic then util.invalidMagic(magic) end
 
   need(8)
-  local version = readu32(index, 4)
+  local version = buffer.readu32(index, 4)
   if version ~= 103 and version ~= 104 and version ~= 105 then util.invalidVersion(version) end
 
   need(12)
-  local folderRecordOffset = readu32(index, 8)
+  local folderRecordOffset = buffer.readu32(index, 8)
   if folderRecordOffset ~= HeaderSize then
     fail(`invalid size read from archive header: {folderRecordOffset}`)
   end
 
   need(16)
-  local flags = readu32(index, 12)
-  if band(flags, Flags.xboxArchive) ~= 0 then util.notImplemented 'TES4 Xbox archive layout' end
+  local flags = buffer.readu32(index, 12)
+  if bit32.band(flags, Flags.xboxArchive) ~= 0 then
+    util.notImplemented 'TES4 Xbox archive layout'
+  end
 
   -- Oblivion's version 103 archives set the XMem bit on PC too; it only means XMem from 104.
   if
     version ~= 103
-    and band(flags, Flags.compressed) ~= 0
-    and band(flags, Flags.xboxCompressed) ~= 0
+    and bit32.band(flags, Flags.compressed) ~= 0
+    and bit32.band(flags, Flags.xboxCompressed) ~= 0
   then
     util.notImplemented 'TES4 XMem compression'
   end
 
   need(36)
-  local folderCount, fileCount = readu32(index, 16), readu32(index, 20)
-  local fileNamesLength = readu32(index, 28)
-  local directoryStrings = band(flags, Flags.directoryStrings) ~= 0
-  local fileStrings = band(flags, Flags.fileStrings) ~= 0
-  local archiveCompressed = band(flags, Flags.compressed) ~= 0
-  local embedded = version ~= 103 and band(flags, Flags.embeddedNames) ~= 0
-  local usesXmem = version ~= 103 and band(flags, Flags.xboxCompressed) ~= 0
+  local folderCount, fileCount = buffer.readu32(index, 16), buffer.readu32(index, 20)
+  local fileNamesLength = buffer.readu32(index, 28)
+  local directoryStrings = bit32.band(flags, Flags.directoryStrings) ~= 0
+  local fileStrings = bit32.band(flags, Flags.fileStrings) ~= 0
+  local archiveCompressed = bit32.band(flags, Flags.compressed) ~= 0
+  local embedded = version ~= 103 and bit32.band(flags, Flags.embeddedNames) ~= 0
+  local usesXmem = version ~= 103 and bit32.band(flags, Flags.xboxCompressed) ~= 0
   local recordSize = if version == 105 then 24 else 16
 
   -- The whole index of a well-formed archive, read at once.
@@ -198,7 +198,7 @@ local function open(store: Store): Backend
       size,
       HeaderSize
         + recordSize * folderCount
-        + (if directoryStrings then folderCount + readu32(index, 24) else 0)
+        + (if directoryStrings then folderCount + buffer.readu32(index, 24) else 0)
         + 16 * fileCount
         + fileNamesLength
     )
@@ -208,7 +208,7 @@ local function open(store: Store): Backend
   for folder = 0, folderCount - 1 do
     local record = HeaderSize + recordSize * folder
     need(record + recordSize)
-    parsedFileCount += readu32(index, record + 8)
+    parsedFileCount += buffer.readu32(index, record + 8)
     if parsedFileCount > 0xffffffff then fail(Messages.outOfBounds) end
   end
 
@@ -225,22 +225,24 @@ local function open(store: Store): Backend
     local record = HeaderSize + recordSize * (folder - 1)
     folderRecords[folder] = record
     local filesAt = if version == 105
-      then readu32(index, record + 16) + readu32(index, record + 20) * 0x100000000
-      else readu32(index, record + 12)
+      then buffer.readu32(index, record + 16) + buffer.readu32(index, record + 20) * 0x100000000
+      else buffer.readu32(index, record + 12)
     if filesAt < position or filesAt > size then fail(Messages.outOfBounds) end
 
     if directoryStrings then
       need(position + 1)
-      local length = readu8(index, position)
+      local length = buffer.readu8(index, position)
       need(position + 1 + length)
-      if length == 0 or readu8(index, position + length) ~= 0 then fail(Messages.endOfFile) end
+      if length == 0 or buffer.readu8(index, position + length) ~= 0 then
+        fail(Messages.endOfFile)
+      end
 
       local name = buffer.readstring(index, position + 1, length - 1)
       folderNames[folder] = if name == '.' then '' else name
       position += 1 + length
     end
 
-    local files = readu32(index, record + 8)
+    local files = buffer.readu32(index, record + 8)
     need(position + 16 * files)
     for _ = 1, files do
       entry += 1
@@ -265,12 +267,12 @@ local function open(store: Store): Backend
   for current = 1, fileCount do
     local record = entryRecord[current]
     if embedded then
-      local start = band(readu32(index, record + 12), 0x7fffffff)
-      local stored = band(readu32(index, record + 8), 0x3fffffff)
+      local start = bit32.band(buffer.readu32(index, record + 12), 0x7fffffff)
+      local stored = bit32.band(buffer.readu32(index, record + 8), 0x3fffffff)
       if start + stored > size or stored == 0 then fail(Messages.outOfBounds) end
 
       local head = Store.read(store, start, math.min(stored, 256))
-      local length = readu8(head, 0)
+      local length = buffer.readu8(head, 0)
       if 1 + length > stored then fail(Messages.outOfBounds) end
 
       local text = buffer.readstring(head, 1, length)
@@ -282,7 +284,7 @@ local function open(store: Store): Backend
 
     if fileStrings then
       local finish = cursor
-      while finish < namesEnd and readu8(index, finish) ~= 0 do
+      while finish < namesEnd and buffer.readu8(index, finish) ~= 0 do
         finish += 1
       end
 
@@ -296,13 +298,13 @@ local function open(store: Store): Backend
 
   -- Fallout 3's voice archives pad the name block with NULs after the last name.
   for padding = cursor, namesEnd - 1 do
-    if readu8(index, padding) ~= 0 then fail(Messages.outOfBounds) end
+    if buffer.readu8(index, padding) ~= 0 then fail(Messages.outOfBounds) end
   end
 
   for current = 1, fileCount do
     local record = entryRecord[current]
-    local start = band(readu32(index, record + 12), 0x7fffffff)
-    local stored = band(readu32(index, record + 8), 0x3fffffff)
+    local start = bit32.band(buffer.readu32(index, record + 12), 0x7fffffff)
+    local stored = bit32.band(buffer.readu32(index, record + 8), 0x3fffffff)
     if start < namesEnd or start + stored > size then fail(Messages.outOfBounds) end
   end
 
@@ -328,15 +330,15 @@ local function open(store: Store): Backend
   end
 
   local function isCompressed(current: number): boolean
-    local toggled = band(readu32(index, entryRecord[current] + 8), 0x40000000) ~= 0
+    local toggled = bit32.band(buffer.readu32(index, entryRecord[current] + 8), 0x40000000) ~= 0
     return archiveCompressed ~= toggled
   end
 
   --- Where an entry's payload starts and how long it is, past its embedded name.
   local function payload(current: number): (number, number)
     local record = entryRecord[current]
-    local start = band(readu32(index, record + 12), 0x7fffffff)
-    local length = band(readu32(index, record + 8), 0x3fffffff)
+    local start = bit32.band(buffer.readu32(index, record + 12), 0x7fffffff)
+    local length = bit32.band(buffer.readu32(index, record + 8), 0x3fffffff)
     if embedded then
       local skip = embeddedSkips[current]
       return start + skip, length - skip
@@ -365,7 +367,9 @@ local function open(store: Store): Backend
     local expected = Store.u32(store, start)
     local compressed = Store.read(store, start + 4, length - 4)
     if version == 105 then
-      if length < 8 or readu32(compressed, 0) ~= 0x184d2204 then fail(Messages.invalidLz4Frame) end
+      if length < 8 or buffer.readu32(compressed, 0) ~= 0x184d2204 then
+        fail(Messages.invalidLz4Frame)
+      end
 
       return util.lz4FrameExact(compressed, expected)
     end
@@ -428,7 +432,7 @@ local function open(store: Store): Backend
         0,
         at + nameLength,
         current,
-        plain and (nameLength == 0 or readu8(index, nameStarts[current]) ~= 92)
+        plain and (nameLength == 0 or buffer.readu8(index, nameStarts[current]) ~= 92)
       )
     end
 
@@ -501,11 +505,11 @@ local function open(store: Store): Backend
     folder = folderOf,
     size = decodedSize,
     storedSize = function(current: number): number
-      return band(readu32(index, entryRecord[current] + 8), 0x3fffffff)
+      return bit32.band(buffer.readu32(index, entryRecord[current] + 8), 0x3fffffff)
     end,
 
     offset = function(current: number): number?
-      return band(readu32(index, entryRecord[current] + 12), 0x7fffffff)
+      return bit32.band(buffer.readu32(index, entryRecord[current] + 12), 0x7fffffff)
     end,
     compressed = isCompressed,
     chunks = function(): number? return nil end,
@@ -532,8 +536,8 @@ local function open(store: Store): Backend
         id = current,
         format = 'bsaTes4',
         path = path(current),
-        storedSize = band(readu32(index, record + 8), 0x3fffffff),
-        offset = band(readu32(index, record + 12), 0x7fffffff),
+        storedSize = bit32.band(buffer.readu32(index, record + 8), 0x3fffffff),
+        offset = bit32.band(buffer.readu32(index, record + 12), 0x7fffffff),
         compressed = isCompressed(current),
         hash = buffer.readinteger(index, record),
         folderHash = buffer.readinteger(index, folderRecords[entryFolder[current]]),
@@ -559,7 +563,7 @@ local function open(store: Store): Backend
       return length
     end,
 
-    tes4 = { version = version, flags = flags, archiveTypes = readu16(index, 32) },
+    tes4 = { version = version, flags = flags, archiveTypes = buffer.readu16(index, 32) },
   }
 end
 

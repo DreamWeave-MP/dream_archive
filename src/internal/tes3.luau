@@ -14,7 +14,6 @@ type Backend = types.Backend
 type Store = types.Store
 
 local fail, Messages = util.fail, util.Messages
-local readu32, readu8 = buffer.readu32, buffer.readu8
 
 local Version = 0x100
 
@@ -51,12 +50,12 @@ local function open(store: Store): Backend
   if size < 4 then fail(Messages.endOfFile) end
 
   local header = Store.head(store, math.min(size, 12))
-  local version = readu32(header, 0)
+  local version = buffer.readu32(header, 0)
   if version ~= Version then util.invalidVersion(version) end
 
   if size < 12 then fail(Messages.endOfFile) end
 
-  local hashOffset, count = readu32(header, 4), readu32(header, 8)
+  local hashOffset, count = buffer.readu32(header, 4), buffer.readu32(header, 8)
   local offsetsStart = 12 + 8 * count
   local namesStart = offsetsStart + 4 * count
   local hashesStart = 12 + hashOffset
@@ -68,14 +67,14 @@ local function open(store: Store): Backend
   -- A name is read up to its NUL, so one that starts after the blob's last NUL runs off the end.
   local lastNul = -1
   for position = hashesStart - 1, namesStart, -1 do
-    if readu8(index, position) == 0 then
+    if buffer.readu8(index, position) == 0 then
       lastNul = position - namesStart
       break
     end
   end
 
   for entry = 0, count - 1 do
-    local relative = readu32(index, offsetsStart + 4 * entry)
+    local relative = buffer.readu32(index, offsetsStart + 4 * entry)
     if relative > namesLength then fail(Messages.outOfBounds) end
 
     if relative > lastNul then fail(Messages.endOfFile) end
@@ -83,13 +82,13 @@ local function open(store: Store): Backend
 
   for entry = 0, count - 1 do
     local record = 12 + 8 * entry
-    if dataStart + readu32(index, record + 4) + readu32(index, record) > size then
+    if dataStart + buffer.readu32(index, record + 4) + buffer.readu32(index, record) > size then
       fail(Messages.outOfBounds)
     end
   end
 
   local function nameStart(entry: number): number
-    return namesStart + readu32(index, offsetsStart + 4 * (entry - 1))
+    return namesStart + buffer.readu32(index, offsetsStart + 4 * (entry - 1))
   end
 
   --- Each name's length, found once by searching for its NUL.
@@ -111,7 +110,7 @@ local function open(store: Store): Backend
 
   local function payload(entry: number): (number, number)
     local record = 12 + 8 * (entry - 1)
-    return dataStart + readu32(index, record + 4), readu32(index, record)
+    return dataStart + buffer.readu32(index, record + 4), buffer.readu32(index, record)
   end
 
   local function buildNames(): names.Index
@@ -119,7 +118,8 @@ local function open(store: Store): Backend
     local plain = names.regionCanonical(index, namesStart, namesLength)
     for entry = 1, count do
       local start = nameStart(entry)
-      built.add(index, start, nameLength(entry, start), entry, plain and readu8(index, start) ~= 92)
+      local canonical = plain and buffer.readu8(index, start) ~= 92
+      built.add(index, start, nameLength(entry, start), entry, canonical)
     end
 
     return built
@@ -149,7 +149,7 @@ local function open(store: Store): Backend
       local built: { [integer]: number } = {}
       for entry = count - 1, 0, -1 do
         local at = hashesStart + 8 * entry
-        built[numeric(readu32(index, at), readu32(index, at + 4))] = entry + 1
+        built[numeric(buffer.readu32(index, at), buffer.readu32(index, at + 4))] = entry + 1
       end
 
       hashes, map = built, built
@@ -168,15 +168,19 @@ local function open(store: Store): Backend
     name = function(entry: number): string? return util.lastComponent(path(entry)) end,
     folder = function(entry: number): string? return util.parentFolder(path(entry)) end,
     size = function(entry: number): (number?, string?)
-      return readu32(index, 12 + 8 * (entry - 1)), nil
+      return buffer.readu32(index, 12 + 8 * (entry - 1)), nil
     end,
-    storedSize = function(entry: number): number return readu32(index, 12 + 8 * (entry - 1)) end,
-    offset = function(entry: number): number? return readu32(index, 16 + 8 * (entry - 1)) end,
+    storedSize = function(entry: number): number
+      return buffer.readu32(index, 12 + 8 * (entry - 1))
+    end,
+    offset = function(entry: number): number?
+      return buffer.readu32(index, 16 + 8 * (entry - 1))
+    end,
     compressed = function(): boolean return false end,
     chunks = function(): number? return nil end,
     hash = function(entry: number): integer?
       local at = hashesStart + 8 * (entry - 1)
-      return numeric(readu32(index, at), readu32(index, at + 4))
+      return numeric(buffer.readu32(index, at), buffer.readu32(index, at + 4))
     end,
     folderHash = function(): integer? return nil end,
     ba2Hash = function(): { directory: number, file: number, extension: number }? return nil end,
@@ -198,7 +202,7 @@ local function open(store: Store): Backend
 
     row = function(entry: number): { [string]: unknown }
       local record = 12 + 8 * (entry - 1)
-      local size = readu32(index, record)
+      local size = buffer.readu32(index, record)
       local at = hashesStart + 8 * (entry - 1)
       return {
         index = entry,
@@ -207,9 +211,9 @@ local function open(store: Store): Backend
         path = path(entry),
         size = size,
         storedSize = size,
-        offset = readu32(index, record + 4),
+        offset = buffer.readu32(index, record + 4),
         compressed = false,
-        hash = numeric(readu32(index, at), readu32(index, at + 4)),
+        hash = numeric(buffer.readu32(index, at), buffer.readu32(index, at + 4)),
       }
     end,
   }

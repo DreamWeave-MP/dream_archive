@@ -15,7 +15,6 @@ local util = require './util'
 type Source = types.Source
 
 local fail, Messages = util.fail, util.Messages
-local writeu32, writeu8 = buffer.writeu32, buffer.writeu8
 
 type Override = 'inherit' | 'store' | 'compress'
 type NameMode = 'strings' | 'hashOnly' | 'embedded' | 'stringsAndEmbedded'
@@ -234,9 +233,9 @@ local function new()
     end
 
     local out = buffer.create(total)
-    writeu32(out, 0, 0x00415342)
-    writeu32(out, 4, version)
-    writeu32(out, 8, 0x24)
+    buffer.writeu32(out, 0, 0x00415342)
+    buffer.writeu32(out, 4, version)
+    buffer.writeu32(out, 8, 0x24)
     local flags = 0
     if strings then
       flags += 0x3
@@ -250,11 +249,11 @@ local function new()
       flags += tes4.Flags.compressed
     end
 
-    writeu32(out, 12, flags)
-    writeu32(out, 16, folderCount)
-    writeu32(out, 20, fileCount)
-    writeu32(out, 24, folderNamesLength)
-    writeu32(out, 28, fileNamesLength)
+    buffer.writeu32(out, 12, flags)
+    buffer.writeu32(out, 16, folderCount)
+    buffer.writeu32(out, 20, fileCount)
+    buffer.writeu32(out, 24, folderNamesLength)
+    buffer.writeu32(out, 28, fileNamesLength)
     buffer.writeu16(out, 32, archiveTypes)
 
     local blockOffset = 0x24 + recordSize * folderCount
@@ -262,14 +261,14 @@ local function new()
       local finish = (folderStarts[folder + 1] or fileCount + 1) - 1
       local record = 0x24 + recordSize * (folder - 1)
       buffer.writeinteger(out, record, list[start].folderValue)
-      writeu32(out, record + 8, finish - start + 1)
+      buffer.writeu32(out, record + 8, finish - start + 1)
       if version == 105 then
-        writeu32(out, record + 16, blockOffset % 0x100000000)
-        writeu32(out, record + 20, blockOffset // 0x100000000)
+        buffer.writeu32(out, record + 16, blockOffset % 0x100000000)
+        buffer.writeu32(out, record + 20, blockOffset // 0x100000000)
       else
         if blockOffset > 0xffffffff then fail(Messages.integral) end
 
-        writeu32(out, record + 12, blockOffset)
+        buffer.writeu32(out, record + 12, blockOffset)
       end
 
       blockOffset += (if strings then #list[start].folder + 2 else 0) + 16 * (finish - start + 1)
@@ -285,7 +284,7 @@ local function new()
         local name = list[start].folder
         if #name + 1 > 255 then fail(Messages.integral) end
 
-        writeu8(out, cursor, #name + 1)
+        buffer.writeu8(out, cursor, #name + 1)
         buffer.writestring(out, cursor + 1, name)
         cursor += #name + 2
       end
@@ -303,8 +302,8 @@ local function new()
           size += 0x40000000
         end
 
-        writeu32(out, cursor + 8, size)
-        writeu32(out, cursor + 12, payloadOffset)
+        buffer.writeu32(out, cursor + 8, size)
+        buffer.writeu32(out, cursor + 12, payloadOffset)
         payloadOffset += length
         if payloadOffset > 0xffffffff then fail(Messages.outOfBounds) end
 
@@ -324,14 +323,14 @@ local function new()
         local name = embeddedName(member)
         if #name > 255 then fail(Messages.integral) end
 
-        writeu8(out, cursor, #name)
+        buffer.writeu8(out, cursor, #name)
         buffer.writestring(out, cursor + 1, name)
         cursor += 1 + #name
       end
 
       local prefix = prefixes[position]
       if prefix then
-        writeu32(out, cursor, prefix)
+        buffer.writeu32(out, cursor, prefix)
         cursor += 4
       end
 
