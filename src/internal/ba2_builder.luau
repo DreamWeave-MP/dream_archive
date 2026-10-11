@@ -20,7 +20,6 @@ type TextureHeader = types.TextureHeader
 type Chunk = types.Chunk
 
 local fail, Messages = util.fail, util.Messages
-local writeu32, writeu16, writeu8 = buffer.writeu32, buffer.writeu16, buffer.writeu8
 
 local Versions: { [number]: boolean } =
   { [1] = true, [2] = true, [3] = true, [7] = true, [8] = true }
@@ -95,14 +94,14 @@ local function writeHeader(
   lz4: boolean
 )
   buffer.writestring(out, 0, 'BTDX')
-  writeu32(out, 4, version)
+  buffer.writeu32(out, 4, version)
   buffer.writestring(out, 8, format)
-  writeu32(out, 12, count)
-  writeu32(out, 16, stringTable % 0x100000000)
-  writeu32(out, 20, stringTable // 0x100000000)
-  if version == 2 or version == 3 then writeu32(out, 24, 1) end
+  buffer.writeu32(out, 12, count)
+  buffer.writeu32(out, 16, stringTable % 0x100000000)
+  buffer.writeu32(out, 20, stringTable // 0x100000000)
+  if version == 2 or version == 3 then buffer.writeu32(out, 24, 1) end
 
-  if version == 3 then writeu32(out, 32, if lz4 then 3 else 0) end
+  if version == 3 then buffer.writeu32(out, 32, if lz4 then 3 else 0) end
 end
 
 local function stringTable(list: { Member }): buffer
@@ -114,7 +113,7 @@ local function stringTable(list: { Member }): buffer
   local out = buffer.create(length)
   local cursor = 0
   for _, member in list do
-    writeu16(out, cursor, #member.name)
+    buffer.writeu16(out, cursor, #member.name)
     buffer.writestring(out, cursor + 2, member.name)
     cursor += 2 + #member.name
   end
@@ -173,15 +172,15 @@ local function new()
     local anyCompressed = false
     for position, member in list do
       local record = recordsAt + 36 * (position - 1)
-      writeu32(head, record, member.file)
-      writeu32(head, record + 4, member.extension)
-      writeu32(head, record + 8, member.directory)
-      writeu8(head, record + 13, 1)
-      writeu16(head, record + 14, 0x10)
+      buffer.writeu32(head, record, member.file)
+      buffer.writeu32(head, record + 4, member.extension)
+      buffer.writeu32(head, record + 8, member.directory)
+      buffer.writeu8(head, record + 13, 1)
+      buffer.writeu16(head, record + 14, 0x10)
       if member.source.length > 0xffffffff then fail(Messages.integral) end
 
-      writeu32(head, record + 28, member.source.length)
-      writeu32(head, record + 32, Sentinel)
+      buffer.writeu32(head, record + 28, member.source.length)
+      buffer.writeu32(head, record + 32, Sentinel)
       anyCompressed = anyCompressed or isCompressed(member, compression)
     end
 
@@ -212,15 +211,15 @@ local function new()
         data = compressed
       end
 
-      writeu32(head, record + 16, offset % 0x100000000)
-      writeu32(head, record + 20, offset // 0x100000000)
-      writeu32(head, record + 24, packed)
+      buffer.writeu32(head, record + 16, offset % 0x100000000)
+      buffer.writeu32(head, record + 20, offset // 0x100000000)
+      buffer.writeu32(head, record + 24, packed)
       sources.add(output, data)
     end
 
     local tableAt = output.length
-    writeu32(head, 16, tableAt % 0x100000000)
-    writeu32(head, 20, tableAt // 0x100000000)
+    buffer.writeu32(head, 16, tableAt % 0x100000000)
+    buffer.writeu32(head, 20, tableAt // 0x100000000)
     sources.add(output, names)
     return sources.finish(output, head)
   end
@@ -569,30 +568,30 @@ local function newDx10()
     for position, member in list do
       local texture = member.texture :: TextureHeader
       local chunks = prepared[position]
-      writeu32(head, cursor, member.file)
-      writeu32(head, cursor + 4, member.extension)
-      writeu32(head, cursor + 8, member.directory)
+      buffer.writeu32(head, cursor, member.file)
+      buffer.writeu32(head, cursor + 4, member.extension)
+      buffer.writeu32(head, cursor + 8, member.directory)
       if #chunks > 255 then fail(Messages.integral) end
 
-      writeu8(head, cursor + 13, #chunks)
-      writeu16(head, cursor + 14, 0x18)
-      writeu16(head, cursor + 16, texture.height)
-      writeu16(head, cursor + 18, texture.width)
-      writeu8(head, cursor + 20, texture.mipCount)
-      writeu8(head, cursor + 21, texture.format)
-      writeu8(head, cursor + 22, texture.flags)
-      writeu8(head, cursor + 23, texture.tileMode)
+      buffer.writeu8(head, cursor + 13, #chunks)
+      buffer.writeu16(head, cursor + 14, 0x18)
+      buffer.writeu16(head, cursor + 16, texture.height)
+      buffer.writeu16(head, cursor + 18, texture.width)
+      buffer.writeu8(head, cursor + 20, texture.mipCount)
+      buffer.writeu8(head, cursor + 21, texture.format)
+      buffer.writeu8(head, cursor + 22, texture.flags)
+      buffer.writeu8(head, cursor + 23, texture.tileMode)
       cursor += 24
       for _, chunk in chunks do
-        writeu32(head, cursor, offset % 0x100000000)
-        writeu32(head, cursor + 4, offset // 0x100000000)
-        writeu32(head, cursor + 8, chunk.packed)
+        buffer.writeu32(head, cursor, offset % 0x100000000)
+        buffer.writeu32(head, cursor + 4, offset // 0x100000000)
+        buffer.writeu32(head, cursor + 8, chunk.packed)
         if chunk.size > 0xffffffff then fail(Messages.integral) end
 
-        writeu32(head, cursor + 12, chunk.size)
-        writeu16(head, cursor + 16, chunk.first)
-        writeu16(head, cursor + 18, chunk.last)
-        writeu32(head, cursor + 20, Sentinel)
+        buffer.writeu32(head, cursor + 12, chunk.size)
+        buffer.writeu16(head, cursor + 16, chunk.first)
+        buffer.writeu16(head, cursor + 18, chunk.last)
+        buffer.writeu32(head, cursor + 20, Sentinel)
         offset += storedLength(chunk)
         cursor += 24
       end

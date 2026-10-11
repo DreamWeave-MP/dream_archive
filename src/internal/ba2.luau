@@ -17,7 +17,6 @@ type Chunk = types.Chunk
 type TextureHeader = types.TextureHeader
 
 local fail, Messages = util.fail, util.Messages
-local readu32, readu16, readu8 = buffer.readu32, buffer.readu16, buffer.readu8
 
 local Magic = 0x58445442
 local Gnrl, Dx10, Gnmf = 0x4c524e47, 0x30315844, 0x464d4e47
@@ -68,7 +67,7 @@ end
 
 --- A u64 field as a number: exact below 2^53, which every real offset is.
 local function u64(data: buffer, offset: number): number
-  return readu32(data, offset) + readu32(data, offset + 4) * 0x100000000
+  return buffer.readu32(data, offset) + buffer.readu32(data, offset + 4) * 0x100000000
 end
 
 --- A hash field as the binding reads one: an exact u32, from a number or an integer.
@@ -104,20 +103,20 @@ local function open(store: Store): Backend
   end
 
   need(4)
-  local magic = readu32(index, 0)
+  local magic = buffer.readu32(index, 0)
   if magic ~= Magic then util.invalidMagic(magic) end
 
   need(8)
-  local version = readu32(index, 4)
+  local version = buffer.readu32(index, 4)
   if not Versions[version] then util.invalidVersion(version) end
 
   need(12)
-  local format = readu32(index, 8)
+  local format = buffer.readu32(index, 8)
   local formatName = FormatNames[format]
   if not formatName then fail(`invalid format read from archive header: {util.hex32(format)}`) end
 
   need(24)
-  local count = readu32(index, 12)
+  local count = buffer.readu32(index, 12)
   local stringTable = u64(index, 16)
   local position = 24
   if version == 2 or version == 3 then
@@ -128,7 +127,7 @@ local function open(store: Store): Backend
   local compression = 'zip'
   if version == 3 then
     need(36)
-    if readu32(index, 32) == 3 then compression = 'lz4' end
+    if buffer.readu32(index, 32) == 3 then compression = 'lz4' end
 
     position = 36
   end
@@ -146,8 +145,8 @@ local function open(store: Store): Backend
   for entry = 1, count do
     records[entry] = position
     need(position + 16)
-    local chunkCount = readu8(index, position + 13)
-    local fileHeaderSize = readu16(index, position + 14)
+    local chunkCount = buffer.readu8(index, position + 13)
+    local fileHeaderSize = buffer.readu16(index, position + 14)
     if fileHeaderSize ~= headerSize then fail(`invalid BA2 file header size: {fileHeaderSize}`) end
 
     position += 16
@@ -164,10 +163,11 @@ local function open(store: Store): Backend
     local firstChunk = position
     for _ = 1, chunkCount do
       need(position + chunkSize)
-      local sentinel = readu32(index, position + chunkSize - 4)
+      local sentinel = buffer.readu32(index, position + chunkSize - 4)
       if sentinel ~= Sentinel then fail(`invalid chunk sentinel: {util.hex32(sentinel)}`) end
 
-      local packed, unpacked = readu32(index, position + 8), readu32(index, position + 12)
+      local packed = buffer.readu32(index, position + 8)
+      local unpacked = buffer.readu32(index, position + 12)
       if u64(index, position) + (if packed == 0 then unpacked else packed) > size then
         fail(Messages.outOfBounds)
       end
@@ -176,14 +176,15 @@ local function open(store: Store): Backend
     end
 
     if format == Dx10 then
-      local height, width = readu16(index, textureAt), readu16(index, textureAt + 2)
-      local mipCount, textureFormat = readu8(index, textureAt + 4), readu8(index, textureAt + 5)
-      local flags = readu8(index, textureAt + 6)
+      local height, width = buffer.readu16(index, textureAt), buffer.readu16(index, textureAt + 2)
+      local mipCount = buffer.readu8(index, textureAt + 4)
+      local textureFormat = buffer.readu8(index, textureAt + 5)
+      local flags = buffer.readu8(index, textureAt + 6)
       dds.check(height, width, mipCount, textureFormat)
       stamp += 1
       for chunk = 0, chunkCount - 1 do
         local at = firstChunk + 24 * chunk
-        local first, last = readu16(index, at + 16), readu16(index, at + 18)
+        local first, last = buffer.readu16(index, at + 16), buffer.readu16(index, at + 18)
         if first > last or last >= mipCount then util.dds 'invalid BA2 texture mip range' end
 
         for mip = first, last do
@@ -193,7 +194,7 @@ local function open(store: Store): Backend
         end
 
         local expected = dds.mipBytes(height, width, flags, textureFormat, first, last)
-        if readu32(index, at + 12) ~= expected then
+        if buffer.readu32(index, at + 12) ~= expected then
           util.dds 'DDS payload size does not match metadata'
         end
       end
@@ -205,21 +206,21 @@ local function open(store: Store): Backend
   end
 
   -- The string table: a u16 length and that many bytes per entry, in record order.
-  local names_: buffer? = nil
+  local nameRegion: buffer? = nil
   local namesBase = 0
   local nameStarts: { number } = {}
   if stringTable ~= 0 then
     if stringTable > size then fail(Messages.outOfBounds) end
 
-    local table_, base = Store.region(store, stringTable, size - stringTable)
-    names_, namesBase = table_, base
+    local region, base = Store.region(store, stringTable, size - stringTable)
+    nameRegion, namesBase = region, base
     nameStarts = table.create(count) :: { number }
     local cursor = base
     local limit = base + size - stringTable
     for entry = 1, count do
       if cursor + 2 > limit then fail(Messages.endOfFile) end
 
-      local length = readu16(table_, cursor)
+      local length = buffer.readu16(region, cursor)
       if cursor + 2 + length > limit then fail(Messages.endOfFile) end
 
       nameStarts[entry] = cursor
@@ -228,17 +229,19 @@ local function open(store: Store): Backend
   end
 
   local function nameOf(entry: number): string?
-    local region = names_
+    local region = nameRegion
     if not region then return nil end
 
     local start = nameStarts[entry]
-    local length = readu16(region, start)
+    local length = buffer.readu16(region, start)
     if length == 0 then return nil end
 
     return buffer.readstring(region, start + 2, length)
   end
 
-  local function chunkCountOf(entry: number): number return readu8(index, records[entry] + 13) end
+  local function chunkCountOf(entry: number): number
+    return buffer.readu8(index, records[entry] + 13)
+  end
 
   local function chunkAt(entry: number, chunk: number): number
     return records[entry]
@@ -251,19 +254,19 @@ local function open(store: Store): Backend
 
     local at = records[entry] + 16
     return {
-      height = readu16(index, at),
-      width = readu16(index, at + 2),
-      mipCount = readu8(index, at + 4),
-      format = readu8(index, at + 5),
-      flags = readu8(index, at + 6),
-      tileMode = readu8(index, at + 7),
+      height = buffer.readu16(index, at),
+      width = buffer.readu16(index, at + 2),
+      mipCount = buffer.readu8(index, at + 4),
+      format = buffer.readu8(index, at + 5),
+      flags = buffer.readu8(index, at + 6),
+      tileMode = buffer.readu8(index, at + 7),
     }
   end
 
   local function chunksSize(entry: number): number
     local total = 0
     for chunk = 0, chunkCountOf(entry) - 1 do
-      total += readu32(index, chunkAt(entry, chunk) + 12)
+      total += buffer.readu32(index, chunkAt(entry, chunk) + 12)
     end
 
     return total
@@ -276,7 +279,7 @@ local function open(store: Store): Backend
 
     local total = chunksSize(entry)
     if format == Dx10 then
-      total += dds.headerLength(readu8(index, records[entry] + 21))
+      total += dds.headerLength(buffer.readu8(index, records[entry] + 21))
     end
 
     return total, nil
@@ -285,7 +288,8 @@ local function open(store: Store): Backend
   --- One chunk's decoded bytes.
   local function chunkBytes(entry: number, chunk: number): buffer
     local at = chunkAt(entry, chunk)
-    local offset, packed, unpacked = u64(index, at), readu32(index, at + 8), readu32(index, at + 12)
+    local offset = u64(index, at)
+    local packed, unpacked = buffer.readu32(index, at + 8), buffer.readu32(index, at + 12)
     if packed == 0 then return Store.read(store, offset, unpacked) end
 
     local compressed = Store.read(store, offset, packed)
@@ -308,7 +312,8 @@ local function open(store: Store): Backend
 
     for chunk = 0, chunkCountOf(entry) - 1 do
       local position = chunkAt(entry, chunk)
-      local packed, unpacked = readu32(index, position + 8), readu32(index, position + 12)
+      local packed = buffer.readu32(index, position + 8)
+      local unpacked = buffer.readu32(index, position + 12)
       if packed == 0 then
         Store.copyInto(store, target, cursor, u64(index, position), unpacked)
       else
@@ -336,15 +341,16 @@ local function open(store: Store): Backend
 
   local function buildNames(): names.Index
     local built = names.new()
-    local region = names_
+    local region = nameRegion
     if not region then return built end
 
     local plain = names.regionCanonical(region, namesBase, size - stringTable)
     for entry = 1, count do
       local start = nameStarts[entry]
-      local length = readu16(region, start)
+      local length = buffer.readu16(region, start)
       if length > 0 then
-        built.add(region, start + 2, length, entry, plain and readu8(region, start + 2) ~= 92)
+        local canonical = plain and buffer.readu8(region, start + 2) ~= 92
+        built.add(region, start + 2, length, entry, canonical)
       end
     end
 
@@ -360,14 +366,14 @@ local function open(store: Store): Backend
     local built: { [number]: { [integer]: number } } = {}
     for entry = count, 1, -1 do
       local at = records[entry]
-      local directory = readu32(index, at + 8)
+      local directory = buffer.readu32(index, at + 8)
       local files = built[directory]
       if not files then
         files = {}
         built[directory] = files
       end
 
-      files[util.int64(readu32(index, at), readu32(index, at + 4))] = entry
+      files[util.int64(buffer.readu32(index, at), buffer.readu32(index, at + 4))] = entry
     end
 
     hashes = built
@@ -407,10 +413,10 @@ local function open(store: Store): Backend
       local at = chunkAt(entry, chunk)
       list[chunk + 1] = {
         offset = u64(index, at),
-        packedSize = readu32(index, at + 8),
-        size = readu32(index, at + 12),
-        firstMip = if chunked then readu16(index, at + 16) else 0,
-        lastMip = if chunked then readu16(index, at + 18) else 0,
+        packedSize = buffer.readu32(index, at + 8),
+        size = buffer.readu32(index, at + 12),
+        firstMip = if chunked then buffer.readu16(index, at + 16) else 0,
+        lastMip = if chunked then buffer.readu16(index, at + 18) else 0,
       }
     end
 
@@ -438,8 +444,8 @@ local function open(store: Store): Backend
       local total = 0
       for chunk = 0, chunkCountOf(entry) - 1 do
         local at = chunkAt(entry, chunk)
-        local packed = readu32(index, at + 8)
-        total += if packed == 0 then readu32(index, at + 12) else packed
+        local packed = buffer.readu32(index, at + 8)
+        total += if packed == 0 then buffer.readu32(index, at + 12) else packed
       end
 
       return total
@@ -453,7 +459,7 @@ local function open(store: Store): Backend
 
     compressed = function(entry: number): boolean
       for chunk = 0, chunkCountOf(entry) - 1 do
-        if readu32(index, chunkAt(entry, chunk) + 8) ~= 0 then return true end
+        if buffer.readu32(index, chunkAt(entry, chunk) + 8) ~= 0 then return true end
       end
 
       return false
@@ -464,17 +470,17 @@ local function open(store: Store): Backend
     ba2Hash = function(entry: number): { directory: number, file: number, extension: number }?
       local at = records[entry]
       return {
-        directory = readu32(index, at + 8),
-        file = readu32(index, at),
-        extension = readu32(index, at + 4),
+        directory = buffer.readu32(index, at + 8),
+        file = buffer.readu32(index, at),
+        extension = buffer.readu32(index, at + 4),
       }
     end,
     decode = decode,
     decodeString = function(entry: number): string
       if format == Gnrl and chunkCountOf(entry) == 1 then
         local at = chunkAt(entry, 0)
-        if readu32(index, at + 8) == 0 then
-          return Store.readString(store, u64(index, at), readu32(index, at + 12))
+        if buffer.readu32(index, at + 8) == 0 then
+          return Store.readString(store, u64(index, at), buffer.readu32(index, at + 12))
         end
       end
 
@@ -488,7 +494,8 @@ local function open(store: Store): Backend
       local stored, unpacked, compressed = 0, 0, false
       for chunk = 0, chunkCount - 1 do
         local position = chunkAt(entry, chunk)
-        local packed, size = readu32(index, position + 8), readu32(index, position + 12)
+        local packed = buffer.readu32(index, position + 8)
+        local size = buffer.readu32(index, position + 12)
         stored += if packed == 0 then size else packed
         unpacked += size
         compressed = compressed or packed ~= 0
@@ -503,15 +510,15 @@ local function open(store: Store): Backend
         offset = if chunkCount > 0 then u64(index, chunkAt(entry, 0)) else nil,
         compressed = compressed,
         chunks = chunkCount,
-        directoryHash = readu32(index, at + 8),
-        fileHash = readu32(index, at),
-        extensionHash = readu32(index, at + 4),
+        directoryHash = buffer.readu32(index, at + 8),
+        fileHash = buffer.readu32(index, at),
+        extensionHash = buffer.readu32(index, at + 4),
       }
 
       if format == Gnrl then
         row.size = unpacked
       elseif format == Dx10 then
-        row.size = unpacked + dds.headerLength(readu8(index, at + 21))
+        row.size = unpacked + dds.headerLength(buffer.readu8(index, at + 21))
       end
 
       return row

@@ -10,8 +10,6 @@ local util = require './util'
 type TextureHeader = types.TextureHeader
 
 local dds = util.dds
-local band, bor = bit32.band, bit32.bor
-local readu32 = buffer.readu32
 
 local Ddsd = table.freeze {
   caps = 0x1,
@@ -123,12 +121,12 @@ local Dx10Pitched: { [number]: number } = {
 
 --- The plain formats: bytes per pixel, pixel-format flags, bit count, and the four masks.
 local Plain: { [number]: { number } } = {
-  [28] = { 4, bor(Pf.rgb, Pf.alphaPixels), 32, 0xff, 0xff00, 0xff0000, 0xff000000 },
-  [87] = { 4, bor(Pf.rgb, Pf.alphaPixels), 32, 0xff0000, 0xff00, 0xff, 0xff000000 },
+  [28] = { 4, bit32.bor(Pf.rgb, Pf.alphaPixels), 32, 0xff, 0xff00, 0xff0000, 0xff000000 },
+  [87] = { 4, bit32.bor(Pf.rgb, Pf.alphaPixels), 32, 0xff0000, 0xff00, 0xff, 0xff000000 },
   [88] = { 4, Pf.rgb, 32, 0xff0000, 0xff00, 0xff, 0 },
   [85] = { 2, Pf.rgb, 16, 0xf800, 0x7e0, 0x1f, 0 },
-  [86] = { 2, bor(Pf.rgb, Pf.alphaPixels), 16, 0x7c00, 0x3e0, 0x1f, 0x8000 },
-  [49] = { 2, bor(Pf.luminance, Pf.alphaPixels), 16, 0xff, 0, 0, 0xff00 },
+  [86] = { 2, bit32.bor(Pf.rgb, Pf.alphaPixels), 16, 0x7c00, 0x3e0, 0x1f, 0x8000 },
+  [49] = { 2, bit32.bor(Pf.luminance, Pf.alphaPixels), 16, 0xff, 0, 0, 0xff00 },
   [65] = { 1, Pf.alpha, 8, 0, 0, 0, 0xff },
   [61] = { 1, Pf.luminance, 8, 0xff, 0, 0, 0 },
 }
@@ -151,7 +149,7 @@ local function header(
   if mipCount == 0 then dds 'zero mip count' end
 
   local fields: Fields = {
-    flags = bor(Ddsd.caps, Ddsd.pixelFormat, Ddsd.width, Ddsd.height, Ddsd.mipmapCount),
+    flags = bit32.bor(Ddsd.caps, Ddsd.pixelFormat, Ddsd.width, Ddsd.height, Ddsd.mipmapCount),
     pitch = 0,
     pfFlags = 0,
     fourcc = 0,
@@ -166,10 +164,10 @@ local function header(
     misc = 0,
   }
 
-  if mipCount > 1 then fields.caps = bor(fields.caps, Caps.mipmap, Caps.complex) end
+  if mipCount > 1 then fields.caps = bit32.bor(fields.caps, Caps.mipmap, Caps.complex) end
 
-  if band(flags, 1) ~= 0 then
-    fields.caps = bor(fields.caps, Caps.complex)
+  if bit32.band(flags, 1) ~= 0 then
+    fields.caps = bit32.bor(fields.caps, Caps.complex)
     fields.caps2 = CubemapCaps2
     fields.misc = MiscTextureCube
   end
@@ -179,24 +177,24 @@ local function header(
   local pitched = Dx10Pitched[format]
   local plain = Plain[format]
   if legacy then
-    fields.flags = bor(fields.flags, Ddsd.linearSize)
+    fields.flags = bit32.bor(fields.flags, Ddsd.linearSize)
     fields.pfFlags = Pf.fourCc
     fields.fourcc = legacy.fourcc
     fields.pitch = blockLinearSize(width, height, legacy.block)
   elseif dx10Block then
-    fields.flags = bor(fields.flags, Ddsd.linearSize)
+    fields.flags = bit32.bor(fields.flags, Ddsd.linearSize)
     fields.pfFlags = Pf.fourCc
     fields.fourcc = Dx10
     fields.dxgi = format
     fields.pitch = blockLinearSize(width, height, dx10Block)
   elseif pitched then
-    fields.flags = bor(fields.flags, Ddsd.pitch)
+    fields.flags = bit32.bor(fields.flags, Ddsd.pitch)
     fields.pfFlags = Pf.fourCc
     fields.fourcc = Dx10
     fields.dxgi = format
     fields.pitch = width * pitched
   elseif plain then
-    fields.flags = bor(fields.flags, Ddsd.pitch)
+    fields.flags = bit32.bor(fields.flags, Ddsd.pitch)
     fields.pitch = width * plain[1]
     fields.pfFlags = plain[2]
     fields.rgbBits = plain[3]
@@ -265,7 +263,7 @@ local function mipBytes(
   local layout = Layouts[format]
   if not layout then dds 'unsupported DXGI format' end
 
-  local faces = if band(flags, 1) ~= 0 then 6 else 1
+  local faces = if bit32.band(flags, 1) ~= 0 then 6 else 1
   local size = 0
   for mip = first, last do
     -- The crate shifts a u32 by the mip number; a release build masks the shift to five bits.
@@ -298,66 +296,75 @@ end
 local function readAt(bytes: buffer, offset: number): number
   if offset + 4 > buffer.len(bytes) then dds 'truncated DDS header' end
 
-  return readu32(bytes, offset)
+  return buffer.readu32(bytes, offset)
 end
 
---- The DXGI format a plain pixel format means.
+--- The DXGI format a plain pixel format means, from its flags, bit count, and channel masks.
 local function plainFormat(
   flags: number,
   bits: number,
-  r: number,
-  g: number,
-  b: number,
-  a: number
+  red: number,
+  green: number,
+  blue: number,
+  alpha: number
 ): number
-  local rgbAlpha = bor(Pf.rgb, Pf.alphaPixels)
-  if bits == 32 and band(flags, rgbAlpha) == rgbAlpha then
-    if r == 0xff and g == 0xff00 and b == 0xff0000 and a == 0xff000000 then return 28 end
+  local rgbAlpha = bit32.bor(Pf.rgb, Pf.alphaPixels)
+  if bits == 32 and bit32.band(flags, rgbAlpha) == rgbAlpha then
+    if red == 0xff and green == 0xff00 and blue == 0xff0000 and alpha == 0xff000000 then
+      return 28
+    end
 
-    if r == 0xff0000 and g == 0xff00 and b == 0xff and a == 0xff000000 then return 87 end
+    if red == 0xff0000 and green == 0xff00 and blue == 0xff and alpha == 0xff000000 then
+      return 87
+    end
   end
 
   if
     bits == 32
-    and band(flags, Pf.rgb) ~= 0
-    and r == 0xff0000
-    and g == 0xff00
-    and b == 0xff
-    and a == 0
+    and bit32.band(flags, Pf.rgb) ~= 0
+    and red == 0xff0000
+    and green == 0xff00
+    and blue == 0xff
+    and alpha == 0
   then
     return 88
   end
 
   if
     bits == 16
-    and band(flags, Pf.rgb) ~= 0
-    and r == 0xf800
-    and g == 0x7e0
-    and b == 0x1f
-    and a == 0
+    and bit32.band(flags, Pf.rgb) ~= 0
+    and red == 0xf800
+    and green == 0x7e0
+    and blue == 0x1f
+    and alpha == 0
   then
     return 85
   end
 
   if
     bits == 16
-    and band(flags, rgbAlpha) == rgbAlpha
-    and r == 0x7c00
-    and g == 0x3e0
-    and b == 0x1f
-    and a == 0x8000
+    and bit32.band(flags, rgbAlpha) == rgbAlpha
+    and red == 0x7c00
+    and green == 0x3e0
+    and blue == 0x1f
+    and alpha == 0x8000
   then
     return 86
   end
 
-  local luminanceAlpha = bor(Pf.luminance, Pf.alphaPixels)
-  if bits == 16 and r == 0xff and a == 0xff00 and band(flags, luminanceAlpha) == luminanceAlpha then
+  local luminanceAlpha = bit32.bor(Pf.luminance, Pf.alphaPixels)
+  if
+    bits == 16
+    and red == 0xff
+    and alpha == 0xff00
+    and bit32.band(flags, luminanceAlpha) == luminanceAlpha
+  then
     return 49
   end
 
-  if bits == 8 and a == 0xff and band(flags, Pf.alpha) ~= 0 then return 65 end
+  if bits == 8 and alpha == 0xff and bit32.band(flags, Pf.alpha) ~= 0 then return 65 end
 
-  if bits == 8 and r == 0xff and band(flags, Pf.luminance) ~= 0 then return 61 end
+  if bits == 8 and red == 0xff and bit32.band(flags, Pf.luminance) ~= 0 then return 61 end
 
   return dds 'unsupported DDS pixel format'
 end
@@ -379,27 +386,27 @@ local function parse(bytes: buffer): (TextureHeader, number)
 
   if buffer.readstring(bytes, 0, 4) ~= 'DDS ' then dds 'invalid DDS magic' end
 
-  if readu32(bytes, 4) ~= 124 then dds 'invalid DDS header size' end
+  if buffer.readu32(bytes, 4) ~= 124 then dds 'invalid DDS header size' end
 
-  if readu32(bytes, 76) ~= 32 then dds 'invalid DDS pixel format size' end
+  if buffer.readu32(bytes, 76) ~= 32 then dds 'invalid DDS pixel format size' end
 
-  local flags, caps2 = readu32(bytes, 8), readu32(bytes, 112)
-  if band(flags, Ddsd.depth) ~= 0 or band(caps2, Volume) ~= 0 then
+  local flags, caps2 = buffer.readu32(bytes, 8), buffer.readu32(bytes, 112)
+  if bit32.band(flags, Ddsd.depth) ~= 0 or bit32.band(caps2, Volume) ~= 0 then
     dds 'unsupported DDS volume texture'
   end
 
-  local pfFlags, pfFourcc = readu32(bytes, 80), readu32(bytes, 84)
+  local pfFlags, pfFourcc = buffer.readu32(bytes, 80), buffer.readu32(bytes, 84)
   local payloadOffset, arraySize = 128, 1
   if pfFourcc == Dx10 then
     if length < 148 then dds 'truncated DDS DX10 header' end
 
-    payloadOffset, arraySize = 148, readu32(bytes, 140)
+    payloadOffset, arraySize = 148, buffer.readu32(bytes, 140)
   end
 
-  local height, width = readu32(bytes, 12), readu32(bytes, 16)
-  local mipCount = math.max(readu32(bytes, 28), 1)
+  local height, width = buffer.readu32(bytes, 12), buffer.readu32(bytes, 16)
+  local mipCount = math.max(buffer.readu32(bytes, 28), 1)
   local format: number
-  if band(pfFlags, Pf.fourCc) ~= 0 then
+  if bit32.band(pfFlags, Pf.fourCc) ~= 0 then
     if pfFourcc == Dx10 then
       local dxgi = readAt(bytes, 128)
       if readAt(bytes, 132) ~= Texture2d then dds 'unsupported DDS resource dimension' end
@@ -416,17 +423,17 @@ local function parse(bytes: buffer): (TextureHeader, number)
   else
     format = plainFormat(
       pfFlags,
-      readu32(bytes, 88),
-      readu32(bytes, 92),
-      readu32(bytes, 96),
-      readu32(bytes, 100),
-      readu32(bytes, 104)
+      buffer.readu32(bytes, 88),
+      buffer.readu32(bytes, 92),
+      buffer.readu32(bytes, 96),
+      buffer.readu32(bytes, 100),
+      buffer.readu32(bytes, 104)
     )
   end
 
   local cubemap = if payloadOffset == 148
-    then band(readAt(bytes, 136), MiscTextureCube) ~= 0
-    else band(caps2, Cubemap) ~= 0
+    then bit32.band(readAt(bytes, 136), MiscTextureCube) ~= 0
+    else bit32.band(caps2, Cubemap) ~= 0
   if height > 0xffff then dds 'texture height exceeds BA2 field' end
 
   if width > 0xffff then dds 'texture width exceeds BA2 field' end
