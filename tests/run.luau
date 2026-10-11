@@ -115,95 +115,95 @@ suite.describe('reading what the builders write', function()
 
   suite.it('lists entries as tables, one per index', function()
     local builder = archive.bsa.tes3.Builder.new()
-    for i = 1, 5 do
-      builder:addBytes(`data/file{i}.txt`, string.rep('x', i))
+    for number = 1, 5 do
+      builder:addBytes(`data/file{number}.txt`, string.rep('x', number))
     end
 
     local opened = archive.openBytes(builder:toBytes())
-    local es: any = opened:entries()
-    expect(#es).toBe(5)
-    expect(es[0]).toBeNil()
-    expect(es[6]).toBeNil()
-    expect(es[1.5]).toBeNil()
+    local entries: any = opened:entries()
+    expect(#entries).toBe(5)
+    expect(entries[0]).toBeNil()
+    expect(entries[6]).toBeNil()
+    expect(entries[1.5]).toBeNil()
     local seen = 0
-    for i, e in es do
-      expect(e.index).toBe(i)
-      expect(e.id).toBe(i)
-      expect(es[i]).toBe(e)
-      expect(e.size).toBe(#opened:readEntry(i))
-      expect(e.storedSize).toBe(e.size)
-      expect(type(e.offset)).toBe 'number'
-      expect(e.compressed).toBe(false)
-      expect(e.chunks).toBeNil()
-      expect(typeof(e.hash)).toBe 'integer'
-      expect(#e.hashHex).toBe(16)
-      expect(e.folderHash).toBeNil()
-      expect(e.directoryHash).toBeNil()
-      expect(opened:get(e.path)).toBe(e)
-      expect(opened:entry(i)).toBe(e)
-      expect(opened:getByHash(e.hash)).toBe(e)
-      expect(opened:containsHash(e.hash)).toBe(true)
-      expect(e.folder).toBe 'data'
-      expect(string.sub(e.name, 1, 4)).toBe 'file'
+    for index, entry in entries do
+      expect(entry.index).toBe(index)
+      expect(entry.id).toBe(index)
+      expect(entries[index]).toBe(entry)
+      expect(entry.size).toBe(#opened:readEntry(index))
+      expect(entry.storedSize).toBe(entry.size)
+      expect(type(entry.offset)).toBe 'number'
+      expect(entry.compressed).toBe(false)
+      expect(entry.chunks).toBeNil()
+      expect(typeof(entry.hash)).toBe 'integer'
+      expect(#entry.hashHex).toBe(16)
+      expect(entry.folderHash).toBeNil()
+      expect(entry.directoryHash).toBeNil()
+      expect(opened:get(entry.path)).toBe(entry)
+      expect(opened:entry(index)).toBe(entry)
+      expect(opened:getByHash(entry.hash)).toBe(entry)
+      expect(opened:containsHash(entry.hash)).toBe(true)
+      expect(entry.folder).toBe 'data'
+      expect(string.sub(entry.name, 1, 4)).toBe 'file'
       seen += 1
     end
 
     expect(seen).toBe(5)
-    local copy = es:toTable()
+    local copy = entries:toTable()
     expect(#copy).toBe(5)
-    expect(copy[3]).toBe(es[3])
+    expect(copy[3]).toBe(entries[3])
     expect(table.isfrozen(copy)).toBe(false)
     expect(opened:entry(0)).toBeNil()
     expect(opened:entry(6)).toBeNil()
     expect(opened:get 'missing').toBeNil()
     expect(opened:containsHash(int64 '0000000000003039')).toBe(false)
     expect(opened:getByHash(int64 '0000000000003039')).toBeNil()
-    expect((string.find(tostring(es[1]), 'dream.archive.Entry(1', 1, true))).toBeTruthy()
-    expect(function() es[1].path = 'x' end).toThrow 'readonly'
+    expect((string.find(tostring(entries[1]), 'dream.archive.Entry(1', 1, true))).toBeTruthy()
+    expect(function() entries[1].path = 'x' end).toThrow 'readonly'
   end)
 
   suite.it('gives hashes as integers that match the hash helpers', function()
     local tes3Builder = archive.bsa.tes3.Builder.new()
     tes3Builder:addBytes('Meshes/Foo.NIF', 'tes3')
     local tes3 = archive.openBytes(tes3Builder:toBytes())
-    local h = archive.bsa.tes3.hashFile 'meshes\\foo.nif'
+    local tes3Hash = archive.bsa.tes3.hashFile 'meshes\\foo.nif'
     local first = tes3:entries()[1]
-    expect(first.hash).toBe(h.hash)
-    expect(first.hashHex).toBe(h.hex)
-    expect(tes3:containsHash(h.hash)).toBe(true)
-    expect((tes3:getByHash(h.hash) :: archive.Entry).path).toBe 'meshes\\foo.nif'
+    expect(first.hash).toBe(tes3Hash.hash)
+    expect(first.hashHex).toBe(tes3Hash.hex)
+    expect(tes3:containsHash(tes3Hash.hash)).toBe(true)
+    expect((tes3:getByHash(tes3Hash.hash) :: archive.Entry).path).toBe 'meshes\\foo.nif'
     expect(function() return tes3:containsHash(1) end).toThrow 'expected integer, got number'
-    expect(function() return tes3:containsHash(h.hash, h.hash) end).toThrow 'takes one integer'
+    expect(function() return tes3:containsHash(tes3Hash.hash, tes3Hash.hash) end).toThrow 'takes one integer'
 
     local tes4Builder = archive.bsa.tes4.Builder.new()
     tes4Builder:addBytes('textures/foo.dds', 'tes4')
     local tes4 = archive.openBytes(tes4Builder:toBytes())
     local folder = archive.bsa.tes4.hashDirectory 'textures'
     local file = archive.bsa.tes4.hashFile 'foo.dds'
-    local e = tes4:entries()[1]
-    expect(e.hash).toBe(file.hash)
-    expect(e.folderHash).toBe(folder.hash)
-    expect(e.hashHex).toBe(file.hex)
-    expect(e.folderHashHex).toBe(folder.hex)
+    local tes4Entry = tes4:entries()[1]
+    expect(tes4Entry.hash).toBe(file.hash)
+    expect(tes4Entry.folderHash).toBe(folder.hash)
+    expect(tes4Entry.hashHex).toBe(file.hex)
+    expect(tes4Entry.folderHashHex).toBe(folder.hex)
     expect(tes4:containsHash(folder.hash, file.hash)).toBe(true)
-    expect(tes4:getByHash(folder.hash, file.hash)).toBe(e)
+    expect(tes4:getByHash(folder.hash, file.hash)).toBe(tes4Entry)
     expect(tes4:containsHash(file.hash, folder.hash)).toBe(false)
     expect(function() return tes4:containsHash(folder.hash) end).toThrow 'takes two integers'
 
     local ba2Builder = archive.ba2.Builder.new()
     ba2Builder:addBytes('Meshes/Foo.NIF', 'ba2')
     local ba2 = archive.openBytes(ba2Builder:toBytes())
-    local h2 = archive.ba2.hashFile 'meshes/foo.nif'
-    local b = ba2:entries()[1]
-    expect(b.hash).toBeNil()
-    expect(b.hashHex).toBeNil()
-    expect(b.directoryHash).toBe(h2.directory)
-    expect(b.fileHash).toBe(h2.file)
-    expect(b.extensionHash).toBe(h2.extension)
-    expect(ba2:containsHash(h2.directory, h2.file, h2.extension)).toBe(true)
-    expect(ba2:getByHash(h2.directory, h2.file, h2.extension)).toBe(b)
-    expect(ba2:containsHash(h2.directory, h2.file, h2.extension + 1)).toBe(false)
-    expect(function() return ba2:containsHash(h2.directory, h2.file) end).toThrow 'three numbers'
+    local ba2Hash = archive.ba2.hashFile 'meshes/foo.nif'
+    local ba2Entry = ba2:entries()[1]
+    expect(ba2Entry.hash).toBeNil()
+    expect(ba2Entry.hashHex).toBeNil()
+    expect(ba2Entry.directoryHash).toBe(ba2Hash.directory)
+    expect(ba2Entry.fileHash).toBe(ba2Hash.file)
+    expect(ba2Entry.extensionHash).toBe(ba2Hash.extension)
+    expect(ba2:containsHash(ba2Hash.directory, ba2Hash.file, ba2Hash.extension)).toBe(true)
+    expect(ba2:getByHash(ba2Hash.directory, ba2Hash.file, ba2Hash.extension)).toBe(ba2Entry)
+    expect(ba2:containsHash(ba2Hash.directory, ba2Hash.file, ba2Hash.extension + 1)).toBe(false)
+    expect(function() return ba2:containsHash(ba2Hash.directory, ba2Hash.file) end).toThrow 'three numbers'
     expect(function() return ba2:containsHash(1.5, 2, 3) end).toThrow 'not an exact u32'
   end)
 
@@ -217,19 +217,19 @@ suite.describe('reading what the builders write', function()
       builder:addBytes('big/payload.bin', payload)
       builder:addBytes('small.txt', 'tiny')
       local opened = archive.openBytes(builder:toBytes())
-      local buf = buffer.create(#payload + 8)
-      expect(opened:readInto('big/payload.bin', buf)).toBe(#payload)
-      expect(buffer.readstring(buf, 0, #payload)).toBe(payload)
-      local e = opened:get 'small.txt' :: archive.Entry
-      expect(opened:readInto(e, buf, 4)).toBe(4)
-      expect(buffer.readstring(buf, 4, 4)).toBe 'tiny'
-      expect(opened:readInto(e, buf, #payload + 4)).toBe(4)
-      expect(function() opened:readInto(e, buf, #payload + 5) end).toThrow 'does not fit'
-      expect(function() opened:readInto(e, buf, #payload + 9) end).toThrow 'out of bounds'
-      expect(function() opened:readInto('missing', buf) end).toThrow 'not found'
-      expect(function() (opened :: any):readInto(7, buf) end).toThrow 'entry handle or an archive path'
+      local into = buffer.create(#payload + 8)
+      expect(opened:readInto('big/payload.bin', into)).toBe(#payload)
+      expect(buffer.readstring(into, 0, #payload)).toBe(payload)
+      local small = opened:get 'small.txt' :: archive.Entry
+      expect(opened:readInto(small, into, 4)).toBe(4)
+      expect(buffer.readstring(into, 4, 4)).toBe 'tiny'
+      expect(opened:readInto(small, into, #payload + 4)).toBe(4)
+      expect(function() opened:readInto(small, into, #payload + 5) end).toThrow 'does not fit'
+      expect(function() opened:readInto(small, into, #payload + 9) end).toThrow 'out of bounds'
+      expect(function() opened:readInto('missing', into) end).toThrow 'not found'
+      expect(function() (opened :: any):readInto(7, into) end).toThrow 'entry handle or an archive path'
       local other = archive.openBytes(builder:toBytes())
-      expect(function() other:readInto(e, buf) end).toThrow 'different archive'
+      expect(function() other:readInto(small, into) end).toThrow 'different archive'
       expect(#(opened:readFile 'big/payload.bin' :: string)).toBe(#payload)
     end
   end)
@@ -461,9 +461,9 @@ suite.describe('reading what the builders write', function()
     local ba2 = archive.ba2.openBytes(dx10:toBytes())
     expect(ba2:info().format).toBe 'dx10'
     expect(string.sub(ba2:readEntry(1), 1, 4)).toBe 'DDS '
-    local e = ba2:entries()[1]
-    expect(e.size).toBe(#ba2:readEntry(1))
-    expect(e.chunks).toBe(1)
+    local texture = ba2:entries()[1]
+    expect(texture.size).toBe(#ba2:readEntry(1))
+    expect(texture.chunks).toBe(1)
   end)
 
   suite.it('keeps open errors apart from detection', function()
@@ -523,6 +523,7 @@ suite.describe('reading what the builders write', function()
         )
       end
     ).toThrow 'missing required option \'format\''
+
     expect(
       function()
         dx10:addTextureBytes(
@@ -532,6 +533,7 @@ suite.describe('reading what the builders write', function()
         )
       end
     ).toThrow 'height'
+
     expect(
       function()
         dx10:addTextureBytes(
@@ -662,9 +664,9 @@ suite.describe('lookups', function()
     expect(second.file).toBe(0x0785843B)
     expect(second.extension).toBe(0x6D736762)
     expect(second.directory).toBe(0x818374CC)
-    local a, b =
+    local untidy, normalized =
       archive.ba2.hashFile '/Textures/Foo/Bar.DDS\\', archive.ba2.hashFile 'textures\\foo\\bar.dds'
-    expect(a).toEqual(b)
+    expect(untidy).toEqual(normalized)
     local nonAscii = archive.ba2.hashFile 'Sound/Voice/Fallout4.esm/RobotMrHandy/Mar\237a_M.fuz'
     local stripped = archive.ba2.hashFile 'Sound/Voice/Fallout4.esm/RobotMrHandy/Mara_M.fuz'
     expect(nonAscii.file).toBe(stripped.file)
@@ -800,6 +802,7 @@ suite.describe('hand-made archives', function()
         )
       end
     ).toThrow 'TES4 Xbox archive layout'
+
     expect(
       function()
         archive.bsa.tes4.openBytes(
@@ -809,6 +812,7 @@ suite.describe('hand-made archives', function()
         )
       end
     ).toThrow 'TES4 XMem compression'
+
     local oblivion = archive.bsa.tes4.openBytes(support.tes4(tes4Spec(103, 7 + 0x200, {
       { name = 'a.txt', data = 'x', compress = 'zlib' },
     })))
