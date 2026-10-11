@@ -1,0 +1,1232 @@
+--!strict
+--!native
+-- The archive port's own suite: dream_archive's tests, its Luau API contracts first, held to the
+-- port alone. The fixtures beside this file are read when they are there; the filesystem cases
+-- run when the harness names a scratch folder as `scratchRoot`.
+local archive = require '@dream-archive'
+local fs = require '@dream/fs'
+local support = require './support'
+local test = require '@jess/test'
+local expect = test.expect
+local suite = test.new()
+
+local dreamArchive: any = archive
+
+local function fixturePath(relative: string): string?
+  local path = `{support.here()}/fixtures/{relative}`
+  return if fs.exists(path) then path else nil
+end
+
+local function digest(data: string): string return support.digest(data) end
+
+--- A 64-bit integer from 16 hex digits; StyLua reads no integer literals.
+local function int64(hex: string): integer
+  local scratch = buffer.create(8)
+  buffer.writeu32(scratch, 0, tonumber(string.sub(hex, 9, 16), 16) :: number)
+  buffer.writeu32(scratch, 4, tonumber(string.sub(hex, 1, 8), 16) :: number)
+  return buffer.readinteger(scratch, 0)
+end
+
+suite.describe('the module', function()
+  suite.it('has the native module shape, frozen', function()
+    expect(type(archive.openBytes)).toBe 'function'
+    expect(type(archive.detectPath)).toBe 'function'
+    expect(type(archive.ba2.Builder.new)).toBe 'function'
+    expect(type(archive.ba2.Dx10Builder.new)).toBe 'function'
+    expect(archive.ba2.compression.none).toBe 'none'
+    expect(archive.ba2.version.V8).toBe(8)
+    expect(archive.bsa.encoding.cp437).toBe 'cp437'
+    expect(type(archive.bsa.tes3.Builder.new)).toBe 'function'
+    expect(type(archive.bsa.tes4.Builder.new)).toBe 'function'
+    expect(archive.bsa.tes4.profile.skyrimSe).toBe 'skyrimSe'
+    expect(archive.bsa.tes4.nameMode.hashOnly).toBe 'hashOnly'
+    expect(archive.bsa.tes4.archiveTypes.TEXTURES).toBe(2)
+    expect(archive.bsa.tes4.profile.falloutNewVegas).toBe 'falloutNewVegas'
+    expect(archive.bsa.tes4.nameMode.stringsAndEmbedded).toBe 'stringsAndEmbedded'
+    expect(dreamArchive.open_bytes).toBeNil()
+    expect(dreamArchive.bsa.tes4.archive_types).toBeNil()
+    local builder: any = archive.ba2.Builder.new()
+    expect(builder.add_bytes).toBeNil()
+    expect(type(builder.addBytes)).toBe 'function'
+    expect(require '@dream-archive/ba2').toBe(archive.ba2)
+    expect(require '@dream-archive/bsa').toBe(archive.bsa)
+    expect(require '@dream-archive/bsa/tes3').toBe(archive.bsa.tes3)
+    expect(require '@dream-archive/bsa/tes4').toBe(archive.bsa.tes4)
+    expect(function() dreamArchive.ba2.version.V9 = 9 end).toThrow()
+    expect(function() dreamArchive.ba2.Builder.new = nil end).toThrow()
+    expect(function() dreamArchive.ba2 = nil end).toThrow()
+    expect(archive.version).toBe '1.1.0'
+  end)
+
+  suite.it('rejects snake_case enum values', function()
+    local tes4 = archive.bsa.tes4.Builder.new()
+    expect(function() tes4:setProfile 'skyrim_se' end).toThrow 'unknown TES4 profile'
+    expect(function() tes4:setProfile 'fallout_new_vegas' end).toThrow 'unknown TES4 profile'
+    expect(function() tes4:setNameMode 'hash_only' end).toThrow 'unknown TES4 name mode'
+    expect(function() tes4:setNameMode 'strings_and_embedded' end).toThrow 'unknown TES4 name mode'
+    tes4:setProfile 'falloutNewVegas'
+    tes4:setProfile 'skyrimLe'
+    tes4:setNameMode 'stringsAndEmbedded'
+  end)
+end)
+
+suite.describe('reading what the builders write', function()
+  suite.it('builds and reads a BA2 through the top-level module', function()
+    local builder = archive.ba2.Builder.new()
+    builder:setCompression(archive.ba2.compression.zip)
+    builder:setVersion(archive.ba2.version.V1)
+    builder:addBytes('Meshes/Foo.NIF', 'mesh payload')
+    local data = builder:toBytes()
+    expect(archive.guessFormat(data)).toBe 'ba2'
+    local opened: any = archive.openBytes(data)
+    expect(opened:format()).toBe 'ba2'
+    expect(opened:len()).toBe(1)
+    expect(opened:readFileRequired 'meshes/foo.nif').toBe 'mesh payload'
+    expect(opened.openFileRequired).toBeNil()
+    expect(opened:readEntry(1)).toBe 'mesh payload'
+    expect(opened:extractEntry(1)).toBe 'mesh payload'
+    local entries = opened:entries()
+    expect(entries[1].path).toBe 'meshes\\foo.nif'
+    expect(entries[1].format).toBe 'ba2'
+    local ba2 = archive.ba2.openBytes(data)
+    expect(ba2:info().format).toBe 'gnrl'
+    expect(ba2:entries()[1].name).toBe 'foo.nif'
+    expect(ba2:entries()[1].folder).toBe 'meshes'
+    expect((string.find(tostring(opened), 'dream.archive.Archive(ba2', 1, true))).toBeTruthy()
+  end)
+
+  suite.it('splits names and folders the same way in every family', function()
+    for _, builder: any in
+      { archive.bsa.tes3.Builder.new(), archive.bsa.tes4.Builder.new(), archive.ba2.Builder.new() }
+
+    do
+      builder:addBytes('Meshes/X/Foo.NIF', 'nested')
+      builder:addBytes('readme.txt', 'root')
+      local opened = archive.openBytes(builder:toBytes())
+      local nested = opened:get 'meshes/x/foo.nif' :: archive.Entry
+      local root = opened:get 'readme.txt' :: archive.Entry
+      expect(nested.path).toBe 'meshes\\x\\foo.nif'
+      expect(nested.name).toBe 'foo.nif'
+      expect(nested.folder).toBe 'meshes\\x'
+      expect(root.name).toBe 'readme.txt'
+      expect(root.folder).toBe ''
+    end
+  end)
+
+  suite.it('lists entries as tables, one per index', function()
+    local builder = archive.bsa.tes3.Builder.new()
+    for i = 1, 5 do
+      builder:addBytes(`data/file{i}.txt`, string.rep('x', i))
+    end
+
+    local opened = archive.openBytes(builder:toBytes())
+    local es: any = opened:entries()
+    expect(#es).toBe(5)
+    expect(es[0]).toBeNil()
+    expect(es[6]).toBeNil()
+    expect(es[1.5]).toBeNil()
+    local seen = 0
+    for i, e in es do
+      expect(e.index).toBe(i)
+      expect(e.id).toBe(i)
+      expect(es[i]).toBe(e)
+      expect(e.size).toBe(#opened:readEntry(i))
+      expect(e.storedSize).toBe(e.size)
+      expect(type(e.offset)).toBe 'number'
+      expect(e.compressed).toBe(false)
+      expect(e.chunks).toBeNil()
+      expect(typeof(e.hash)).toBe 'integer'
+      expect(#e.hashHex).toBe(16)
+      expect(e.folderHash).toBeNil()
+      expect(e.directoryHash).toBeNil()
+      expect(opened:get(e.path)).toBe(e)
+      expect(opened:entry(i)).toBe(e)
+      expect(opened:getByHash(e.hash)).toBe(e)
+      expect(opened:containsHash(e.hash)).toBe(true)
+      expect(e.folder).toBe 'data'
+      expect(string.sub(e.name, 1, 4)).toBe 'file'
+      seen += 1
+    end
+
+    expect(seen).toBe(5)
+    local copy = es:toTable()
+    expect(#copy).toBe(5)
+    expect(copy[3]).toBe(es[3])
+    expect(table.isfrozen(copy)).toBe(false)
+    expect(opened:entry(0)).toBeNil()
+    expect(opened:entry(6)).toBeNil()
+    expect(opened:get 'missing').toBeNil()
+    expect(opened:containsHash(int64 '0000000000003039')).toBe(false)
+    expect(opened:getByHash(int64 '0000000000003039')).toBeNil()
+    expect((string.find(tostring(es[1]), 'dream.archive.Entry(1', 1, true))).toBeTruthy()
+    expect(function() es[1].path = 'x' end).toThrow 'readonly'
+  end)
+
+  suite.it('gives hashes as integers that match the hash helpers', function()
+    local tes3Builder = archive.bsa.tes3.Builder.new()
+    tes3Builder:addBytes('Meshes/Foo.NIF', 'tes3')
+    local tes3 = archive.openBytes(tes3Builder:toBytes())
+    local h = archive.bsa.tes3.hashFile 'meshes\\foo.nif'
+    local first = tes3:entries()[1]
+    expect(first.hash).toBe(h.hash)
+    expect(first.hashHex).toBe(h.hex)
+    expect(tes3:containsHash(h.hash)).toBe(true)
+    expect((tes3:getByHash(h.hash) :: archive.Entry).path).toBe 'meshes\\foo.nif'
+    expect(function() return tes3:containsHash(1) end).toThrow 'expected integer, got number'
+    expect(function() return tes3:containsHash(h.hash, h.hash) end).toThrow 'takes one integer'
+
+    local tes4Builder = archive.bsa.tes4.Builder.new()
+    tes4Builder:addBytes('textures/foo.dds', 'tes4')
+    local tes4 = archive.openBytes(tes4Builder:toBytes())
+    local folder = archive.bsa.tes4.hashDirectory 'textures'
+    local file = archive.bsa.tes4.hashFile 'foo.dds'
+    local e = tes4:entries()[1]
+    expect(e.hash).toBe(file.hash)
+    expect(e.folderHash).toBe(folder.hash)
+    expect(e.hashHex).toBe(file.hex)
+    expect(e.folderHashHex).toBe(folder.hex)
+    expect(tes4:containsHash(folder.hash, file.hash)).toBe(true)
+    expect(tes4:getByHash(folder.hash, file.hash)).toBe(e)
+    expect(tes4:containsHash(file.hash, folder.hash)).toBe(false)
+    expect(function() return tes4:containsHash(folder.hash) end).toThrow 'takes two integers'
+
+    local ba2Builder = archive.ba2.Builder.new()
+    ba2Builder:addBytes('Meshes/Foo.NIF', 'ba2')
+    local ba2 = archive.openBytes(ba2Builder:toBytes())
+    local h2 = archive.ba2.hashFile 'meshes/foo.nif'
+    local b = ba2:entries()[1]
+    expect(b.hash).toBeNil()
+    expect(b.hashHex).toBeNil()
+    expect(b.directoryHash).toBe(h2.directory)
+    expect(b.fileHash).toBe(h2.file)
+    expect(b.extensionHash).toBe(h2.extension)
+    expect(ba2:containsHash(h2.directory, h2.file, h2.extension)).toBe(true)
+    expect(ba2:getByHash(h2.directory, h2.file, h2.extension)).toBe(b)
+    expect(ba2:containsHash(h2.directory, h2.file, h2.extension + 1)).toBe(false)
+    expect(function() return ba2:containsHash(h2.directory, h2.file) end).toThrow 'three numbers'
+    expect(function() return ba2:containsHash(1.5, 2, 3) end).toThrow 'not an exact u32'
+  end)
+
+  suite.it('reads straight into a buffer', function()
+    local payload = string.rep('abcdefgh', 8192)
+    local builders: { any } =
+      { archive.bsa.tes3.Builder.new(), archive.bsa.tes4.Builder.new(), archive.ba2.Builder.new() }
+    builders[2]:setCompressed(true)
+    builders[3]:setCompression 'zip'
+    for _, builder in builders do
+      builder:addBytes('big/payload.bin', payload)
+      builder:addBytes('small.txt', 'tiny')
+      local opened = archive.openBytes(builder:toBytes())
+      local buf = buffer.create(#payload + 8)
+      expect(opened:readInto('big/payload.bin', buf)).toBe(#payload)
+      expect(buffer.readstring(buf, 0, #payload)).toBe(payload)
+      local e = opened:get 'small.txt' :: archive.Entry
+      expect(opened:readInto(e, buf, 4)).toBe(4)
+      expect(buffer.readstring(buf, 4, 4)).toBe 'tiny'
+      expect(opened:readInto(e, buf, #payload + 4)).toBe(4)
+      expect(function() opened:readInto(e, buf, #payload + 5) end).toThrow 'does not fit'
+      expect(function() opened:readInto(e, buf, #payload + 9) end).toThrow 'out of bounds'
+      expect(function() opened:readInto('missing', buf) end).toThrow 'not found'
+      expect(function() (opened :: any):readInto(7, buf) end).toThrow 'entry handle or an archive path'
+      local other = archive.openBytes(builder:toBytes())
+      expect(function() other:readInto(e, buf) end).toThrow 'different archive'
+      expect(#(opened:readFile 'big/payload.bin' :: string)).toBe(#payload)
+    end
+  end)
+
+  suite.it('takes payloads as buffers and strings', function()
+    local builder = archive.ba2.Builder.new()
+    builder:addBytes('meshes/foo.nif', buffer.fromstring 'mesh payload')
+    builder:addBytesWithCompression('meshes/bar.nif', 'text', 'store')
+    local opened = archive.openBytes(builder:toBuffer())
+    expect(opened:readFileRequired 'meshes/foo.nif').toBe 'mesh payload'
+    expect(archive.guessFormat(builder:toBuffer())).toBe 'ba2'
+    expect(archive.guessFormat(buffer.create(2))).toBeNil()
+    local tes3 = archive.bsa.tes3.Builder.new()
+    tes3:addBytes('a.txt', buffer.fromstring 'a')
+    expect(archive.bsa.tes3.openBytes(buffer.fromstring(tes3:toBytes())):readEntry(1)).toBe 'a'
+  end)
+
+  suite.it('gives every builder its archive as a buffer', function()
+    local dds = buffer.create(148 + 16)
+    buffer.writestring(dds, 0, 'DDS ')
+    buffer.writeu32(dds, 4, 124)
+    buffer.writeu32(dds, 8, 0x000A1007)
+    buffer.writeu32(dds, 12, 4)
+    buffer.writeu32(dds, 16, 4)
+    buffer.writeu32(dds, 28, 1)
+    buffer.writeu32(dds, 76, 32)
+    buffer.writeu32(dds, 80, 4)
+    buffer.writestring(dds, 84, 'DX10')
+    buffer.writeu32(dds, 108, 0x1000)
+    buffer.writeu32(dds, 128, 98)
+    buffer.writeu32(dds, 132, 3)
+    buffer.writeu32(dds, 140, 1)
+    local dx10 = archive.ba2.Dx10Builder.new()
+    dx10:addDdsBytes('textures/tiny.dds', dds)
+    local cases: { { any } } = {
+      { archive.ba2.Builder.new(), 'ba2', 'meshes/foo.nif' },
+      { dx10, 'ba2', 'textures/tiny.dds' },
+      { archive.bsa.tes3.Builder.new(), 'bsaTes3', 'meshes/foo.nif' },
+      { archive.bsa.tes4.Builder.new(), 'bsaTes4', 'meshes/foo.nif' },
+    }
+
+    for _, case in cases do
+      local builder, format, path = case[1], case[2], case[3]
+      if builder ~= dx10 then builder:addBytes(path, 'payload') end
+
+      local data = builder:toBuffer()
+      expect(typeof(data)).toBe 'buffer'
+      expect(buffer.tostring(data)).toBe(builder:toBytes())
+      local opened = archive.openBytes(data)
+      expect(opened:format()).toBe(format)
+      expect(opened:contains(path)).toBe(true)
+    end
+  end)
+
+  suite.it('reads TES3 and encodes paths', function()
+    local encoded =
+      archive.bsa.encodeFilename('textures/zażółć.dds', archive.bsa.encoding.windows1250)
+    expect(encoded).toBe 'textures/za\191\243\179\230.dds'
+    expect(archive.bsa.decodeFilenameLossy(encoded, 'windows1250')).toBe 'textures/zażółć.dds'
+    expect(archive.bsa.encodeFilename('a', 'cp1250')).toBe 'a'
+    expect(archive.bsa.encodeFilename('a', 'cp1251')).toBe 'a'
+    expect(archive.bsa.encodeFilename('a', 'cp1252')).toBe 'a'
+    local builder = archive.bsa.tes3.Builder.new()
+    builder:addBytes('Meshes/Foo.NIF', 'tes3 payload')
+    local opened = archive.bsa.tes3.openBytes(builder:toString())
+    expect(opened:contains 'meshes/foo.nif').toBe(true)
+    expect(opened:readFileRequired 'meshes/foo.nif').toBe 'tes3 payload'
+    expect(opened:entries()[1].path).toBe 'meshes\\foo.nif'
+    expect(opened:extractFileRequired 'meshes/foo.nif').toBe 'tes3 payload'
+    local entry = opened:entries()[1]
+    local fileHash = archive.bsa.tes3.hashFile 'Meshes/Foo.NIF'
+    expect(entry.hash).toBe(fileHash.hash)
+    expect(entry.hashHex).toBe(fileHash.hex)
+  end)
+
+  suite.it('reads TES3 and TES4 through the top-level module', function()
+    local tes3Builder = archive.bsa.tes3.Builder.new()
+    tes3Builder:addBytes('meshes/foo.nif', 'tes3')
+    local tes3 = archive.openBytes(tes3Builder:toBytes())
+    expect(tes3:format()).toBe 'bsaTes3'
+    expect(tes3:entries()[1].format).toBe 'bsaTes3'
+    expect(tes3:readFileRequired 'meshes/foo.nif').toBe 'tes3'
+    local tes4Builder = archive.bsa.tes4.Builder.new()
+    tes4Builder:addBytes('textures/foo.dds', 'tes4')
+    local tes4 = archive.openBytes(tes4Builder:toBytes())
+    expect(tes4:format()).toBe 'bsaTes4'
+    expect(tes4:extractEntry(1)).toBe 'tes4'
+  end)
+
+  suite.it('builds TES4 with every policy knob', function()
+    local builder = archive.bsa.tes4.Builder.new()
+    builder:setProfile(archive.bsa.tes4.profile.skyrimLe)
+    builder:setArchiveTypes(archive.bsa.tes4.archiveTypes.MISC)
+    builder:setNameMode(archive.bsa.tes4.nameMode.stringsAndEmbedded)
+    builder:setCompressed(true)
+    builder:addBytesWithCompression('textures/foo.dds', 'tes4 payload', 'store')
+    builder:addBytes('textures/bar.dds', 'compressed payload')
+    local opened = archive.bsa.tes4.openBytes(builder:toString())
+    expect(opened:len()).toBe(2)
+    expect(opened:readFileRequired 'textures/foo.dds').toBe 'tes4 payload'
+    local entry = opened:get 'textures/foo.dds' :: archive.Entry
+    expect(entry.path).toBe 'textures\\foo.dds'
+    expect(entry.folder).toBe 'textures'
+    expect(entry.name).toBe 'foo.dds'
+    expect(entry.compressed).toBe(false)
+    expect(entry.size).toBe(#'tes4 payload')
+    local other = opened:get 'textures/bar.dds' :: archive.Entry
+    expect(other.compressed).toBe(true)
+    expect(other.size).toBe(#'compressed payload')
+    expect(other.storedSize ~= other.size).toBe(true)
+    expect(opened:readEntry(entry.index)).toBe 'tes4 payload'
+  end)
+
+  suite.it('keeps payload and path bytes as bytes', function()
+    local payload = 'a\0\255b'
+    local builder = archive.ba2.Builder.new()
+    builder:addBytes('bytes/payload.bin', payload)
+    local opened = archive.openBytes(builder:toBytes())
+    local read = opened:readFileRequired 'bytes/payload.bin'
+    expect(read).toBe(payload)
+    expect(opened:readFile 'missing.bin').toBeNil()
+    expect(opened:extractFile 'missing.bin').toBeNil()
+    expect(archive.normalizePath 'A/B\255/C').toBe 'a/b\255/c'
+    expect(archive.bsa.normalizePath 'A\\B\255/C').toBe 'a/b\255/c'
+
+    local path = 'bytes/\255.bin'
+    for _, make: any in
+      { archive.ba2.Builder.new, archive.bsa.tes3.Builder.new, archive.bsa.tes4.Builder.new }
+
+    do
+      local raw = make()
+      raw:addBytes(path, 'payload')
+      local reopened = archive.openBytes(raw:toBytes())
+      expect(reopened:contains(path)).toBe(true)
+      expect(reopened:readFileRequired(path)).toBe 'payload'
+      expect((string.byte(reopened:entries()[1].path :: string, 7))).toBe(255)
+    end
+  end)
+
+  suite.it('reports option and index errors', function()
+    local ba2 = archive.ba2.Builder.new()
+    expect(function() ba2:setVersion(9) end).toThrow 'unsupported BA2 version'
+    expect(function() ba2:setCompression 'nonsense' end).toThrow 'unknown BA2 compression'
+    expect(function() ba2:setZlibLevel(10) end).toThrow 'zlib compression level'
+    expect(function() ba2:addBytesWithCompression('a.txt', 'x', 'nonsense') end).toThrow 'unknown compression override'
+    expect(function() archive.bsa.encodeFilename('x', 'nonsense') end).toThrow 'unknown filename encoding'
+    expect(function() archive.bsa.encodeFilename('bad\255', 'windows1250') end).toThrow 'not valid UTF-8'
+    local tes4Builder = archive.bsa.tes4.Builder.new()
+    expect(function() tes4Builder:setVersion(999) end).toThrow 'unsupported TES4 BSA version'
+    expect(function() tes4Builder:setProfile 'arena' end).toThrow 'unknown TES4 profile'
+    expect(function() tes4Builder:setNameMode 'mystery' end).toThrow 'unknown TES4 name mode'
+    expect(function() tes4Builder:setZlibLevel(999) end).toThrow 'zlib compression level'
+    expect(function() tes4Builder:setZlibLevel(1.5) end).toThrow 'not an exact'
+    ba2:addBytes('a.txt', 'x')
+    local opened = archive.ba2.openBytes(ba2:toBytes())
+    expect(opened:readEntry(1)).toBe 'x'
+    expect(function() opened:readEntry(0) end).toThrow 'out of bounds'
+    expect(function() opened:extractEntry(2) end).toThrow 'out of bounds'
+    expect(function() opened:readEntry(-1) end).toThrow 'out of bounds'
+    expect(function() opened:readEntry(1.5) end).toThrow 'not an exact'
+    expect(function() opened:extractToWithEncoding('x', 'utf8') end).toThrow 'needs a BSA archive'
+    expect(function() opened:extractToWithPaths('x', {}) end).toThrow 'needs a TES4 BSA archive'
+    local tes3Builder = archive.bsa.tes3.Builder.new()
+    expect(function() tes3Builder:addEncodedPath('bad\255', 'windows1250', 'x') end).toThrow 'not valid UTF-8'
+    tes3Builder:addBytes('a.txt', 'x')
+    local tes3 = archive.bsa.tes3.openBytes(tes3Builder:toBytes())
+    expect(function() tes3:readEntry(0) end).toThrow 'out of bounds'
+    expect(function() tes3:info() end).toThrow 'needs a BA2 archive'
+    expect(function() tes4Builder:addEncodedPath('bad\255', 'windows1250', 'x') end).toThrow 'not valid UTF-8'
+    tes4Builder:addBytes('a.txt', 'x')
+    local tes4 = archive.bsa.tes4.openBytes(tes4Builder:toBytes())
+    expect(function() tes4:extractEntry(2) end).toThrow 'out of bounds'
+    expect(function() ba2:addArchiveEntry('b.txt', tes4, 1) end).toThrow 'needs a BA2 archive'
+  end)
+
+  suite.it('gives hash helpers their exact shapes and values', function()
+    local ba2Hash = archive.ba2.hashFile 'Meshes/Foo.NIF'
+    expect(ba2Hash.normalized).toBe 'meshes\\foo.nif'
+    local tes3 = archive.bsa.tes3.hashFile 'meshes/c/artifact_bloodring_01.nif'
+    expect(tes3.lo).toBe(0x1c3c1149)
+    expect(tes3.hi).toBe(0x920d5f0c)
+    expect(tes3.hex).toBe '1c3c1149920d5f0c'
+    expect(tes3.hash).toBe(int64 '1c3c1149920d5f0c')
+    expect(tes3.normalized).toBe 'meshes\\c\\artifact_bloodring_01.nif'
+    local tes4: any = archive.bsa.tes4.hashFile 'Meshes/Foo.NIF'
+    expect(tes4.numeric).toBeNil()
+    local ba2 =
+      archive.ba2.hashFile 'Textures\\CreationClub\\BGSFO4001\\AnimObjects\\PipBoy\\PipBoy02(Black)_d.DDS'
+    expect(ba2.directory).toBe(0x23157A84)
+    expect(ba2.file).toBe(0x69E1E82C)
+    expect(ba2.extension).toBe(0x00736464)
+    local dir = archive.bsa.tes4.hashDirectory 'textures/armor/amuletsandrings/elder council'
+    expect(dir.hex).toBe '04bc422c742c696c'
+    expect(dir.hash).toBe(int64 '04bc422c742c696c')
+    expect(dir.crc).toBe(0x04bc422c)
+    expect(dir.first).toBe((string.byte 't'))
+    expect(dir.last).toBe((string.byte 'l'))
+    expect(dir.last2).toBe((string.byte 'i'))
+    expect(dir.length).toBe(44)
+    local file = archive.bsa.tes4.hashFile 'elder_council_amulet_n.dds'
+    expect(file.hex).toBe 'dc531e2f6516dfee'
+    expect(file.hash).toBe(int64 'dc531e2f6516dfee')
+    expect(file.crc).toBe(0xdc531e2f)
+    expect(file.first).toBe((string.byte 'e'))
+    expect(file.last).toBe(0xee)
+    expect(file.last2).toBe(0xdf)
+    expect(file.length).toBe(22)
+  end)
+
+  suite.it('covers TES4 hash-only archives and the DX10 builder', function()
+    local tes4 = archive.bsa.tes4.Builder.new()
+    tes4:setNameMode(archive.bsa.tes4.nameMode.hashOnly)
+    tes4:addBytes('textures/foo.dds', 'payload')
+    local opened = archive.bsa.tes4.openBytes(tes4:toBytes())
+    local entry = opened:entries()[1]
+    expect(entry.path).toBeNil()
+    expect(entry.folder).toBeNil()
+    expect(entry.name).toBeNil()
+    expect(type(entry.folderHashHex)).toBe 'string'
+    expect(typeof(entry.folderHash)).toBe 'integer'
+    expect(opened:contains 'textures/foo.dds').toBe(true)
+    expect(opened:readInto(entry, buffer.create(7))).toBe(7)
+    local dx10 = archive.ba2.Dx10Builder.new()
+    dx10:addTextureBytes(
+      'textures/one.dds',
+      { height = 1, width = 1, mipCount = 1, format = 61, flags = 0, tileMode = 0 },
+      '\127'
+    )
+    local ba2 = archive.ba2.openBytes(dx10:toBytes())
+    expect(ba2:info().format).toBe 'dx10'
+    expect(string.sub(ba2:readEntry(1), 1, 4)).toBe 'DDS '
+    local e = ba2:entries()[1]
+    expect(e.size).toBe(#ba2:readEntry(1))
+    expect(e.chunks).toBe(1)
+  end)
+
+  suite.it('keeps open errors apart from detection', function()
+    local ba2Builder = archive.ba2.Builder.new()
+    ba2Builder:addBytes('a.txt', 'ba2')
+    local tes3Builder = archive.bsa.tes3.Builder.new()
+    tes3Builder:addBytes('a.txt', 'tes3')
+    expect(function() archive.openBytes 'not an archive' end).toThrow 'unknown or disabled archive format'
+    expect(function() archive.openBytes 'BTD' end).toThrow 'failed to fill whole buffer'
+    expect(function() archive.ba2.openBytes(tes3Builder:toBytes()) end).toThrow 'invalid magic'
+    expect(function() archive.bsa.tes3.openBytes(ba2Builder:toBytes()) end).toThrow 'invalid version'
+    expect(function() archive.bsa.tes4.openBytes(tes3Builder:toBytes()) end).toThrow 'invalid magic'
+    expect(archive.guessFormat 'not an archive').toBeNil()
+    expect(archive.guessFormat '').toBeNil()
+    expect(archive.guessFormat 'BTDX this is not a real archive').toBe 'ba2'
+    expect(archive.guessFormat '\0\1\0\0payload').toBe 'bsaTes3'
+    expect(archive.guessFormat 'BSA\0payload').toBe 'bsaTes4'
+  end)
+
+  suite.it('raises for required members that are missing, in every family', function()
+    for _, make: any in
+      { archive.ba2.Builder.new, archive.bsa.tes3.Builder.new, archive.bsa.tes4.Builder.new }
+
+    do
+      local builder = make()
+      builder:addBytes('present.txt', 'payload')
+      local opened = archive.openBytes(builder:toBytes())
+      expect(opened:readFile 'missing.txt').toBeNil()
+      expect(opened:extractFile 'missing.txt').toBeNil()
+      expect(function() opened:readFileRequired 'missing.txt' end).toThrow 'archive member not found: missing.txt'
+      expect(function() opened:extractFileRequired 'missing.txt' end).toThrow 'archive member not found'
+    end
+  end)
+
+  suite.it('takes default compression options and refuses bad DX10 headers', function()
+    local ba2 = archive.ba2.Builder.new()
+    expect(ba2:isEmpty()).toBe(true)
+    ba2:setZlibLevel(0)
+    ba2:setZlibLevel(9)
+    ba2:setCompression(nil)
+    ba2:addBytesWithCompression('a.txt', 'x', nil)
+    ba2:addBytesWithCompression('b.txt', 'y', 'inherit')
+    ba2:addBytesWithCompression('c.txt', 'z')
+    expect(ba2:len()).toBe(3)
+    local tes4 = archive.bsa.tes4.Builder.new()
+    tes4:addBytesWithCompression('a.txt', 'x', nil)
+    tes4:addBytesWithCompression('b.txt', 'y', 'compress')
+    expect(tes4:len()).toBe(2)
+    local dx10: any = archive.ba2.Dx10Builder.new()
+    expect(dx10:isEmpty()).toBe(true)
+    expect(
+      function()
+        dx10:addTextureBytes(
+          'bad.dds',
+          { height = 1, width = 1, mipCount = 1, flags = 0, tileMode = 0 },
+          '\127'
+        )
+      end
+    ).toThrow 'missing required option \'format\''
+    expect(
+      function()
+        dx10:addTextureBytes(
+          'bad2.dds',
+          { height = 'bad', width = 1, mipCount = 1, format = 61, flags = 0, tileMode = 0 },
+          '\127'
+        )
+      end
+    ).toThrow 'height'
+    expect(
+      function()
+        dx10:addTextureBytes(
+          'bad3.dds',
+          { height = 1, width = 1, mipCount = 1, format = 61, flags = 0, tileMode = 0, depth = 1 },
+          '\127'
+        )
+      end
+    ).toThrow 'unknown option \'depth\''
+  end)
+
+  suite.it('lets builders carry entries of opened archives', function()
+    local ba2Source = archive.ba2.Builder.new()
+    ba2Source:addBytes('data/source.txt', 'ba2 payload')
+    local ba2 = archive.ba2.openBytes(ba2Source:toBytes())
+    local ba2Entry = ba2:entries()[1]
+    local ba2Dest = archive.ba2.Builder.new()
+    ba2Dest:addArchiveEntry('data/copied.txt', ba2, ba2Entry.id)
+    ba2Dest:addArchiveEntry('data/again.txt', ba2, ba2Entry.id)
+    local copied = archive.ba2.openBytes(ba2Dest:toBytes())
+    expect(copied:readFileRequired 'data/copied.txt').toBe 'ba2 payload'
+    expect(copied:readFileRequired 'data/again.txt').toBe 'ba2 payload'
+    local tes3Source = archive.bsa.tes3.Builder.new()
+    tes3Source:addBytes('data/source.txt', 'tes3 payload')
+    local tes3 = archive.bsa.tes3.openBytes(tes3Source:toBytes())
+    local tes3Dest = archive.bsa.tes3.Builder.new()
+    tes3Dest:addArchiveEntry('data/copied.txt', tes3, 1)
+    expect(archive.bsa.tes3.openBytes(tes3Dest:toBytes()):readFileRequired 'data/copied.txt').toBe 'tes3 payload'
+    local tes4Source = archive.bsa.tes4.Builder.new()
+    tes4Source:setCompressed(true)
+    tes4Source:addBytes('data/source.txt', 'tes4 payload')
+    local tes4 = archive.openBytes(tes4Source:toBytes())
+    local tes4Dest = archive.bsa.tes4.Builder.new()
+    tes4Dest:addArchiveEntryWithCompression('data/copied.txt', tes4, 1, 'store')
+    expect(archive.bsa.tes4.openBytes(tes4Dest:toBytes()):readFileRequired 'data/copied.txt').toBe 'tes4 payload'
+    expect(function() tes4Dest:addArchiveEntry('x', tes4, 2) end).toThrow 'out of bounds'
+  end)
+end)
+
+suite.describe('lookups', function()
+  suite.it('match a path the same way in every family', function()
+    local hashOnly = archive.bsa.tes4.Builder.new()
+    hashOnly:setNameMode 'hashOnly'
+    local builders: { any } = {
+      archive.bsa.tes3.Builder.new(),
+      archive.bsa.tes4.Builder.new(),
+      hashOnly,
+      archive.ba2.Builder.new(),
+    }
+
+    for _, builder in builders do
+      builder:addBytes('meshes/x/door.nif', 'payload')
+      local opened = archive.openBytes(builder:toBytes())
+      for _, found in
+        {
+          'meshes/x/door.nif',
+          '\\Meshes\\X\\DOOR.NIF',
+          'meshes//x//door.nif',
+          '//meshes\\\\x/door.nif',
+        }
+
+      do
+        expect(opened:readFile(found)).toBe 'payload'
+      end
+
+      for _, missing in { 'meshes/x/door.nif/', 'meshes\\x\\door.nif\\', 'meshes/x/door', '' } do
+        expect(opened:readFile(missing)).toBeNil()
+      end
+    end
+  end)
+
+  suite.it('normalize the TES3 hash path and its vectors', function()
+    local vectors: { [string]: string } = {
+      ['meshes/c/artifact_bloodring_01.nif'] = '1c3c1149920d5f0c',
+      ['meshes/x/ex_stronghold_pylon00.nif'] = '20250749acccd202',
+      ['meshes/r/xsteam_centurions.kf'] = '6e5c0f3125072ea6',
+      ['textures/tx_rock_cave_mu_01.dds'] = '58060c2fa3d8f759',
+      ['meshes/f/furn_ashl_chime_02.nif'] = '7c3b2f3abffc8611',
+      ['textures/tx_rope_woven.dds'] = '5865632f0c052c64',
+      ['icons/a/tx_templar_skirt.dds'] = '46512a0b60eda673',
+      ['icons/m/misc_prongs00.dds'] = '51715677bba837d3',
+      ['meshes/i/in_c_stair_plain_tall_02.nif'] = '2a324956bf89b1c9',
+      ['meshes/r/xkwama worker.nif'] = '6d446e352c3f5a1e',
+    }
+
+    for path, hex in vectors do
+      expect(archive.bsa.tes3.hashFile(path).hex).toBe(hex)
+    end
+
+    local forward = archive.bsa.tes3.hashFile '/FOO/bar/'
+    expect(forward.hash).toBe(archive.bsa.tes3.hashFile('foo\\BAR').hash)
+    expect(forward.normalized).toBe 'foo\\bar'
+  end)
+
+  suite.it('reproduce the TES4 hash vectors and oddities', function()
+    local directories: { [string]: string } = {
+      ['textures/armor/amuletsandrings/elder council'] = '04bc422c742c696c',
+      ['sound/voice/skyrim.esm/maleuniquedbguardian'] = '594085ac732b616e',
+      ['textures/architecture/windhelm'] = 'c1d97ebe741e6c6d',
+    }
+
+    for path, hex in directories do
+      expect(archive.bsa.tes4.hashDirectory(path).hex).toBe(hex)
+    end
+
+    local files: { [string]: string } = {
+      ['darkbrotherhood__0007469a_1.fuz'] = '011f11b0641b5f31',
+      ['elder_council_amulet_n.dds'] = 'dc531e2f6516dfee',
+      ['testtoddquest_testtoddhappy_00027fa2_1.mp3'] = 'de0301ee74265f31',
+      ['Mar\237a_F.fuz'] = '690e07826d075f66',
+    }
+
+    for path, hex in files do
+      expect(archive.bsa.tes4.hashFile(path).hex).toBe(hex)
+    end
+
+    expect(archive.bsa.tes4.hashDirectory('').hash).toBe(archive.bsa.tes4.hashDirectory('.').hash)
+    expect(archive.bsa.tes4.hashFile('.gitignore').hash).toBe(int64 '0000000000000000')
+    expect(archive.bsa.tes4.hashFile('.gitmodules').hash).toBe(int64 '0000000000000000')
+    expect(archive.bsa.tes4.hashFile('users/john/test.txt').hash).toBe(
+      archive.bsa.tes4.hashFile('test.txt').hash
+    )
+  end)
+
+  suite.it('reproduce the BA2 hash vectors and normalization', function()
+    local second =
+      archive.ba2.hashFile 'Materials/CreationClub/BGSFO4003/AnimObjects/PipBoy/PipBoyLabels01(Camo01).BGSM'
+    expect(second.file).toBe(0x0785843B)
+    expect(second.extension).toBe(0x6D736762)
+    expect(second.directory).toBe(0x818374CC)
+    local a, b =
+      archive.ba2.hashFile '/Textures/Foo/Bar.DDS\\', archive.ba2.hashFile 'textures\\foo\\bar.dds'
+    expect(a).toEqual(b)
+    local nonAscii = archive.ba2.hashFile 'Sound/Voice/Fallout4.esm/RobotMrHandy/Mar\237a_M.fuz'
+    local stripped = archive.ba2.hashFile 'Sound/Voice/Fallout4.esm/RobotMrHandy/Mara_M.fuz'
+    expect(nonAscii.file).toBe(stripped.file)
+    expect(nonAscii.directory).toBe(stripped.directory)
+    expect(nonAscii.normalized).toBe 'sound\\voice\\fallout4.esm\\robotmrhandy\\mar\237a_m.fuz'
+    expect(archive.ba2.hashFile('').normalized).toBe '.'
+  end)
+end)
+
+suite.describe('filename encodings', function()
+  suite.it('decode for display', function()
+    local bsa = archive.bsa
+    expect(bsa.decodeFilenameLossy('meshes/foo.nif', 'utf8')).toBe 'meshes/foo.nif'
+    expect(bsa.decodeFilenameLossy('bad\255', 'utf8')).toBe 'bad\u{fffd}'
+    expect(bsa.decodeFilenameLossy('za\191\243\179\230', 'windows1250')).toBe 'zażółć'
+    expect(bsa.decodeFilenameLossy('\239\240\232\226\229\242', 'windows1251')).toBe 'привет'
+    expect(bsa.decodeFilenameLossy('Mar\237a_F.fuz', 'windows1252')).toBe 'María_F.fuz'
+    expect(bsa.decodeFilenameLossy('\130\148\129', 'cp437')).toBe 'éöü'
+    expect(bsa.decodeFilenameLossy('box\179\196', 'cp437')).toBe 'box│─'
+  end)
+
+  suite.it('encode losslessly or not at all', function()
+    local bsa = archive.bsa
+    expect(bsa.encodeFilename('meshes/foo.nif', 'utf8')).toBe 'meshes/foo.nif'
+    expect(bsa.encodeFilename('zażółć', 'windows1250')).toBe 'za\191\243\179\230'
+    expect(bsa.encodeFilename('привет', 'windows1251')).toBe '\239\240\232\226\229\242'
+    expect(bsa.encodeFilename('María_F.fuz', 'windows1252')).toBe 'Mar\237a_F.fuz'
+    expect(bsa.encodeFilename('éöü', 'cp437')).toBe '\130\148\129'
+    expect(bsa.encodeFilename('box│─', 'cp437')).toBe 'box\179\196'
+    for byte = 0x80, 0xff do
+      local decoded = bsa.decodeFilenameLossy(string.char(byte), 'cp437')
+      expect(bsa.encodeFilename(decoded, 'cp437')).toBe(string.char(byte))
+    end
+
+    expect(function() bsa.encodeFilename('你好', 'windows1251') end).toThrow 'losslessly as Windows1251'
+    expect(function() bsa.encodeFilename('✓', 'cp437') end).toThrow 'losslessly as Cp437'
+  end)
+end)
+
+local tes3Hash = archive.bsa.tes3.hashFile
+local tes4Directory, tes4File = archive.bsa.tes4.hashDirectory, archive.bsa.tes4.hashFile
+
+suite.describe('hand-made archives', function()
+  suite.it('read a TES3 archive whose names are stored as given', function()
+    local data = support.tes3({ { name = 'Meshes/Foo.NIF', data = 'hello' } }, tes3Hash)
+    local opened = archive.bsa.tes3.openBytes(data)
+    expect(opened:entries()[1].path).toBe 'Meshes/Foo.NIF'
+    expect(opened:contains 'meshes\\foo.nif').toBe(true)
+    expect(opened:contains '/MESHES//foo.nif').toBe(true)
+    expect(opened:readFileRequired 'meshes/foo.nif').toBe 'hello'
+  end)
+
+  suite.it('refuse malformed TES3 indexes as the crate does', function()
+    local good = support.tes3({ { name = 'file.txt', data = 'hello' } }, tes3Hash)
+    local function patched(offset: number, value: number): string
+      local copy = buffer.fromstring(good)
+      buffer.writeu32(copy, offset, value)
+      return buffer.tostring(copy)
+    end
+
+    expect(function() archive.bsa.tes3.openBytes(patched(0, 42)) end).toThrow 'invalid version read from archive header: 42'
+    expect(function() archive.bsa.tes3.openBytes '' end).toThrow 'unexpected end of file'
+    expect(function() archive.bsa.tes3.openBytes(patched(4, 10000)) end).toThrow 'out of bounds'
+    expect(function() archive.bsa.tes3.openBytes(patched(20, 99)) end).toThrow 'out of bounds'
+    expect(function() archive.bsa.tes3.openBytes(patched(12, 99)) end).toThrow 'out of bounds'
+    local unterminated = buffer.fromstring(good)
+    buffer.writeu8(unterminated, 32, (string.byte 'X'))
+    expect(function() archive.bsa.tes3.openBytes(buffer.tostring(unterminated)) end).toThrow 'unexpected end of file'
+  end)
+
+  local function tes4Spec(
+    version: number,
+    flags: number,
+    files: { support.Tes4File }
+  ): support.Tes4Spec
+    return {
+      version = version,
+      flags = flags,
+      folders = { { name = 'data', files = files } },
+      hashDirectory = tes4Directory,
+      hashFile = tes4File,
+    }
+  end
+
+  suite.it('read TES4 names from string tables, embedded names, or hashes alone', function()
+    for _, version in { 103, 104, 105 } do
+      local opened = archive.bsa.tes4.openBytes(
+        support.tes4(tes4Spec(version, 3, { { name = 'file.txt', data = 'payload' } }))
+      )
+      expect(opened:readFileRequired 'DATA\\FILE.TXT').toBe 'payload'
+    end
+
+    local hashOnly = archive.bsa.tes4.openBytes(
+      support.tes4(tes4Spec(104, 0, { { name = 'file.txt', data = 'payload' } }))
+    )
+    expect(hashOnly:entries()[1].path).toBeNil()
+    expect(hashOnly:readFileRequired 'data/file.txt').toBe 'payload'
+    expect(function() hashOnly:readFileRequired 'data/other.txt' end).toThrow 'not found'
+    local embedded = archive.bsa.tes4.openBytes(
+      support.tes4(tes4Spec(104, 0x100, { { name = 'file.txt', data = 'payload' } }))
+    )
+    expect(embedded:entries()[1].path).toBe 'data\\file.txt'
+    expect(embedded:readFileRequired 'data/file.txt').toBe 'payload'
+    local disagreeing = archive.bsa.tes4.openBytes(support.tes4(tes4Spec(104, 0x103, {
+      { name = 'file.txt', data = 'payload', embedded = 'other\\name.txt' },
+    })))
+    expect(disagreeing:entries()[1].path).toBe 'data\\file.txt'
+  end)
+
+  suite.it('apply the TES4 compression flag, its toggle, and the checked bit', function()
+    local compressed = archive.bsa.tes4.openBytes(support.tes4(tes4Spec(104, 7, {
+      { name = 'a.txt', data = 'zipped', compress = 'zlib' },
+      { name = 'b.txt', data = 'stored', toggled = true, checked = true },
+    })))
+    expect(compressed:readFileRequired 'data/a.txt').toBe 'zipped'
+    expect(compressed:readFileRequired 'data/b.txt').toBe 'stored'
+    expect((compressed:get 'data/b.txt' :: archive.Entry).storedSize).toBe(6)
+    local lz4 = archive.bsa.tes4.openBytes(support.tes4(tes4Spec(105, 7, {
+      { name = 'a.txt', data = string.rep('frame', 50), compress = 'lz4' },
+    })))
+    expect(lz4:readFileRequired 'data/a.txt').toBe(string.rep('frame', 50))
+    local block = archive.bsa.tes4.openBytes(support.tes4(tes4Spec(105, 7, {
+      { name = 'a.txt', data = 'not a frame', compress = 'zlib' },
+    })))
+    expect(function() block:readFileRequired 'data/a.txt' end).toThrow 'expected TES4 v105 LZ4 frame data'
+  end)
+
+  suite.it('refuse console TES4 layouts and keep Oblivion\'s XMem bit', function()
+    expect(
+      function()
+        archive.bsa.tes4.openBytes(
+          support.tes4(tes4Spec(104, 3 + 0x40, { { name = 'a.txt', data = 'x' } }))
+        )
+      end
+    ).toThrow 'TES4 Xbox archive layout'
+    expect(
+      function()
+        archive.bsa.tes4.openBytes(
+          support.tes4(
+            tes4Spec(104, 7 + 0x200, { { name = 'a.txt', data = 'x', compress = 'zlib' } })
+          )
+        )
+      end
+    ).toThrow 'TES4 XMem compression'
+    local oblivion = archive.bsa.tes4.openBytes(support.tes4(tes4Spec(103, 7 + 0x200, {
+      { name = 'a.txt', data = 'x', compress = 'zlib' },
+    })))
+    expect(oblivion:readFileRequired 'data/a.txt').toBe 'x'
+  end)
+
+  suite.it('accept NUL padding after TES4 file names and nothing else there', function()
+    local spec = tes4Spec(104, 3, { { name = 'a.txt', data = 'x' } })
+    spec.padding = 3
+    expect(archive.bsa.tes4.openBytes(support.tes4(spec)):readFileRequired 'data/a.txt').toBe 'x'
+  end)
+
+  local function ba2Spec(format: string, entries: { support.Ba2Entry }): support.Ba2Spec
+    return {
+      version = 1,
+      format = format,
+      strings = true,
+      entries = entries,
+      hashFile = archive.ba2.hashFile,
+    }
+  end
+
+  suite.it('read BA2 headers of every version and both compression codes', function()
+    for _, version in { 1, 2, 3, 7, 8 } do
+      local spec =
+        ba2Spec('GNRL', { { name = 'a.txt', chunks = { { data = 'zipped', compress = 'zip' } } } })
+      spec.version = version
+      expect(archive.ba2.openBytes(support.ba2(spec)):readFileRequired 'a.txt').toBe 'zipped'
+    end
+
+    local lz4 = ba2Spec(
+      'GNRL',
+      { { name = 'a.txt', chunks = { { data = string.rep('block', 40), compress = 'lz4' } } } }
+    )
+    lz4.version, lz4.compressionCode = 3, 3
+    local opened = archive.ba2.openBytes(support.ba2(lz4))
+    expect(opened:info().compression).toBe 'lz4'
+    expect(opened:readFileRequired 'a.txt').toBe(string.rep('block', 40))
+    local unknown =
+      ba2Spec('GNRL', { { name = 'a.txt', chunks = { { data = 'zipped', compress = 'zip' } } } })
+    unknown.version, unknown.compressionCode = 3, 7
+    expect(archive.ba2.openBytes(support.ba2(unknown)):info().compression).toBe 'zip'
+  end)
+
+  suite.it('find stringless BA2 entries by hash and refuse to extract them by name', function()
+    local spec = ba2Spec('GNRL', { { name = 'misc/example.txt', chunks = { { data = 'hello' } } } })
+    spec.strings = false
+    local opened = archive.ba2.openBytes(support.ba2(spec))
+    local entry = opened:entries()[1]
+    expect(entry.path).toBeNil()
+    expect(opened:contains '\\MISC\\Example.TXT').toBe(true)
+    expect(opened:contains 'misc/example.txt/').toBe(false)
+    expect(opened:info().strings).toBe(false)
+  end)
+
+  suite.it('prefer the string table over a colliding hash', function()
+    local hash = archive.ba2.hashFile 'a.txt'
+    local spec = ba2Spec('GNRL', {
+      { name = 'b.txt', hash = hash, chunks = { { data = 'b' } } },
+      { name = 'a.txt', chunks = { { data = 'a' } } },
+    })
+    expect(archive.ba2.openBytes(support.ba2(spec)):readFileRequired 'a.txt').toBe 'a'
+  end)
+
+  suite.it('read GNMF metadata and refuse its payloads', function()
+    local opened = archive.ba2.openBytes(support.ba2(ba2Spec('GNMF', {
+      { name = 'textures/a.gnf', chunks = { { data = 'console', first = 0, last = 0 } } },
+    })))
+    local entry = opened:entries()[1]
+    expect(entry.size).toBeNil()
+    expect(entry.chunks).toBe(1)
+    expect(function() opened:readEntry(1) end).toThrow 'BA2 GNMF extraction'
+    expect(function() opened:readInto(entry, buffer.create(16)) end).toThrow 'BA2 GNMF extraction'
+  end)
+
+  suite.it('rebuild DX10 headers across chunks and refuse bad mip ranges', function()
+    local texture = { height = 8, width = 8, mipCount = 4, format = 61, flags = 0, tileMode = 0 }
+    local spec = ba2Spec('DX10', {
+      {
+        name = 'textures/a.dds',
+        texture = texture,
+        chunks = {
+          { data = string.rep('a', 64), compress = 'zip', first = 0, last = 0 },
+          { data = string.rep('b', 16 + 4 + 1), first = 1, last = 3 },
+        },
+      },
+    })
+    local opened = archive.ba2.openBytes(support.ba2(spec))
+    local read = opened:readFileRequired 'textures/a.dds'
+    expect(#read).toBe(128 + 85)
+    expect(string.sub(read, 1, 4)).toBe 'DDS '
+    expect(buffer.readu32(buffer.fromstring(read), 28)).toBe(4)
+    expect(string.sub(read, 129)).toBe(string.rep('a', 64) .. string.rep('b', 21))
+    local function failing(chunks: { support.Ba2Chunk }, needle: string)
+      local broken =
+        ba2Spec('DX10', { { name = 'textures/a.dds', texture = texture, chunks = chunks } })
+      expect(function() archive.ba2.openBytes(support.ba2(broken)) end).toThrow(needle)
+    end
+
+    failing(
+      { { data = string.rep('a', 64), first = 0, last = 0 } },
+      'missing BA2 texture mip range'
+    )
+    failing(
+      { { data = string.rep('a', 64), first = 1, last = 0 } },
+      'invalid BA2 texture mip range'
+    )
+    failing(
+      { { data = string.rep('a', 85), first = 0, last = 4 } },
+      'invalid BA2 texture mip range'
+    )
+    failing({
+      { data = string.rep('a', 80), first = 0, last = 1 },
+      { data = string.rep('b', 21), first = 1, last = 3 },
+    }, 'duplicate BA2 texture mip range')
+    failing(
+      { { data = string.rep('a', 84), first = 0, last = 3 } },
+      'DDS payload size does not match metadata'
+    )
+  end)
+
+  suite.it('check zlib payload sizes and trailing data', function()
+    local function chunkArchive(stored: string, size: number): string
+      local data = buffer.fromstring(
+        support.ba2(
+          ba2Spec('GNRL', { { name = 'a.txt', chunks = { { data = string.rep('x', size) } } } })
+        )
+      )
+      local text = buffer.tostring(data)
+      local start = buffer.readu32(data, 24 + 16)
+      return string.sub(text, 1, start) .. stored .. string.sub(text, start + 1 + size)
+    end
+
+    local zipped = support.zlib 'payload!'
+    local function rebuilt(stored: string, size: number): string
+      -- The record's packed size is the stored length; its unpacked size is `size`.
+      local out = buffer.fromstring(chunkArchive(stored, #stored))
+      buffer.writeu32(out, 24 + 24, #stored)
+      buffer.writeu32(out, 24 + 28, size)
+      return buffer.tostring(out)
+    end
+
+    expect(archive.ba2.openBytes(rebuilt(zipped, 8)):readEntry(1)).toBe 'payload!'
+    expect(function() archive.ba2.openBytes(rebuilt(zipped, 7)):readEntry(1) end).toThrow 'expected 7 bytes, got 8 bytes'
+    expect(function() archive.ba2.openBytes(rebuilt(zipped, 9)):readEntry(1) end).toThrow 'expected 9 bytes, got 8 bytes'
+    expect(function() archive.ba2.openBytes(rebuilt(zipped .. '\0', 8)):readEntry(1) end).toThrow 'trailing data'
+  end)
+end)
+
+local function fixtureSuite()
+  local function open(relative: string): any
+    return archive.ba2.openPath(fixturePath(relative) :: string)
+  end
+
+  suite.it('refuse the invalid BA2 headers', function()
+    expect(function() open 'ba2/invalid/invalid_magic.ba2' end).toThrow 'invalid magic'
+    expect(function() open 'ba2/invalid/invalid_format.ba2' end).toThrow 'invalid format'
+    expect(function() open 'ba2/invalid/invalid_version.ba2' end).toThrow 'invalid version read from archive header: 257'
+    expect(function() open 'ba2/invalid/invalid_sentinel.ba2' end).toThrow 'invalid chunk sentinel: 0xdeadbeef'
+    expect(function() open 'ba2/invalid/invalid_size.ba2' end).toThrow 'invalid BA2 file header size: 52428'
+  end)
+
+  suite.it('read a BA2 without a string table', function()
+    local opened = archive.ba2.openPath(fixturePath 'ba2/missing_string_table/in.ba2' :: string)
+    local entry = opened:entries()[1]
+    expect(entry.path).toBeNil()
+    expect(entry.name).toBeNil()
+    expect(entry.folder).toBeNil()
+    expect(digest(opened:readEntry(1))).toBe 'fc9f01504b4218c6'
+    expect(opened:containsHash(entry.directoryHash, entry.fileHash, entry.extensionHash)).toBe(true)
+    expect(opened:readInto(entry, buffer.create(entry.size :: number))).toBe(entry.size)
+    expect(opened:contains 'misc/example.txt').toBe(true)
+    expect(function() opened:extractTo 'nowhere' end).toThrow 'archive entry has no file name'
+  end)
+
+  suite.it('read next-generation GNRL metadata', function()
+    for _, name in { 'gnrl_v7', 'gnrl_v8' } do
+      local opened = archive.ba2.openPath(fixturePath(`ba2/next_gen/{name}.ba2`) :: string)
+      expect(opened:info()).toEqual {
+        format = 'gnrl',
+        version = if name == 'gnrl_v7' then 7 else 8,
+        compression = 'zip',
+        strings = true,
+      }
+      local first = opened:entries()[1]
+      expect(first.path).toBe 'License.txt'
+      expect(first.offset).toBe(96)
+      expect(first.size).toBe(574)
+      expect(first.storedSize).toBe(324)
+      expect(first.compressed).toBe(true)
+      expect(opened:entries()[2].path).toBe 'SampleA.png'
+      expect(digest(opened:readFileRequired 'license.txt')).toBe '27ede686c07f7549'
+      expect(digest(opened:readFileRequired 'SampleA.PNG')).toBe '995741e1f5107945'
+      expect(opened:contains '/LICENSE.TXT').toBe(true)
+      expect(opened:contains 'LICENSE.TXT\\').toBe(false)
+    end
+  end)
+
+  suite.it('read compressed general archives', function()
+    local expected: { [string]: string } = {
+      ['characters\\character_0000.png'] = '843aeca5aa03206a',
+      ['characters\\character_0009.png'] = '3c486a28bd0b3162',
+      ['characters\\character_0017.png'] = 'a5cae9e773afee30',
+      ['share\\license.txt'] = '27ede686c07f7549',
+    }
+
+    for _, name in { 'normal', 'xbox' } do
+      local opened = archive.ba2.openPath(fixturePath(`ba2/compression/{name}.ba2`) :: string)
+      expect(opened:len()).toBe(19)
+      for path, hash in expected do
+        expect(digest(opened:readFileRequired(path))).toBe(hash)
+      end
+    end
+  end)
+
+  suite.it('detect and guess the fixture families', function()
+    expect(archive.detectPath(fixturePath 'ba2/guess/fo4.ba2' :: string)).toBe 'ba2'
+    expect(archive.detectPath(fixturePath 'ba2/guess/tes3.bsa' :: string)).toBe 'bsaTes3'
+    expect(archive.detectPath(fixturePath 'ba2/guess/tes4.bsa' :: string)).toBe 'bsaTes4'
+  end)
+
+  suite.it('read TES4 fixtures in every compression', function()
+    local simple =
+      archive.bsa.tes4.openPath(fixturePath 'bsa/tes4/valid/simple_uncompressed.bsa' :: string)
+    expect(simple:entries()[1].path).toBe 'misc\\example.txt'
+    expect(simple:readFileRequired 'MISC/example.TXT').toBe 'hello world!\r\n'
+    for _, name in { 'test_104', 'test_105' } do
+      local opened = archive.bsa.tes4.openPath(fixturePath(`bsa/tes4/valid/{name}.bsa`) :: string)
+      expect(opened:entries()[1].path).toBe 'preview.png'
+      expect(opened:entries()[2].path).toBe 'license.txt'
+      expect(digest(opened:readFileRequired 'preview.png')).toBe '07a8c8266f94fbe6'
+      expect(digest(opened:readFileRequired 'license.txt')).toBe '27ede686c07f7549'
+    end
+
+    local v104 = archive.bsa.tes4.openPath(fixturePath 'bsa/tes4/valid/test_104.bsa' :: string)
+    expect(v104:archiveSize()).toBe(50866)
+    local preview = v104:get 'PREVIEW.PNG' :: archive.Entry
+    expect(preview.name).toBe 'preview.png'
+    expect(preview.folder).toBe ''
+    expect(preview.compressed).toBe(true)
+    expect(preview.offset).toBe(111)
+  end)
+
+  suite.it('refuse the invalid TES4 headers', function()
+    local function openTes4(name: string)
+      archive.bsa.tes4.openPath(fixturePath(`bsa/tes4/invalid/{name}.bsa`) :: string)
+    end
+
+    expect(function() openTes4 'invalid_magic' end).toThrow 'invalid magic'
+    expect(function() openTes4 'invalid_version' end).toThrow 'invalid version read from archive header: 42'
+    expect(function() openTes4 'invalid_size' end).toThrow 'invalid size read from archive header: 204'
+  end)
+end
+
+if fixturePath 'ba2/guess/fo4.ba2' then suite.describe('the crate\'s fixtures', fixtureSuite) end
+
+local scratch = rawget(_G :: any, 'scratchRoot') :: string?
+
+local function filesystemSuite(root: string)
+  local counter = 0
+  local function folder(name: string): string
+    counter += 1
+    local path = `{root}/{name}-{counter}`
+    assert(fs.mkdir(path, { recursive = true }))
+    return path
+  end
+
+  local function read(path: string): string?
+    return if fs.exists(path) then fs.readFileString(path) else nil
+  end
+
+  suite.it('build from files and folders, then extract', function()
+    local base = folder 'round-trip'
+    assert(fs.writeFile(`{base}/source.txt`, 'from source file'))
+    assert(fs.mkdir(`{base}/dir/nested`, { recursive = true }))
+    assert(fs.writeFile(`{base}/dir/nested/from-dir.txt`, 'from directory'))
+    local builder = archive.ba2.Builder.new()
+    builder:addFile('from-source.txt', `{base}/source.txt`)
+    builder:addDir(`{base}/dir`)
+    builder:writePath(`{base}/test.ba2`)
+    expect(archive.detectPath(`{base}/test.ba2`)).toBe 'ba2'
+    local opened = archive.ba2.openPath(`{base}/test.ba2`)
+    expect(opened:readFileRequired 'from-source.txt').toBe 'from source file'
+    expect(opened:readFileRequired 'nested/from-dir.txt').toBe 'from directory'
+    expect(opened:extractEntryToPath(1, `{base}/entry.bin`)).toBe(#'from source file')
+    expect(opened:extractTo(`{base}/out`) > 0).toBe(true)
+    expect(read(`{base}/entry.bin`)).toBe 'from source file'
+    expect(read(`{base}/out/nested/from-dir.txt`)).toBe 'from directory'
+    expect((string.find(tostring(opened), `{base}/test.ba2`, 1, true))).toBeTruthy()
+  end)
+
+  suite.it('read deferred files when the archive is written', function()
+    local base = folder 'deferred'
+    assert(fs.writeFile(`{base}/source.txt`, 'first'))
+    for _, make: any in
+      { archive.bsa.tes3.Builder.new, archive.bsa.tes4.Builder.new, archive.ba2.Builder.new }
+
+    do
+      local builder = make()
+      builder:addFile('data/source.txt', `{base}/source.txt`)
+      assert(fs.writeFile(`{base}/source.txt`, 'later'))
+      expect(archive.openBytes(builder:toBytes()):readFileRequired 'data/source.txt').toBe 'later'
+      assert(fs.writeFile(`{base}/source.txt`, 'longer than it was'))
+      expect(function() builder:toBytes() end).toThrow 'deferred source file size changed'
+      assert(fs.writeFile(`{base}/source.txt`, 'first'))
+    end
+  end)
+
+  suite.it('extract BSA entries with encoded paths', function()
+    local base = folder 'encoded'
+    local tes3Builder = archive.bsa.tes3.Builder.new()
+    tes3Builder:addEncodedPath('textures/zażółć.dds', 'windows1250', 'tes3')
+    local tes3 = archive.bsa.tes3.openBytes(tes3Builder:toBytes())
+    tes3:extractEntryToPath(1, `{base}/entry.bin`)
+    tes3:extractToWithEncoding(`{base}/tes3`, 'windows1250')
+    expect(tes3:readFileRequired 'textures/za\191\243\179\230.dds').toBe 'tes3'
+    local tes4Builder = archive.bsa.tes4.Builder.new()
+    tes4Builder:addEncodedPath('textures/zażółć.dds', 'windows1250', 'tes4')
+    archive.bsa.tes4
+      .openBytes(tes4Builder:toBytes())
+      :extractToWithEncoding(`{base}/tes4`, 'windows1250')
+    expect(read(`{base}/entry.bin`)).toBe 'tes3'
+    expect(read(`{base}/tes3/textures/zażółć.dds`)).toBe 'tes3'
+    expect(read(`{base}/tes4/textures/zażółć.dds`)).toBe 'tes4'
+  end)
+
+  suite.it('extract hash-only TES4 entries named by a dictionary', function()
+    local base = folder 'dictionary'
+    local builder = archive.bsa.tes4.Builder.new()
+    builder:setNameMode 'hashOnly'
+    builder:addBytes('textures/foo.dds', 'payload')
+    local opened = archive.bsa.tes4.openBytes(builder:toBytes())
+    expect(function() opened:extractTo(`{base}/all`) end).toThrow 'does not contain filenames'
+    expect(
+      opened:extractToWithPaths(
+        `{base}/out`,
+        { 'meshes/not-this.nif', 'textures/foo.dds', 'TEXTURES/FOO.DDS' }
+      )
+    ).toBe(7)
+    expect(read(`{base}/out/textures/foo.dds`)).toBe 'payload'
+    opened:extractToWithPaths(
+      `{base}/bad`,
+      { [2] = 'textures/foo.dds', candidate = 'textures/foo.dds' } :: any
+    )
+    expect((fs.exists(`{base}/bad/textures/foo.dds`))).toBe(false)
+    expect(opened:extractToWithPaths(`{base}/missing`, { 'textures/../foo.dds' })).toBe(0)
+    local unsafe = archive.bsa.tes4.openBytes(support.tes4 {
+      version = 104,
+      flags = 0,
+      folders = { { name = '..', files = { { name = 'a.txt', data = 'x' } } } },
+      hashDirectory = archive.bsa.tes4.hashDirectory,
+      hashFile = archive.bsa.tes4.hashFile,
+    })
+    expect(unsafe:contains '../a.txt').toBe(true)
+    expect(function() unsafe:extractToWithPaths(`{base}/unsafe`, { '../a.txt' }) end).toThrow 'can not be extracted safely'
+  end)
+
+  suite.it('refuse output paths that leave the folder', function()
+    local base = folder 'unsafe'
+    for _, name in { '../escape.txt', 'a\\..\\b.txt', 'c:evil.txt' } do
+      local opened =
+        archive.bsa.tes3.openBytes(support.tes3({ { name = name, data = 'x' } }, tes3Hash))
+      expect(function() opened:extractTo(`{base}/out`) end).toThrow 'can not be extracted safely'
+    end
+
+    local empty = archive.bsa.tes3.openBytes(support.tes3({ { name = '', data = 'x' } }, tes3Hash))
+    expect(function() empty:extractTo(`{base}/out`) end).toThrow 'archive entry has no file name'
+  end)
+
+  suite.it('leave the old file whole when an extraction fails', function()
+    local base = folder 'failed'
+    assert(fs.writeFile(`{base}/a.txt`, 'existing'))
+    local spec: support.Ba2Spec = {
+      version = 1,
+      format = 'GNRL',
+      strings = true,
+      entries = { { name = 'a.txt', chunks = { { data = 'payload!', compress = 'zip' } } } },
+      hashFile = archive.ba2.hashFile,
+    }
+    local data = buffer.fromstring(support.ba2(spec))
+    buffer.writeu32(data, 24 + 28, 7)
+    local opened = archive.ba2.openBytes(data)
+    expect(function() opened:extractTo(base) end).toThrow 'expected 7 bytes'
+    expect(function() opened:extractEntryToPath(1, `{base}/a.txt`) end).toThrow 'expected 7 bytes'
+    expect(read(`{base}/a.txt`)).toBe 'existing'
+    for _, name in assert(fs.list(base)) do
+      expect((string.find(name, 'dream-archive-tmp', 1, true))).toBeNil()
+    end
+  end)
+
+  suite.it('refuse host paths that are not UTF-8', function()
+    local builder = archive.ba2.Builder.new()
+    builder:addBytes('a.txt', 'x')
+    local opened = archive.ba2.openBytes(builder:toBytes())
+    for _, attempt in
+      {
+        function() archive.openPath 'bad\255.ba2' end,
+        function() archive.detectPath 'bad\255.ba2' end,
+        function() opened:extractTo 'bad\255dir' end,
+        function() opened:extractEntryToPath(1, 'bad\255file') end,
+        function() builder:writePath 'bad\255.ba2' end,
+        function() builder:addFile('b.txt', 'bad\255source') end,
+        function() archive.bsa.tes3.Builder.new():addDir 'bad\255dir' end,
+      }
+
+    do
+      expect(attempt).toThrow 'not valid UTF-8'
+    end
+
+    expect(function() archive.detectPath(`{root}/missing.bin`) end).toThrow 'No such file or directory'
+    assert(fs.writeFile(`{root}/short.bin`, 'BS'))
+    expect(archive.detectPath(`{root}/short.bin`)).toBeNil()
+    expect(function() archive.openPath(`{root}/short.bin`) end).toThrow 'failed to fill whole buffer'
+  end)
+end
+
+if scratch then
+  suite.describe('on the host filesystem', function() filesystemSuite(scratch :: string) end)
+end
+
+return suite
