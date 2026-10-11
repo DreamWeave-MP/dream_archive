@@ -1,9 +1,16 @@
 --!strict
 -- The archive port, timed from Luau: open and index, lookups by path and by hash, listing, reads
 -- (stored, zlib, LZ4 blocks and frames, DDS headers rebuilt), extraction, and building. Run by
--- `jess run --package . bench/bench.luau <scratch> [filter] [real archive]...`.
+-- `jess run --capability filesystem.read --capability filesystem.write --package .
+-- bench/bench.luau <scratch> [filter] [real archive]...`, on a release build.
 local fs = require '@dream/fs'
 local port = require '@dream-archive'
+
+-- A build without the verified toolchain runs Luau slower than a release does, so a number from
+-- one says nothing about what ships.
+if not jess.bench.verified then
+  error('archive bench: this jess was built without the verified toolchain: measure on a release build', 0)
+end
 
 --- The arguments: a folder to write into, a filter on the workload names (`''` for all), and
 --- real archives to read in place.
@@ -22,9 +29,8 @@ end
 
 --- Seconds per call of `body`: warmed up, then the median of seven batches of a size that
 --- takes about a tenth of a second.
--- The harness's full collection, run between batches, so one batch's garbage isn't the next
--- one's collection.
-local collect: () -> () = (_G :: any).collect
+-- A full collection, run between batches, so one batch's garbage isn't the next one's collection.
+local collect = jess.bench.collect
 
 local function measure(body: () -> ()): number
   collect()
