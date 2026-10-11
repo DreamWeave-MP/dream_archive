@@ -1,0 +1,41 @@
+--!strict
+--!native
+-- SPDX-License-Identifier: MIT OR Apache-2.0
+-- @dream-archive/bsa: BSA filename encodings and the TES3 and TES4 modules, as
+-- `@dream/archive/bsa` has them.
+local encoding = require './internal/encoding'
+local util = require './internal/util'
+
+--- `text` (UTF-8) as an archive path in a legacy encoding, or an error when a character has no
+--- byte there: nothing is replaced.
+local function encodeFilename(text: string, name: string): string
+  local what = 'dream.archive.encodeFilename'
+  local valid = util.checkHostPath(what, text, 1)
+  return encoding.encode(valid, encoding.parse(util.checkString(what, name, 2)))
+end
+
+--- Archive path bytes decoded for display; invalid bytes become U+FFFD.
+local function decodeFilenameLossy(data: string, name: string): string
+  local what = 'dream.archive.decodeFilenameLossy'
+  local bytes = util.checkString(what, data, 1)
+  return encoding.decode(bytes, encoding.parse(util.checkString(what, name, 2)))
+end
+
+local function normalizePath(path: string): string
+  return util.lookupKey(util.checkString('dream.archive.normalizePath', path, 1))
+end
+
+return table.freeze {
+  encodeFilename = encodeFilename,
+  decodeFilenameLossy = decodeFilenameLossy,
+  normalizePath = normalizePath,
+  encoding = table.freeze {
+    utf8 = 'utf8',
+    windows1250 = 'windows1250',
+    windows1251 = 'windows1251',
+    windows1252 = 'windows1252',
+    cp437 = 'cp437',
+  },
+  tes3 = require '@self/tes3',
+  tes4 = require '@self/tes4',
+}

@@ -1,0 +1,36 @@
+--!strict
+--!native
+-- SPDX-License-Identifier: MIT OR Apache-2.0
+-- @dream-archive/ba2: BA2 archives (Fallout 4, Fallout 76, Starfield): opening, hashing,
+-- and the general and texture builders, as `@dream/archive/ba2` has them.
+local ba2 = require './internal/ba2'
+local builders = require './internal/ba2_builder'
+local open = require './internal/open'
+local types = require './internal/types'
+local util = require './internal/util'
+
+type Archive = types.Archive
+
+local function openPath(path: string): Archive
+  return open.openPathAs('ba2', 'dream.archive.openPath', path)
+end
+
+local function openBytes(data: buffer | string): Archive
+  return open.openBytesAs('ba2', 'dream.archive.openBytes', data)
+end
+
+local function hashFile(
+  path: string
+): { directory: number, file: number, extension: number, normalized: string }
+  return ba2.hashFile(util.checkString('dream.archive.hashFile', path, 1))
+end
+
+return table.freeze {
+  openPath = openPath,
+  openBytes = openBytes,
+  hashFile = hashFile,
+  Builder = table.freeze { new = builders.new },
+  Dx10Builder = table.freeze { new = builders.newDx10 },
+  compression = table.freeze { none = 'none', store = 'store', zip = 'zip', lz4 = 'lz4' },
+  version = table.freeze { V1 = 1, V2 = 2, V3 = 3, V7 = 7, V8 = 8 },
+}

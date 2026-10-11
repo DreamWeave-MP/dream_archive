@@ -1,0 +1,35 @@
+manifest_version = 1
+
+[package]
+id = "org.dreamweave.dream-archive"
+version = "0.1.0"
+jess_api = "1"
+include = ["src"]
+
+[modules]
+"@dream-archive" = "src/init.luau"
+"@dream-archive/ba2" = "src/ba2.luau"
+"@dream-archive/bsa" = "src/bsa/init.luau"
+"@dream-archive/bsa/tes3" = "src/bsa/tes3.luau"
+"@dream-archive/bsa/tes4" = "src/bsa/tes4.luau"
+# Exported for dream-archivetool, whose archive policy is built from these three; they are not
+# the archive API.
+"@dream-archive/types" = "src/internal/types.luau"
+"@dream-archive/util" = "src/internal/util.luau"
+"@dream-archive/backend" = "src/internal/archive.luau"
+
+# Every module here is inert API: it does nothing until something requires it, and runs with the
+# authority of whatever calls it.
+
+[[layer]]
+id = "dream-archive.core"
+exports = [
+    "@dream-archive",
+    "@dream-archive/ba2",
+    "@dream-archive/bsa",
+    "@dream-archive/bsa/tes3",
+    "@dream-archive/bsa/tes4",
+    "@dream-archive/types",
+    "@dream-archive/util",
+    "@dream-archive/backend",
+]
