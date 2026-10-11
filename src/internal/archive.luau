@@ -208,6 +208,14 @@ local function target(state: State, value: unknown): number
   return util.stackValue(2, `expected an entry handle or an archive path, got {typeof(value)}`)
 end
 
+--- The offset `readInto` writes at, as the binding reads its optional usize: only nil is absent,
+--- so `false` is refused as any other value that isn't an integer is.
+local function writeOffset(value: unknown): number
+  if value == nil then return 0 end
+
+  return util.checkInteger('dream.archive.Archive.readInto', value, 3, 'usize', 0, 2 ^ 53)
+end
+
 local EntriesMeta = table.freeze {
   __index = table.freeze {
     toTable = function(entries: Entries): { Entry }
@@ -333,9 +341,7 @@ function Methods.readInto(
     )
   end
 
-  local at = if offset == nil
-    then 0
-    else util.checkInteger('dream.archive.Archive.readInto', offset, 3, 'usize', 0, 2 ^ 53)
+  local at = writeOffset(offset)
   local index = target(state, entry)
   local length = buffer.len(into)
   if at > length then fail 'buffer access out of bounds' end

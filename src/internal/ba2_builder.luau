@@ -40,12 +40,17 @@ local function parseVersion(what: string, value: unknown): number
   return version
 end
 
-local function parseCompression(value: unknown): string?
-  if value == nil or value == 'none' or value == 'store' then return nil end
+--- A `setCompression` argument, as the binding reads its optional string: only nil is absent, so
+--- `false` is refused as any other value that isn't a string is.
+local function parseCompression(what: string, value: unknown): string?
+  if value == nil then return nil end
 
-  if value == 'zip' or value == 'lz4' then return value :: string end
+  local name = util.checkString(what, value, 1)
+  if name == 'none' or name == 'store' then return nil end
 
-  return fail(`unknown BA2 compression: {value}`)
+  if name == 'zip' or name == 'lz4' then return name end
+
+  return fail(`unknown BA2 compression: {name}`)
 end
 
 --- A stored path: TES3's rules, and shorter than 260 bytes.
@@ -235,9 +240,7 @@ local function new()
   end
 
   function builder.setCompression(_self: unknown, value: string?)
-    if value ~= nil then util.checkString('dream.archive.Ba2Builder.setCompression', value, 1) end
-
-    compression = parseCompression(value)
+    compression = parseCompression('dream.archive.Ba2Builder.setCompression', value)
   end
 
   function builder.setZlibLevel(_self: unknown, value: number)
@@ -627,11 +630,7 @@ local function newDx10()
   end
 
   function builder.setCompression(_self: unknown, value: string?)
-    if value ~= nil then
-      util.checkString('dream.archive.Ba2Dx10Builder.setCompression', value, 1)
-    end
-
-    compression = parseCompression(value)
+    compression = parseCompression('dream.archive.Ba2Dx10Builder.setCompression', value)
   end
 
   function builder.setZlibLevel(_self: unknown, value: number)
