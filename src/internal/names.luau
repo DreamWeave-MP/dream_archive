@@ -10,16 +10,16 @@
 local bytes = require '@dream/bytes'
 local intern = require '@dream/intern'
 
-local Scratch = buffer.create(1024)
+local scratch = buffer.create(1024)
 
 --- Writes the canonical form of `length` bytes of `source` at `offset` into the scratch buffer,
 --- growing it as needed; returns the scratch buffer and the canonical length.
 local function canonical(source: buffer, offset: number, length: number): (buffer, number)
-  if length > buffer.len(Scratch) then
-    Scratch = buffer.create(math.max(length, 2 * buffer.len(Scratch)))
+  if length > buffer.len(scratch) then
+    scratch = buffer.create(math.max(length, 2 * buffer.len(scratch)))
   end
 
-  local out = Scratch
+  local out = scratch
   local written = 0
   local separator = true
   for position = offset, offset + length - 1 do
@@ -66,7 +66,7 @@ export type Index = {
   isEmpty: () -> boolean,
 }
 
-local QueryBuffer = buffer.create(1024)
+local queryBuffer = buffer.create(1024)
 
 --- An empty index; `add` names entries, the first entry a name is added for keeping it. A caller
 --- that knows a name is canonical already says so, and the bytes aren't looked at here.
@@ -100,12 +100,12 @@ local function new(): Index
       token = pool:find(path)
     else
       local length = #path
-      if length > buffer.len(QueryBuffer) then
-        QueryBuffer = buffer.create(math.max(length, 2 * buffer.len(QueryBuffer)))
+      if length > buffer.len(queryBuffer) then
+        queryBuffer = buffer.create(math.max(length, 2 * buffer.len(queryBuffer)))
       end
 
-      buffer.writestring(QueryBuffer, 0, path)
-      local out, written = canonical(QueryBuffer, 0, length)
+      buffer.writestring(queryBuffer, 0, path)
+      local out, written = canonical(queryBuffer, 0, length)
       token = pool:find(out, 0, written)
     end
 
