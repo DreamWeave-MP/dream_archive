@@ -131,43 +131,43 @@ export type Tes3File = { name: string, data: string }
 
 --- A TES3 BSA of `files` in the given order, hashed by `hashFile`.
 local function tes3(files: { Tes3File }, hashFile: (string) -> { lo: number, hi: number }): string
-  local w = writer()
+  local output = writer()
   local namesLength = 0
   for _, file in files do
     namesLength += #file.name + 1
   end
 
-  w.u32(0x100)
-  w.u32(12 * #files + namesLength)
-  w.u32(#files)
+  output.u32(0x100)
+  output.u32(12 * #files + namesLength)
+  output.u32(#files)
   local offset = 0
   for _, file in files do
-    w.u32(#file.data)
-    w.u32(offset)
+    output.u32(#file.data)
+    output.u32(offset)
     offset += #file.data
   end
 
   local nameOffset = 0
   for _, file in files do
-    w.u32(nameOffset)
+    output.u32(nameOffset)
     nameOffset += #file.name + 1
   end
 
   for _, file in files do
-    w.raw(file.name .. '\0')
+    output.raw(file.name .. '\0')
   end
 
   for _, file in files do
     local hash = hashFile(file.name)
-    w.u32(hash.lo)
-    w.u32(hash.hi)
+    output.u32(hash.lo)
+    output.u32(hash.hi)
   end
 
   for _, file in files do
-    w.raw(file.data)
+    output.raw(file.data)
   end
 
-  return w.done()
+  return output.done()
 end
 
 export type Tes4File = {
@@ -209,46 +209,45 @@ local function tes4(spec: Tes4Spec): string
   if not fileStrings then fileNamesLength = spec.padding or 0 end
 
   local recordSize = if version == 105 then 24 else 16
-  local w = writer()
-  w.raw 'BSA\0'
-  w.u32(version)
-  w.u32(0x24)
-  w.u32(flags)
-  w.u32(#spec.folders)
-  w.u32(fileCount)
-  w.u32(if directoryStrings then folderNamesLength else 0)
-  w.u32(fileNamesLength)
-  w.u16(spec.archiveTypes or 0x100)
-  w.u16(0)
+  local output = writer()
+  output.raw 'BSA\0'
+  output.u32(version)
+  output.u32(0x24)
+  output.u32(flags)
+  output.u32(#spec.folders)
+  output.u32(fileCount)
+  output.u32(if directoryStrings then folderNamesLength else 0)
+  output.u32(fileNamesLength)
+  output.u16(spec.archiveTypes or 0x100)
+  output.u16(0)
   local blockOffset = 0x24 + recordSize * #spec.folders
   for _, folder in spec.folders do
     local low, high = u64Of(spec.hashDirectory(folder.name).hash)
-    w.u32(low)
-    w.u32(high)
-    w.u32(#folder.files)
+    output.u32(low)
+    output.u32(high)
+    output.u32(#folder.files)
     if version == 105 then
-      w.u32(0)
-      w.u64(blockOffset)
+      output.u32(0)
+      output.u64(blockOffset)
     else
-      w.u32(blockOffset)
+      output.u32(blockOffset)
     end
 
     blockOffset += (if directoryStrings then #folder.name + 2 else 0) + 16 * #folder.files
   end
 
   local payloads: { string } = {}
-  local sizeAt: { number } = {}
-  local offsetAt: { number } = {}
+  local sizeAt: { number }, offsetAt: { number } = {}, {}
   for _, folder in spec.folders do
     if directoryStrings then
-      w.u8(#folder.name + 1)
-      w.raw(folder.name .. '\0')
+      output.u8(#folder.name + 1)
+      output.raw(folder.name .. '\0')
     end
 
     for _, file in folder.files do
       local low, high = u64Of(spec.hashFile(file.name).hash)
-      w.u32(low)
-      w.u32(high)
+      output.u32(low)
+      output.u32(high)
       local stored = file.data
       if file.compress then
         local body = if file.frame
@@ -273,28 +272,28 @@ local function tes4(spec: Tes4Spec): string
         size += 0x80000000
       end
 
-      table.insert(sizeAt, w.at())
-      w.u32(size)
-      table.insert(offsetAt, w.at())
-      w.u32(0)
+      table.insert(sizeAt, output.at())
+      output.u32(size)
+      table.insert(offsetAt, output.at())
+      output.u32(0)
     end
   end
 
   if fileStrings then
     for _, folder in spec.folders do
       for _, file in folder.files do
-        w.raw(file.name .. '\0')
+        output.raw(file.name .. '\0')
       end
     end
   end
 
-  w.raw(string.rep('\0', spec.padding or 0))
+  output.raw(string.rep('\0', spec.padding or 0))
   for index, payload in payloads do
-    w.set32(offsetAt[index], w.at())
-    w.raw(payload)
+    output.set32(offsetAt[index], output.at())
+    output.raw(payload)
   end
 
-  return w.done()
+  return output.done()
 end
 
 export type Ba2Chunk = { data: string, compress: string?, first: number?, last: number? }
@@ -325,39 +324,39 @@ export type Ba2Spec = {
 --- A BA2 laid out by hand: records, chunks (stored, zlib, or LZ4 blocks), and a string table
 --- when asked for.
 local function ba2(spec: Ba2Spec): string
-  local w = writer()
-  w.raw 'BTDX'
-  w.u32(spec.version)
-  w.raw(spec.format)
-  w.u32(#spec.entries)
-  local tableAt = w.at()
-  w.u64(0)
-  if spec.version == 2 or spec.version == 3 then w.u64(1) end
+  local output = writer()
+  output.raw 'BTDX'
+  output.u32(spec.version)
+  output.raw(spec.format)
+  output.u32(#spec.entries)
+  local tableAt = output.at()
+  output.u64(0)
+  if spec.version == 2 or spec.version == 3 then output.u64(1) end
 
-  if spec.version == 3 then w.u32(spec.compressionCode or 0) end
+  if spec.version == 3 then output.u32(spec.compressionCode or 0) end
 
   local chunked = spec.format ~= 'GNRL'
   local offsets: { { number } } = {}
   local stored: { { string } } = {}
   for index, entry in spec.entries do
     local hash = entry.hash or spec.hashFile(entry.name)
-    w.u32(hash.file)
-    w.u32(hash.extension)
-    w.u32(hash.directory)
-    w.u8(0)
-    w.u8(#entry.chunks)
-    w.u16(if spec.format == 'GNRL' then 0x10 elseif spec.format == 'DX10' then 0x18 else 0x30)
+    output.u32(hash.file)
+    output.u32(hash.extension)
+    output.u32(hash.directory)
+    output.u8(0)
+    output.u8(#entry.chunks)
+    output.u16(if spec.format == 'GNRL' then 0x10 elseif spec.format == 'DX10' then 0x18 else 0x30)
     if entry.texture then
       local texture = entry.texture
-      w.u16(texture.height)
-      w.u16(texture.width)
-      w.u8(texture.mipCount)
-      w.u8(texture.format)
-      w.u8(texture.flags)
-      w.u8(texture.tileMode)
+      output.u16(texture.height)
+      output.u16(texture.width)
+      output.u8(texture.mipCount)
+      output.u8(texture.format)
+      output.u8(texture.flags)
+      output.u8(texture.tileMode)
     elseif spec.format == 'GNMF' then
       for slot = 1, 8 do
-        w.u32(if entry.gnmf then entry.gnmf[slot] or 0 else slot)
+        output.u32(if entry.gnmf then entry.gnmf[slot] or 0 else slot)
       end
     end
 
@@ -373,36 +372,36 @@ local function ba2(spec: Ba2Spec): string
         packed = #data
       end
 
-      table.insert(offsets[index], w.at())
+      table.insert(offsets[index], output.at())
       table.insert(stored[index], data)
-      w.u64(0)
-      w.u32(packed)
-      w.u32(#chunk.data)
+      output.u64(0)
+      output.u32(packed)
+      output.u32(#chunk.data)
       if chunked then
-        w.u16(chunk.first or 0)
-        w.u16(chunk.last or 0)
+        output.u16(chunk.first or 0)
+        output.u16(chunk.last or 0)
       end
 
-      w.u32(0xbaadf00d)
+      output.u32(0xbaadf00d)
     end
   end
 
   for index in spec.entries do
     for chunk, data in stored[index] do
-      w.set32(offsets[index][chunk], w.at())
-      w.raw(data)
+      output.set32(offsets[index][chunk], output.at())
+      output.raw(data)
     end
   end
 
   if spec.strings then
-    w.set32(tableAt, w.at())
+    output.set32(tableAt, output.at())
     for _, entry in spec.entries do
-      w.u16(#entry.name)
-      w.raw(entry.name)
+      output.u16(#entry.name)
+      output.raw(entry.name)
     end
   end
 
-  return w.done()
+  return output.done()
 end
 
 local CodecDetails = {
@@ -477,12 +476,15 @@ local function observe(module: any, data: string, label: string?): string
   local lines: { string } = {}
   local function line(text: string) table.insert(lines, text) end
 
+  -- `openBytes` raises for bytes that aren't an archive it reads: a magic, version or header it
+  -- refuses, or an index that runs past the end. The refusal is what there is to observe.
   local opened, archive = pcall(module.openBytes, data)
   if not opened then return `open: {errorText(archive)}` end
 
   line(
     `format {archive:format()} len {archive:len()} size {archive:archiveSize()} empty {archive:isEmpty()}`
   )
+  -- `info` raises for every archive that isn't a BA2, and that error is part of the observation.
   local infoOk, info = pcall(archive.info, archive)
   if infoOk then
     line(`info {info.format} {info.version} {info.compression} {info.strings}`)
@@ -502,11 +504,16 @@ local function observe(module: any, data: string, label: string?): string
 
     line(table.concat(fields, ' '))
     line(`tostring {tostring(entry)}`)
+    -- `readEntry` raises for a payload that lies outside the archive or fails to decompress to
+    -- its declared size, and for a format whose extraction isn't implemented (BA2 GNMF). The
+    -- error is recorded and the next entry is still read.
     local read, result = pcall(archive.readEntry, archive, index)
     line(if read then `read {#result} {digest(result)}` else `read: {errorText(result)}`)
     local size = entry.size
     local room = if type(size) == 'number' and size < 0x1000000 then size else 0
     local target = buffer.create(room + 3)
+    -- `readInto` raises as `readEntry` does, and for an entry larger than the room given here,
+    -- which is none for one of 16 MiB or more. Either way the error is the observation.
     local into, count = pcall(archive.readInto, archive, entry, target, 3)
     if into then
       line(`readInto {count} {digest(buffer.readstring(target, 3, count))}`)
@@ -548,6 +555,8 @@ local function observe(module: any, data: string, label: string?): string
     line(`lookup {show(query)} {if found then found.index else 'nil'}`)
   end
 
+  -- `readFileRequired` raises for a path the archive doesn't hold, which this one never is: the
+  -- message it raises with is what's recorded.
   local bad, problem = pcall(archive.readFileRequired, archive, 'definitely/missing.bin')
   line(`required {bad} {errorText(problem)}`)
   return table.concat(lines, '\n')
@@ -697,10 +706,10 @@ local function here(): string
 end
 
 --- What a runner sets before it requires a suite, for the cases the harness's globals set.
-local settings: { [string]: unknown } = {}
+local Settings: { [string]: unknown } = {}
 
 return table.freeze {
-  settings = settings,
+  settings = Settings,
   generator = generator,
   writer = writer,
   tes3 = tes3,
