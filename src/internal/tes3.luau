@@ -87,11 +87,17 @@ local function open(store: Store): Backend
     end
   end
 
-  for entry = 0, count - 1 do
-    local relative = buffer.readu32(index, offsetsStart + 4 * entry)
-    if relative > namesLength then fail(Messages.outOfBounds) end
+  -- The last NUL is inside the blob, so a name that starts at or before it starts inside too: one
+  -- reduction over the offsets clears them all, and only an archive it doesn't clear is walked
+  -- for the offset that is wrong and how.
+  local firstOffset = offsetsStart // 4
+  if any[for relative in index[(firstOffset + 1):(firstOffset + count), 'u32'] => relative > lastNul] then
+    for entry = 0, count - 1 do
+      local relative = buffer.readu32(index, offsetsStart + 4 * entry)
+      if relative > namesLength then fail(Messages.outOfBounds) end
 
-    if relative > lastNul then fail(Messages.endOfFile) end
+      if relative > lastNul then fail(Messages.endOfFile) end
+    end
   end
 
   for entry = 0, count - 1 do
