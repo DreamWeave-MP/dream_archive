@@ -7,6 +7,7 @@ local archive = require '@dream-archive'
 local fs = require '@dream/fs'
 local support = require './support'
 local test = require '@jess/test'
+local util = require '@dream-archive/util'
 local expect = test.expect
 local suite = test.new()
 
@@ -641,6 +642,57 @@ suite.describe('reading what the builders write', function()
     tes4Dest:addArchiveEntryWithCompression('data/copied.txt', tes4, 1, 'store')
     expect(archive.bsa.tes4.openBytes(tes4Dest:toBytes()):readFileRequired 'data/copied.txt').toBe 'tes4 payload'
     expect(function() tes4Dest:addArchiveEntry('x', tes4, 2) end).toThrow 'out of bounds'
+  end)
+end)
+
+suite.describe('the sort the builders share', function()
+  type Item = { key: number, rank: number, label: string }
+
+  local function key(item: Item): number return item.key end
+
+  local function before(left: Item, right: Item): boolean return left.rank < right.rank end
+
+  local function labels(items: { Item }): string
+    return table.concat([for item in util.sortByKey(items, key, before) => item.label], ' ')
+  end
+
+  suite.it('orders by key, and by the full order among equal keys', function()
+    expect(labels {}).toBe ''
+    expect(labels { { key = 0 / 1, rank = 1, label = 'only' } }).toBe 'only'
+    expect(labels {
+      { key = 3, rank = 1, label = 'three' },
+      { key = -1.5, rank = 9, label = 'low' },
+      { key = 2 ^ 53, rank = 0, label = 'high' },
+      { key = 3, rank = 0, label = 'three-first' },
+      { key = 0, rank = 5, label = 'zero' },
+      { key = 3, rank = 2, label = 'three-last' },
+      { key = math.huge, rank = 0, label = 'most' },
+      { key = -math.huge, rank = 0, label = 'least' },
+    }).toBe 'least low zero three-first three three-last high most'
+  end)
+
+  suite.it('gives back a new list and leaves the one it was given as it was', function()
+    local items: { Item } =
+      { { key = 2, rank = 0, label = 'second' }, { key = 1, rank = 0, label = 'first' } }
+    local sorted = util.sortByKey(items, key, before)
+    expect(sorted == items).toBe(false)
+    expect(items[1].label).toBe 'second'
+    expect(sorted[1]).toBe(items[2])
+    expect(#sorted).toBe(2)
+  end)
+
+  suite.it('refuses a key that is NaN, wherever it comes', function()
+    local nan = 0 / 0
+    for position = 1, 3 do
+      local items: { Item } = {}
+      for index = 1, 3 do
+        items[index] = { key = if index == position then nan else index, rank = 0, label = '' }
+      end
+
+      expect(function() util.sortByKey(items, key, before) end).toThrow 'table index is NaN'
+    end
+
+    expect(function() util.sortByKey({ { key = nan, rank = 0, label = '' } }, key, before) end).toThrow 'table index is NaN'
   end)
 end)
 
