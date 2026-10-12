@@ -22,9 +22,7 @@ local function fromBytes(data: buffer | string): Store
 
   -- The caller keeps its buffer and may write it; the archive reads a copy, as the crate does.
   local source = data :: buffer
-  local copy = buffer.create(buffer.len(source))
-  buffer.copy(copy, 0, source, 0)
-  return fromBuffer(copy)
+  return fromBuffer(source[1:buffer.len(source)])
 end
 
 local function fromPath(path: string): Store

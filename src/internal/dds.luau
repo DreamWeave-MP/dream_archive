@@ -247,8 +247,8 @@ local function headerLength(format: number): number
   return if Dx10Blocks[format] or Dx10Pitched[format] then 148 else 128
 end
 
-local function headerOf(texture: TextureHeader): buffer
-  return header(texture.height, texture.width, texture.mipCount, texture.format, texture.flags)
+local function headerOf({ height, width, mipCount, format, flags }: TextureHeader): buffer
+  return header(height, width, mipCount, format, flags)
 end
 
 --- The payload bytes mips `first` to `last` of a texture take, every face of a cubemap included.
@@ -279,8 +279,12 @@ local function mipBytes(
   return size
 end
 
-local function mipPayloadSize(texture: TextureHeader, first: number, last: number): number
-  return mipBytes(texture.height, texture.width, texture.flags, texture.format, first, last)
+local function mipPayloadSize(
+  { height, width, flags, format }: TextureHeader,
+  first: number,
+  last: number
+): number
+  return mipBytes(height, width, flags, format, first, last)
 end
 
 local function payloadSize(texture: TextureHeader): number

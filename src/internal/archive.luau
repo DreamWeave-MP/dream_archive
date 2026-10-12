@@ -241,12 +241,7 @@ function Methods.entries(self: Archive): Entries
   local list = state.list
   if list then return list end
 
-  local count = state.backend.count
-  local made = table.create(count) :: { Entry }
-  for index = 1, count do
-    made[index] = entryOf(state, index)
-  end
-
+  local made = [for index in range(1, state.backend.count) => entryOf(state, index)]
   local frozen = (table.freeze(setmetatable(made, EntriesMeta)) :: unknown) :: Entries
   state.list = frozen
   return frozen

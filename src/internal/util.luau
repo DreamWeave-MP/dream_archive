@@ -377,13 +377,6 @@ end
 local BlockSizes: { [number]: number } =
   { [4] = 0x10000, [5] = 0x40000, [6] = 0x100000, [7] = 0x400000 }
 
---- `length` bytes of `source` at `offset`, in a buffer of their own.
-local function slice(source: buffer, offset: number, length: number): buffer
-  local out = buffer.create(length)
-  buffer.copy(out, 0, source, offset, length)
-  return out
-end
-
 --- An LZ4 frame of independent blocks, read block by block with the decoded size known: what
 --- lz4_flex's frame decoder accepts, checked as it checks it (header, block, and content
 --- checksums, block sizes, content size), and nothing more. Anything else, or anything that
@@ -432,7 +425,7 @@ local function lz4FrameBlocks(source: buffer, expected: number): buffer?
     size = bit32.band(size, 0x7fffffff)
     if size > maxBlock or position + size > length then return nil end
 
-    local block = slice(source, position, size)
+    local block = source[(position + 1):(position + size)]
     position += size
     if blockChecksums then
       if position + 4 > length or bytes.xxh32(block) ~= buffer.readu32(source, position) then

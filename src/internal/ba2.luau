@@ -272,12 +272,10 @@ local function open(store: Store): Backend
   end
 
   local function chunksSize(entry: number): number
-    local total = 0
-    for chunk = 0, chunkCountOf(entry) - 1 do
-      total += buffer.readu32(index, chunkAt(entry, chunk) + 12)
-    end
-
-    return total
+    return sum[
+      for chunk in range(0, chunkCountOf(entry) - 1)
+      => buffer.readu32(index, chunkAt(entry, chunk) + 12)
+    ]
   end
 
   local function decodedSize(entry: number): (number?, string?)
@@ -462,11 +460,10 @@ local function open(store: Store): Backend
     end,
 
     compressed = function(entry: number): boolean
-      for chunk = 0, chunkCountOf(entry) - 1 do
-        if buffer.readu32(index, chunkAt(entry, chunk) + 8) ~= 0 then return true end
-      end
-
-      return false
+      return any[
+        for chunk in range(0, chunkCountOf(entry) - 1)
+        => buffer.readu32(index, chunkAt(entry, chunk) + 8) ~= 0
+      ]
     end,
     chunks = chunkCountOf,
     hash = function(): integer? return nil end,

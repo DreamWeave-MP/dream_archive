@@ -25,8 +25,7 @@ local function fromBytes(value: buffer | string): Source
   if type(value) == 'string' then return { kind = 'bytes', bytes = value, length = #value } end
 
   local source = value :: buffer
-  local copy = buffer.create(buffer.len(source))
-  buffer.copy(copy, 0, source)
+  local copy = source[1:buffer.len(source)]
   return { kind = 'bytes', bytes = copy, length = buffer.len(copy) }
 end
 
@@ -70,16 +69,15 @@ local function collect(root: string): { CollectedFile }
   if problem then fail(util.walkMessage(problem)) end
 
   local rows = assert(found)
-  local files = {}
-  for index, relative in rows.paths do
-    if rows.kinds[index] == 'dir' then continue end
-
-    table.insert(files, {
+  local files: { CollectedFile } = [
+    for index, relative in enumerate(rows.paths)
+    if rows.kinds[index] ~= 'dir'
+    => {
       archivePath = relative,
       path = jess.fs.join(root, relative),
       size = (rows.sizes :: { number })[index],
-    })
-  end
+    }
+  ]
 
   table.sort(files, function(first: CollectedFile, second: CollectedFile): boolean
     return first.path < second.path
@@ -107,7 +105,7 @@ local function fileSink(path: string): Sink
 end
 
 local function add(sink: Sink, data: buffer | string)
-  local writer, out = sink.writer, sink.out
+  local { writer, out } = sink
   if writer then
     local count, message = writer:write(data)
     util.hostResult(count, message, sink.path :: string)
