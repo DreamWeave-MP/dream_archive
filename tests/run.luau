@@ -699,6 +699,58 @@ suite.describe('lookups', function()
     expect(forward.normalized).toBe 'foo\\bar'
   end)
 
+  suite.it('hash a TES3 path of any length as the format defines it, a byte at a time', function()
+    --- The hash as the format states it: the first half's bytes XORed into a word, each at its
+    --- place in it, and the second half's the same way, the word rotated right after each by the
+    --- low bits of what was XORed in.
+    local function reference(path: string): (number, number)
+      local midpoint = #path // 2
+      local low, high = 0, 0
+      for index = 1, midpoint do
+        low = bit32.bxor(low, bit32.lshift(string.byte(path, index), (index - 1) % 4 * 8))
+      end
+
+      for index = midpoint + 1, #path do
+        local placed = bit32.lshift(string.byte(path, index), (index - midpoint - 1) % 4 * 8)
+        high = bit32.rrotate(bit32.bxor(high, placed), bit32.band(placed, 31))
+      end
+
+      return low, high
+    end
+
+    local random = support.generator(0x7e53)
+    local function pathOf(length: number): string
+      local letters = table.create(length) :: { string }
+      for index = 1, length do
+        letters[index] = string.char(97 + random(26))
+      end
+
+      return table.concat(letters)
+    end
+
+    for length = 1, 259 do
+      local path = pathOf(length)
+      local low, high = reference(path)
+      local hash = archive.bsa.tes3.hashFile(path)
+      expect(hash.lo).toBe(low)
+      expect(hash.hi).toBe(high)
+    end
+
+    -- The helper hashes an overlong path as `.`; a builder hashes the path it stores, whole.
+    local builder = archive.bsa.tes3.Builder.new()
+    local lengths = { 260, 511, 512, 513, 1023, 1024, 1025, 1026, 1027, 3001 }
+    for _, length in lengths do
+      builder:addBytes(pathOf(length), 'payload')
+    end
+
+    local entries = archive.openBytes(builder:toBytes()):entries()
+    expect(#entries).toBe(#lengths)
+    for _, entry in entries do
+      local low, high = reference(entry.path :: string)
+      expect(entry.hashHex).toBe(string.format('%08x%08x', low, high))
+    end
+  end)
+
   suite.it('reproduce the TES4 hash vectors and oddities', function()
     local directories: { [string]: string } = {
       ['textures/armor/amuletsandrings/elder council'] = '04bc422c742c696c',
