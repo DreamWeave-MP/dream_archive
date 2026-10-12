@@ -50,11 +50,7 @@ local function new()
   --- The header, records, name offsets, names, and hashes, from the members' declared sizes.
   local function index(list: { Member }): buffer
     local count = #list
-    local namesLength = 0
-    for _, member in list do
-      namesLength += #member.path + 1
-    end
-
+    local namesLength = sum[for member in list => #member.path + 1]
     local hashOffset = 12 * count + namesLength
     if hashOffset > 0xffffffff then fail(Messages.integral) end
 
@@ -96,12 +92,8 @@ local function new()
     local head = index(list)
     local target = sink
     if not target then
-      local total = buffer.len(head)
-      for _, member in list do
-        total += member.source.length
-      end
-
-      target = sources.memorySink(total)
+      local payloads = sum[for member in list => member.source.length]
+      target = sources.memorySink(buffer.len(head) + payloads)
     end
 
     sources.add(target :: sources.Sink, head)

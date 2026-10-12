@@ -110,12 +110,7 @@ local function writeHeader(
 end
 
 local function stringTable(list: { Member }): buffer
-  local length = 0
-  for _, member in list do
-    length += 2 + #member.name
-  end
-
-  local out = buffer.create(length)
+  local out = buffer.create(sum[for member in list => 2 + #member.name])
   local cursor = 0
   for _, member in list do
     buffer.writeu16(out, cursor, #member.name)
@@ -162,12 +157,12 @@ local function new()
   end
 
   local function write(sink: sources.Sink?): buffer?
-    if compression == 'lz4' and version ~= 3 then
-      for _, member in members do
-        if isCompressed(member, compression) then
-          util.notImplemented 'BA2 LZ4 writer requires version 3'
-        end
-      end
+    if
+      compression == 'lz4'
+      and version ~= 3
+      and any[for member in members => isCompressed(member, compression)]
+    then
+      util.notImplemented 'BA2 LZ4 writer requires version 3'
     end
 
     local list = sortMembers(members)
@@ -175,7 +170,6 @@ local function new()
     local recordsAt = headerSize(version)
     local head = buffer.create(recordsAt + 36 * count)
     writeHeader(head, version, 'GNRL', count, 0, compression == 'lz4')
-    local anyCompressed = false
     for position, member in list do
       local record = recordsAt + 36 * (position - 1)
       buffer.writeu32(head, record, member.file)
@@ -187,18 +181,17 @@ local function new()
 
       buffer.writeu32(head, record + 28, member.source.length)
       buffer.writeu32(head, record + 32, Sentinel)
-      anyCompressed = anyCompressed or isCompressed(member, compression)
     end
 
     local names = stringTable(list)
     local target = sink
     if not target then
+      -- A compressed member's stored length isn't known until it is written.
       local total: number? = nil
-      if not anyCompressed then
-        total = buffer.len(head) + buffer.len(names)
-        for _, member in list do
-          total = (total :: number) + member.source.length
-        end
+      if not any[for member in list => isCompressed(member, compression)] then
+        total = buffer.len(head)
+          + buffer.len(names)
+          + sum[for member in list => member.source.length]
       end
 
       target = sources.memorySink(total)
@@ -469,19 +462,17 @@ local function newDx10()
 
   local function addDds(path: string, data: buffer)
     local texture, payloadAt = dds.parse(data)
-    local payload = buffer.create(buffer.len(data) - payloadAt)
-    buffer.copy(payload, 0, data, payloadAt)
-    addTexture(path, texture, payload)
+    addTexture(path, texture, data[(payloadAt + 1):buffer.len(data)])
   end
 
   --- Each member's chunks, compressed or copied, as the crate prepares them before writing.
   local function prepare(list: { Member }): { { PreparedChunk } }
-    if compression == 'lz4' and version ~= 3 then
-      for _, member in list do
-        if isCompressed(member, compression) then
-          util.notImplemented 'BA2 LZ4 writer requires version 3'
-        end
-      end
+    if
+      compression == 'lz4'
+      and version ~= 3
+      and any[for member in list => isCompressed(member, compression)]
+    then
+      util.notImplemented 'BA2 LZ4 writer requires version 3'
     end
 
     local prepared = table.create(#list) :: { { PreparedChunk } }
@@ -503,18 +494,16 @@ local function newDx10()
           util.notImplemented 'BA2 DX10 archive entry preservation requires matching compression formats'
         end
 
-        local chunks: { PreparedChunk } = {}
-        for _, chunk in facts.chunkList(source.index :: number) do
-          table.insert(chunks, {
+        prepared[position] = [
+          for chunk in facts.chunkList(source.index :: number)
+          => {
             chunk = chunk,
             packed = chunk.packedSize,
             size = chunk.size,
             first = chunk.firstMip,
             last = chunk.lastMip,
-          })
-        end
-
-        prepared[position] = chunks
+          }
+        ]
         continue
       end
 
@@ -552,19 +541,9 @@ local function newDx10()
     local list = sortMembers(members)
     local prepared = prepare(list)
     local recordsAt = headerSize(version)
-    local payloadAt = recordsAt
-    local tableAt = 0
-    for _, chunks in prepared do
-      payloadAt += 24 + 24 * #chunks
-    end
-
-    tableAt = payloadAt
-    for _, chunks in prepared do
-      for _, chunk in chunks do
-        tableAt += storedLength(chunk)
-      end
-    end
-
+    local payloadAt = recordsAt + sum[for chunks in prepared => 24 + 24 * #chunks]
+    local tableAt = payloadAt
+      + sum[for chunks in prepared for chunk in chunks => storedLength(chunk)]
     local names = stringTable(list)
     local head = buffer.create(payloadAt)
     writeHeader(head, version, 'DX10', #list, tableAt, compression == 'lz4')

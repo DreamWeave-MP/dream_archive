@@ -71,8 +71,8 @@ local function normalizeStoredPath(path: string): (string, string, string)
 end
 
 --- A hash's 64-bit value as two numbers that order the same way: the CRC, then the low half.
-local function order(hash: tes4.Hash): (number, number)
-  return hash.crc, ((hash.first * 256 + hash.length) * 256 + hash.last2) * 256 + hash.last
+local function order({ crc, first, length, last2, last }: tes4.Hash): (number, number)
+  return crc, ((first * 256 + length) * 256 + last2) * 256 + last
 end
 
 --- A number that orders hashes as their 64-bit values do, except within one of 2^11 of each
@@ -197,12 +197,11 @@ local function new()
       return left.name < right.name
     end
 
-    local list: { Member } = table.create(#members) :: { Member }
-    for _, folder in util.sortByKey(folderNames, folderKey, folderBefore) do
-      for _, member in util.sortByKey(byFolder[folder], fileKey, fileBefore) do
-        table.insert(list, member)
-      end
-    end
+    local list: { Member } = [
+      for folder in util.sortByKey(folderNames, folderKey, folderBefore)
+      for member in util.sortByKey(byFolder[folder], fileKey, fileBefore)
+      => member
+    ]
 
     local payloads: { buffer | string } = table.create(#list) :: { buffer | string }
     local prefixes: { number | false } = table.create(#list) :: { number | false }
@@ -212,23 +211,16 @@ local function new()
     end
 
     -- Folders are runs of members with the same folder.
-    local folderStarts: { number } = {}
-    for position, member in list do
-      if position == 1 or list[position - 1].folder ~= member.folder then
-        table.insert(folderStarts, position)
-      end
-    end
-
+    local folderStarts: { number } = [
+      for position, member in enumerate(list)
+      if position == 1 or list[position - 1].folder ~= member.folder
+      => position
+    ]
     local folderCount, fileCount = #folderStarts, #list
     local folderNamesLength, fileNamesLength = 0, 0
     if strings then
-      for _, start in folderStarts do
-        folderNamesLength += #list[start].folder + 1
-      end
-
-      for _, member in list do
-        fileNamesLength += #member.name + 1
-      end
+      folderNamesLength = sum[for start in folderStarts => #list[start].folder + 1]
+      fileNamesLength = sum[for member in list => #member.name + 1]
     end
 
     local recordSize = if version == 105 then 24 else 16
@@ -237,15 +229,13 @@ local function new()
       + (if strings then folderCount + folderNamesLength else 0)
       + 16 * fileCount
       + fileNamesLength
-    local total = dataOffset
-    for position, member in list do
-      total += sources.length(payloads[position]) + (if prefixes[position] then 4 else 0)
-      if embedded then
-        total += 1 + #embeddedName(member)
-      end
-    end
-
-    local out = buffer.create(total)
+    local payloadBytes = sum[
+      for position, member in enumerate(list)
+      => sources.length(payloads[position])
+        + (if prefixes[position] then 4 else 0)
+        + (if embedded then 1 + #embeddedName(member) else 0)
+    ]
+    local out = buffer.create(dataOffset + payloadBytes)
     buffer.writeu32(out, 0, 0x00415342)
     buffer.writeu32(out, 4, version)
     buffer.writeu32(out, 8, 0x24)
