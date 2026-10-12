@@ -42,8 +42,12 @@ end
 --- empty or overlong path is `.`.
 local function normalize(path: string): string return util.normalizeHashPath(path) end
 
---- The three hash fields of a normalized path.
-local function hashNormalized(path: string): (number, number, number)
+--- The three hash fields of a normalized path. Given `directories`, each parent folder's hash is
+--- kept there for the next path in it.
+local function hashNormalized(
+  path: string,
+  directories: { [string]: number }?
+): (number, number, number)
   local separator, dot = bytes.rfind(path, '\\'), bytes.rfind(path, '.')
   local parent = if separator then string.sub(path, 1, separator) else ''
   local first = if separator then separator + 2 else 1
@@ -55,7 +59,13 @@ local function hashNormalized(path: string): (number, number, number)
     packed = packed * 256 + string.byte(extension, index)
   end
 
-  return crc(parent), crc(stem), packed
+  local directory = if directories then directories[parent] else nil
+  if not directory then
+    directory = crc(parent)
+    if directories then directories[parent] = directory end
+  end
+
+  return directory, crc(stem), packed
 end
 
 local function hashFile(path: string)

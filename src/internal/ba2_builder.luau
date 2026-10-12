@@ -144,11 +144,12 @@ local function new()
   local level = 6
   local members: { Member } = {}
   local names: { [string]: boolean } = {}
+  local directories: { [string]: number } = {}
 
   local function addSource(name: string, mode: 'inherit' | 'store' | 'compress', source: Source)
     if names[name] then fail(Messages.ba2Duplicate) end
 
-    local directory, file, extension = ba2.hashNormalized(name)
+    local directory, file, extension = ba2.hashNormalized(name, directories)
     names[name] = true
     table.insert(members, {
       name = name,
@@ -438,11 +439,12 @@ local function newDx10()
   local level = 6
   local members: { Member } = {}
   local names: { [string]: boolean } = {}
+  local directories: { [string]: number } = {}
 
   local function addSource(name: string, texture: TextureHeader, source: Source)
     if names[name] then fail(Messages.ba2Duplicate) end
 
-    local directory, file, extension = ba2.hashNormalized(name)
+    local directory, file, extension = ba2.hashNormalized(name, directories)
     names[name] = true
     table.insert(members, {
       name = name,
