@@ -30,7 +30,7 @@ local Flags = table.freeze {
 local function crc(text: string, first: number, last: number): number
   local value = 0
   for index = first, last do
-    value = (string.byte(text, index) + value * 0x1003f) % 0x100000000
+    value = bit32.band(string.byte(text, index) + value * 0x1003f, 0xffffffff)
   end
 
   return value

@@ -17,18 +17,32 @@ local fail, Messages = util.fail, util.Messages
 
 local Version = 0x100
 
---- The two u32 halves of the hash of a normalized path, as stored: low word first.
+--- Where a path's bytes lie while it is hashed.
+local scratch = buffer.create(512)
+
+--- The two u32 halves of the hash of a normalized path, as stored: low word first. The low half
+--- XORs each byte of the path's first half in at its place in a little-endian word, which is
+--- what XORing those words whole does.
 local function hashNormalized(path: string): (number, number)
   local length = #path
+  if length > buffer.len(scratch) then scratch = buffer.create(2 * length) end
+
+  local text = scratch
+  buffer.writestring(text, 0, path)
   local midpoint = length // 2
+  local whole = midpoint - midpoint % 4
   local low = 0
-  for index = 1, midpoint do
-    low = bit32.bxor(low, bit32.lshift(string.byte(path, index), ((index - 1) % 4) * 8))
+  for offset = 0, whole - 4, 4 do
+    low = bit32.bxor(low, buffer.readu32(text, offset))
+  end
+
+  for offset = whole, midpoint - 1 do
+    low = bit32.bxor(low, bit32.lshift(buffer.readu8(text, offset), (offset - whole) * 8))
   end
 
   local high = 0
-  for index = midpoint + 1, length do
-    local rotation = bit32.lshift(string.byte(path, index), ((index - midpoint - 1) % 4) * 8)
+  for offset = midpoint, length - 1 do
+    local rotation = bit32.lshift(buffer.readu8(text, offset), bit32.band(offset - midpoint, 3) * 8)
     high = bit32.rrotate(bit32.bxor(high, rotation), bit32.band(rotation, 31))
   end
 
