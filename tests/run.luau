@@ -1006,6 +1006,38 @@ suite.describe('hand-made archives', function()
     expect(archive.bsa.tes4.openBytes(support.tes4(spec)):readFileRequired 'data/a.txt').toBe 'x'
   end)
 
+  suite.it('refuse TES4 padding that is not NUL, and a file name its block does not end', function()
+    --- An archive of two files, the second's payload `payload`, with `padding` NULs after the
+    --- names: bytes of the name block overwritten, and what opening it then says.
+    local function check(payload: string, padding: number)
+      local spec = tes4Spec(104, 3, { { name = 'a.txt', data = 'x' }, { name = 'b.txt', data = payload } })
+      spec.padding = padding
+      local good = support.tes4(spec)
+      local namesAt = (string.find(good, 'a.txt\0b.txt\0', 1, true) :: number) - 1
+      local namesEnd = namesAt + 12 + padding
+      local function opening(first: number, last: number): () -> ()
+        local copy = buffer.fromstring(good)
+        buffer.fill(copy, first, (string.byte 'X'), last - first + 1)
+        return function() archive.bsa.tes4.openBytes(buffer.tostring(copy)) end
+      end
+
+      expect(archive.bsa.tes4.openBytes(good):readFileRequired 'data/b.txt').toBe(payload)
+      expect(opening(namesAt + 11, namesEnd - 1)).toThrow 'unexpected end of file'
+      expect(opening(namesAt + 5, namesEnd - 1)).toThrow 'unexpected end of file'
+      if padding == 0 then return end
+
+      expect(opening(namesEnd - 1, namesEnd - 1)).toThrow 'out of bounds'
+      expect(opening(namesEnd - 2, namesEnd - 2)).toThrow 'out of bounds'
+      expect(opening(namesEnd - 2, namesEnd - 1)).toThrow 'out of bounds'
+    end
+
+    -- A NUL past the names, in a payload, ends no name, and neither does the archive's end.
+    for _, payload in { 'NUL\0s', 'none' } do
+      check(payload, 0)
+      check(payload, 2)
+    end
+  end)
+
   local function ba2Spec(format: string, entries: { support.Ba2Entry }): support.Ba2Spec
     return {
       version = 1,
