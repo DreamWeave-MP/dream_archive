@@ -17,7 +17,7 @@ jess run --package jpk/dream-archive --package-path jpk \
 
 - Machine: Intel Core i7-10870H @ 2.20 GHz, 16 threads, shared with other work while this ran.
 - Date: 2026-10-12.
-- Binary: the verified release build of Jess 0.1.0 on l3i 2.0.0 (Luau 0.742), the same one for
+- Binary: the verified release build of Jess 0.1.0 on l3i 2.0.1 (Luau 0.742), the same one for
   both sides.
 - Base: `33f6b95`, the package before the move, with this bench. Head: `987549d`.
 - Protocol: the whole bench run against base, then head, three times over, back to back under one
@@ -170,6 +170,50 @@ rows over seven rounds each, which is the measurement to believe for them.
 The two tables disagree with each other on which of these rows moved and which way, so they are
 noise, except where the rows opened from a path show the same change: `open + N lookups`.
 
+### The same again
+
+The whole protocol a second time, the same day on the same binary, by the review of the move:
+base `33f6b95`, head `820adb8`, which is `987549d` with more tests. The rows that moved, and the
+build rows:
+
+| Workload | Base, µs | Head, µs | Base / head |
+|---|---:|---:|---:|
+| tes3 4000 stored (path): open + index | 81.3 | 67.9 | 1.20x |
+| tes3 4000 stored (path): open + first lookup | 878.2 | 757.9 | 1.16x |
+| tes3 4000 stored (path): open + 8000 lookups | 4686.4 | 3586.7 | 1.31x |
+| tes4 1000 zlib (path): open + index | 133.2 | 108.6 | 1.23x |
+| tes4 1000 zlib (path): open + first lookup | 387.1 | 333.6 | 1.16x |
+| tes4 1000 zlib (path): open + 2000 lookups | 1313.4 | 1026.0 | 1.28x |
+| tes4 1000 lz4 frames (path): open + index | 132.8 | 106.9 | 1.24x |
+| tes4 1000 lz4 frames (path): open + first lookup | 390.9 | 334.1 | 1.17x |
+| tes4 1000 lz4 frames (path): open + 2000 lookups | 1318.5 | 1035.3 | 1.27x |
+| ba2 1000 zip (path): open + 2000 lookups | 1159.0 | 919.1 | 1.26x |
+| ba2 1000 lz4 (path): open + 2000 lookups | 1163.9 | 906.9 | 1.28x |
+| dx10 300 BC7 (path): open + 600 lookups | 469.0 | 401.9 | 1.17x |
+| build: tes3, add 2000 | 1780.1 | 1526.4 | 1.17x |
+| build: tes4, add 2000 | 5472.7 | 2862.5 | 1.91x |
+| build: ba2, add 2000 | 3371.1 | 2474.9 | 1.36x |
+| build: tes3, 2000 stored | 3501.5 | 2973.4 | 1.18x |
+| build: tes4 104, 2000 stored | 7868.6 | 5014.7 | 1.57x |
+| build: ba2, 2000 stored | 5523.7 | 4072.4 | 1.36x |
+| build: dx10, 300 stored | 1206.4 | 1001.7 | 1.20x |
+| build: tes4 104, 2000 zlib | 266280 | 269173 | no change |
+| build: tes4 105, 2000 lz4 frames | 28513.3 | 26311.6 | 1.08x |
+| build: ba2, 2000 zip | 262900 | 264663 | no change |
+| build: ba2 v3, 2000 lz4 | 23625.3 | 22540.8 | no change |
+
+Every row whose code changed repeats to within 7 percent of its ratio above. The zlib build's
+1.09x does not: it was deflate's own variance. Of the rest, four rows whose code is what it was differ by 5 to 7
+percent, three of them slower at head, and the † rows swung as they do. One of those,
+`tes4 1000 lz4 frames (bytes): list paths and sizes`, came out slower at head both times the
+whole bench ran (0.83x above, 0.87x here) and no different with its group run alone, five rounds
+a side (1158.6 against 1115.7): it follows where the heap is when the whole bench reaches it, not
+the package.
+
+The shared sort has refused a NaN key again since `b11ed83`, one read more per sort. The build
+rows run alone against that head, five rounds a side on a busier machine: adding 1.14x (TES3),
+1.86x (TES4) and 1.34x (BA2); stored builds 1.23x, 1.47x, 1.34x and 1.23x (DX10).
+
 ## What moved, and what did not
 
 Building moved most. Adding a member is up to 1.9 times as fast (TES4), 1.4 (BA2) and 1.2 (TES3):
@@ -197,6 +241,7 @@ did not change differ by up to 9 percent between the two sides here; that is the
 package.
 
 The pool is read through its binding, not through the native code an annotated
-`dream_intern_Pool` compiles to: l3i 2.0.0 leaves that code reading a slot table the pool has
-replaced, once a name it already holds is interned at the pool's load limit. When l3i fixes that,
-annotating the pool in `src/internal/names.luau` is the next lookup win to measure.
+`dream_intern_Pool` compiles to: l3i 2.0.1, as 2.0.0 did, leaves that code reading a slot table
+the pool has replaced, once a name it already holds is interned at the pool's load limit. When
+l3i fixes that, annotating the pool in `src/internal/names.luau` is the next lookup win to
+measure.
