@@ -5,6 +5,7 @@
 -- frames; names from string tables, from embedded payload names, both, or neither. The index is
 -- checked when the archive opens, in the crate's order; names and lookups are made when asked.
 local Store = require './store'
+local bytes = require '@dream/bytes'
 local names = require './names'
 local types = require './types'
 local util = require './util'
@@ -283,11 +284,10 @@ local function open(store: Store): Backend
     end
 
     if fileStrings then
-      local finish = cursor
-      while finish < namesEnd and buffer.readu8(index, finish) ~= 0 do
-        finish += 1
-      end
-
+      -- A name ends at its NUL, which one search finds; one past the block's end ends no name.
+      local finish = if cursor < namesEnd
+        then bytes.find(index, '\0', cursor) or namesEnd
+        else namesEnd
       if finish >= namesEnd then fail(Messages.endOfFile) end
 
       nameStarts[current] = cursor
@@ -297,9 +297,7 @@ local function open(store: Store): Backend
   end
 
   -- Fallout 3's voice archives pad the name block with NULs after the last name.
-  for padding = cursor, namesEnd - 1 do
-    if buffer.readu8(index, padding) ~= 0 then fail(Messages.outOfBounds) end
-  end
+  if any[for byte in index[(cursor + 1):namesEnd] => byte ~= 0] then fail(Messages.outOfBounds) end
 
   for current = 1, fileCount do
     local record = entryRecord[current]
