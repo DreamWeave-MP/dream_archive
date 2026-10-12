@@ -23,7 +23,7 @@ export type Index = {
 
 --- An empty index; `add` names entries, the first entry a name is added for keeping it.
 local function new(): Index
-  -- Not annotated as a `dream_intern_Pool`, which would compile `find` to native code: l3i 2.0.0
+  -- Not annotated as a `dream_intern_Pool`, which would compile `find` to native code: l3i 2.0.1
   -- leaves that code reading a slot table the pool has replaced, once a name it already holds is
   -- interned while it is at its load limit. The binding's own `find` reads the pool as it is.
   local pool = intern.new(Rules)
