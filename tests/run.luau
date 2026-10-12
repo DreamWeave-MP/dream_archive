@@ -881,6 +881,43 @@ suite.describe('hand-made archives', function()
     expect(function() archive.bsa.tes3.openBytes(buffer.tostring(unterminated)) end).toThrow 'unexpected end of file'
   end)
 
+  suite.it('refuse the first TES3 name offset that is wrong, in the words for what is wrong with it', function()
+    local files: { support.Tes3File } = {}
+    for index = 1, 6 do
+      files[index] = { name = `file{index}.txt`, data = `payload {index}` }
+    end
+
+    local good = support.tes3(files, tes3Hash)
+    -- Six names of nine bytes and a NUL: the names are 60 bytes, the last of them the last NUL.
+    local offsetsAt, namesLength = 12 + 8 * #files, 60
+    local function patched(offsets: { [number]: number }): string
+      local copy = buffer.fromstring(good)
+      for entry, offset in offsets do
+        buffer.writeu32(copy, offsetsAt + 4 * (entry - 1), offset)
+      end
+
+      return buffer.tostring(copy)
+    end
+
+    local function opening(offsets: { [number]: number }): () -> ()
+      return function() archive.bsa.tes3.openBytes(patched(offsets)) end
+    end
+
+    -- A name that starts where the names end never ends; one that starts past there is outside.
+    expect(opening { [4] = namesLength }).toThrow 'unexpected end of file'
+    expect(opening { [4] = namesLength + 1 }).toThrow 'out of bounds'
+    expect(opening { [1] = 0xffffffff }).toThrow 'out of bounds'
+    expect(opening { [6] = namesLength + 1 }).toThrow 'out of bounds'
+    expect(opening { [2] = namesLength, [5] = namesLength + 1 }).toThrow 'unexpected end of file'
+    expect(opening { [2] = namesLength + 1, [5] = namesLength }).toThrow 'out of bounds'
+    -- Any offset up to the last NUL starts a name, whichever entry's name it was written as.
+    local opened = archive.bsa.tes3.openBytes(patched { [1] = namesLength - 1, [6] = 3 })
+    expect(opened:entries()[1].path).toBe ''
+    expect(opened:entries()[6].path).toBe 'e1.txt'
+    expect(opened:readFile 'e1.txt').toBe 'payload 6'
+    expect(opened:readFile 'file1.txt').toBeNil()
+  end)
+
   local function tes4Spec(
     version: number,
     flags: number,
