@@ -5,6 +5,7 @@
 -- 64-bit hashes as Luau integers, the codecs with the crate's size and trailing-data rules, and
 -- host file access with the operating system's messages the crate reported.
 local bytes = require '@dream/bytes'
+local data = require '@dream/data'
 local fs = require '@dream/fs'
 
 local function fail(message: string): never return error(message, 0) end
@@ -230,30 +231,32 @@ end
 
 --- `items` in order, by `key`, a number that orders them as their full order does except among
 --- equal keys, which `before` orders. The keys sort with Luau's own comparison, so a full order
---- is only asked of the rare items that share a key.
+--- is only asked of the rare items that share a key. The keys are sorted as one column of
+--- doubles, natively and stably, so no key is NaN.
 local function sortByKey<T>(items: { T }, key: (T) -> number, before: (T, T) -> boolean): { T }
-  local keys: { number } = table.create(#items) :: { number }
-  local groups: { [number]: { T } } = {}
-  for _, item in items do
-    local value = key(item)
-    local group = groups[value]
-    if group then
-      table.insert(group, item)
+  local count = #items
+  local keys, order = buffer.create(8 * count), buffer.create(4 * count)
+  into(keys, 'f64')[for item in items => key(item)]
+  data.argsort(keys, 'f64', 0, count, order)
+  local sorted: { T } = table.create(count) :: { T }
+  local position = 1
+  while position <= count do
+    local first = buffer.readu32(order, 4 * position - 4)
+    local value = buffer.readf64(keys, 8 * first)
+    local last = position
+    while last < count and buffer.readf64(keys, 8 * buffer.readu32(order, 4 * last)) == value do
+      last += 1
+    end
+
+    if last == position then
+      sorted[position] = items[first + 1]
     else
-      groups[value] = { item }
-      table.insert(keys, value)
+      local group = [for slot in order[position:last, 'u32'] => items[slot + 1]]
+      table.sort(group, before)
+      table.move(group, 1, #group, position, sorted)
     end
-  end
 
-  table.sort(keys)
-  local sorted: { T } = table.create(#items) :: { T }
-  for _, value in keys do
-    local group = groups[value]
-    if #group > 1 then table.sort(group, before) end
-
-    for _, item in group do
-      table.insert(sorted, item)
-    end
+    position = last + 1
   end
 
   return sorted
