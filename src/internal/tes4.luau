@@ -70,9 +70,9 @@ local Extensions: { [string]: number } =
   { ['.nif'] = 1, ['.kf'] = 2, ['.dds'] = 3, ['.wav'] = 4, ['.adp'] = 5 }
 
 local function hashNormalizedFile(path: string): Hash
-  local dot = string.find(path, '%.[^%.]*$')
-  local stem = if dot then string.sub(path, 1, dot - 1) else path
-  local extension = if dot then string.sub(path, dot) else ''
+  local dot = bytes.rfind(path, '.')
+  local stem = if dot then string.sub(path, 1, dot) else path
+  local extension = if dot then string.sub(path, dot + 1) else ''
   if stem == '' or #stem >= 260 or #extension >= 16 then
     return { last = 0, last2 = 0, length = 0, first = 0, crc = 0 }
   end
@@ -100,8 +100,8 @@ end
 
 local function hashFile(path: string): Hash
   local normalized = util.normalizeHashPath(path)
-  local at = string.find(normalized, '\\[^\\]*$')
-  if at then normalized = string.sub(normalized, at + 1) end
+  local at = bytes.rfind(normalized, '\\')
+  if at then normalized = string.sub(normalized, at + 2) end
 
   return hashNormalizedFile(normalized)
 end
@@ -122,9 +122,9 @@ end
 
 --- The folder and file hashes of a lookup-normalized path.
 local function pathHash(key: string): (integer, integer)
-  local at = string.find(key, '/[^/]*$')
-  local folder = if at then string.sub(key, 1, at - 1) else ''
-  local name = if at then string.sub(key, at + 1) else key
+  local at = bytes.rfind(key, '/')
+  local folder = if at then string.sub(key, 1, at) else ''
+  local name = if at then string.sub(key, at + 2) else key
   return numeric(hashDirectory(folder)), numeric(hashFile(name))
 end
 

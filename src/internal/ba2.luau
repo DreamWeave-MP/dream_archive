@@ -44,13 +44,12 @@ local function normalize(path: string): string return util.normalizeHashPath(pat
 
 --- The three hash fields of a normalized path.
 local function hashNormalized(path: string): (number, number, number)
-  local separator = string.find(path, '\\[^\\]*$')
-  local parent = if separator then string.sub(path, 1, separator - 1) else ''
-  local first = if separator then separator + 1 else 1
-  local dot = string.find(path, '%.[^%.]*$')
-  local last = if dot then dot - 1 else #path
+  local separator, dot = bytes.rfind(path, '\\'), bytes.rfind(path, '.')
+  local parent = if separator then string.sub(path, 1, separator) else ''
+  local first = if separator then separator + 2 else 1
+  local last = dot or #path
   local stem = if last >= first then string.sub(path, first, last) else ''
-  local extension = if dot then string.sub(path, dot + 1, dot + 4) else ''
+  local extension = if dot then string.sub(path, dot + 2, dot + 5) else ''
   local packed = 0
   for index = #extension, 1, -1 do
     packed = packed * 256 + string.byte(extension, index)

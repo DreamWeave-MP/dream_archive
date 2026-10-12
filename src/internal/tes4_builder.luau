@@ -64,10 +64,10 @@ end
 --- rest, joined with `\`, the folder.
 local function normalizeStoredPath(path: string): (string, string)
   local stored = util.storedPath(path) or fail(Messages.bsaInvalidPath)
-  local at = string.find(stored, '\\[^\\]*$')
+  local at = bytes.rfind(stored, '\\')
   if not at then return '', stored end
 
-  return string.sub(stored, 1, at - 1), string.sub(stored, at + 1)
+  return string.sub(stored, 1, at), string.sub(stored, at + 2)
 end
 
 --- A hash's 64-bit value as two numbers that order the same way: the CRC, then the low half.

@@ -269,20 +269,28 @@ local function namesAFile(key: string): boolean
   return last ~= nil and last ~= 47
 end
 
+--- How many bytes of a stored path come before its last separator, of either kind; nil without one.
+local function lastSeparator(path: string): number?
+  local backward, forward = bytes.rfind(path, '\\'), bytes.rfind(path, '/')
+  if backward and forward then return math.max(backward, forward) end
+
+  return backward or forward
+end
+
 --- The part of a stored path after its last separator.
 local function lastComponent(path: string): string
-  local at = string.find(path, '[/\\][^/\\]*$')
+  local at = lastSeparator(path)
   if not at then return path end
 
-  return string.sub(path, at + 1)
+  return string.sub(path, at + 2)
 end
 
 --- The part of a stored path before its last separator, `''` at the root.
 local function parentFolder(path: string): string
-  local at = string.find(path, '[/\\][^/\\]*$')
+  local at = lastSeparator(path)
   if not at then return '' end
 
-  return string.sub(path, 1, at - 1)
+  return string.sub(path, 1, at)
 end
 
 --- Archive errors retain the OS reason, without the native operation and host path prefix.
