@@ -2,7 +2,10 @@
 -- The archive port, timed from Luau: open and index, lookups by path and by hash, listing, reads
 -- (stored, zlib, LZ4 blocks and frames, DDS headers rebuilt), extraction, and building. Run by
 -- `jess run --capability filesystem.read --capability filesystem.write --package .
--- bench/bench.luau <scratch> [filter] [real archive]...`, on a release build.
+-- bench/bench.luau <scratch> [filter] [real archive]...`, on a release build. Prints one line per
+-- workload, its name, a tab, and the seconds one call takes; every workload's result is checked
+-- against what the inputs say it must be, so a path that stopped doing the work fails here.
+local bytes = require '@dream/bytes'
 local fs = require '@dream/fs'
 local port = require '@dream-archive'
 
@@ -14,9 +17,9 @@ end
 
 --- The arguments: a folder to write into, a filter on the workload names (`''` for all), and
 --- real archives to read in place.
-local scratch: string, filter: string = ...
+local scratch: string, filter: string? = ...
 local realArchives: { string } = { select(3, ...) }
-local only = if filter ~= '' then filter else nil
+local only = if filter and filter ~= '' then filter else nil
 
 export type Row = { group: string, name: string, port: number, note: string? }
 
@@ -27,14 +30,15 @@ local function median(samples: { number }): number
   return samples[(#samples + 1) // 2]
 end
 
---- Seconds per call of `body`: warmed up, then the median of seven batches of a size that
---- takes about a tenth of a second.
 -- A full collection, run between batches, so one batch's garbage isn't the next one's collection.
 local collect = jess.bench.collect
 
-local function measure(body: () -> ()): number
+--- Seconds per call of `body`: warmed up, then the median of seven batches of a size that
+--- takes about a tenth of a second. `verify` is given the result of the first call and of one
+--- more after the last batch, outside the time.
+local function measure(body: () -> unknown, verify: (result: unknown) -> ()): number
   collect()
-  body()
+  verify(body())
   local start = os.clock()
   body()
   local once = math.max(os.clock() - start, 1e-7)
@@ -50,20 +54,34 @@ local function measure(body: () -> ()): number
     samples[batch] = (os.clock() - start) / iterations
   end
 
+  verify(body())
   return median(samples)
 end
 
---- Times `make(port)`'s workload.
+--- Times `make(port)`'s workload, whose every call must return `expected`, or pass it when it is
+--- a function.
 local function workload(
   group: string,
   name: string,
   make: (module: any) -> () -> unknown,
+  expected: unknown,
   note: string?
 )
   if only and not string.find(`{group} {name}`, only, 1, true) then return end
 
-  local body = make(port)
-  table.insert(rows, { group = group, name = name, port = measure(body :: () -> ()), note = note })
+  local function verify(result: unknown)
+    if type(expected) == 'function' then
+      expected(result)
+      return
+    end
+
+    if result ~= expected then
+      error(`archive bench: {group}: {name} returned {result}, not {expected}`, 0)
+    end
+  end
+
+  local seconds = measure(make(port), verify)
+  table.insert(rows, { group = group, name = name, port = seconds, note = note })
 end
 
 local random = 0x2545f491
@@ -105,29 +123,39 @@ local function paths(count: number, extension: string): { string }
   return list
 end
 
-type Input = { name: string, data: string, paths: { string }, file: string }
+--- An archive to read: its bytes, the file they were written to, the paths its members were
+--- added under, and how long each member is once decoded.
+type Input = { name: string, data: string, paths: { string }, sizes: { number }, file: string }
+
+--- How long a DX10 texture's DDS file is: the header the record stands for, then the payload.
+local Dx10HeaderLength = 148
 
 --- The synthetic archives, built once.
 local function inputs(): { Input }
   local made: { Input } = {}
-  local function add(name: string, builder: any, list: { string })
+  local function add(name: string, builder: any, list: { string }, sizes: { number })
     local data = builder:toBytes()
     local file = `{scratch}/{name}.archive`
     assert(fs.writeFile(file, data))
-    table.insert(made, { name = name, data = data, paths = list, file = file })
+    table.insert(made, { name = name, data = data, paths = list, sizes = sizes, file = file })
   end
 
   local plain = paths(4000, '.nif')
+  local plainSizes: { number } = {}
   local tes3 = port.bsa.tes3.Builder.new()
-  for _, path in plain do
-    tes3:addBytes(path, payload(1000 + nextRandom() % 3000, false))
+  for index, path in plain do
+    local body = payload(1000 + nextRandom() % 3000, false)
+    plainSizes[index] = #body
+    tes3:addBytes(path, body)
   end
 
-  add('tes3 4000 stored', tes3, plain)
+  add('tes3 4000 stored', tes3, plain, plainSizes)
   local compressible = paths(1000, '.dds')
   local bodies: { string } = {}
+  local bodySizes: { number } = {}
   for index in compressible do
     bodies[index] = payload(16384, true)
+    bodySizes[index] = 16384
   end
 
   for _, version in { 104, 105 } do
@@ -138,7 +166,12 @@ local function inputs(): { Input }
       builder:addBytes(path, bodies[index])
     end
 
-    add(if version == 104 then 'tes4 1000 zlib' else 'tes4 1000 lz4 frames', builder, compressible)
+    add(
+      if version == 104 then 'tes4 1000 zlib' else 'tes4 1000 lz4 frames',
+      builder,
+      compressible,
+      bodySizes
+    )
   end
 
   for _, codec in { 'zip', 'lz4' } do
@@ -150,13 +183,15 @@ local function inputs(): { Input }
       builder:addBytes(path, bodies[index])
     end
 
-    add(`ba2 1000 {codec}`, builder, compressible)
+    add(`ba2 1000 {codec}`, builder, compressible, bodySizes)
   end
 
   local textures = paths(300, '.dds')
+  local textureSizes: { number } = {}
   local dx10 = port.ba2.Dx10Builder.new()
   local texturePayload = payload(65536 + 16384 + 4096 + 1024 + 256 + 64 + 16 + 16 + 16, false)
-  for _, path in textures do
+  for index, path in textures do
+    textureSizes[index] = Dx10HeaderLength + #texturePayload
     dx10:addTextureBytes(
       path,
       { height = 256, width = 256, mipCount = 9, format = 98, flags = 0, tileMode = 0 },
@@ -164,7 +199,7 @@ local function inputs(): { Input }
     )
   end
 
-  add('dx10 300 BC7', dx10, textures)
+  add('dx10 300 BC7', dx10, textures, textureSizes)
   return made
 end
 
@@ -183,6 +218,7 @@ local function readWorkloads(
   data: string?,
   file: string?,
   list: { string },
+  sizes: { number }?,
   sample: number
 )
   local function opener(module: any): any
@@ -193,13 +229,27 @@ local function readWorkloads(
 
   workload(group, 'open + index', function(module: any)
     return function(): unknown return opener(module):len() end
-  end)
+  end, #list)
 
   workload(group, 'open + first lookup', function(module: any)
     return function(): unknown return opener(module):contains(list[1]) end
-  end)
+  end, true)
 
   local variants = lookups(list)
+  workload(group, `open + {#variants} lookups`, function(module: any)
+    return function(): unknown
+      local opened = opener(module)
+      local found = 0
+      for _, path in variants do
+        if opened:contains(path) then
+          found += 1
+        end
+      end
+
+      return found
+    end
+  end, #variants)
+
   workload(group, `{#variants} lookups by path`, function(module: any)
     local opened = opener(module)
     return function(): unknown
@@ -212,7 +262,7 @@ local function readWorkloads(
 
       return found
     end
-  end)
+  end, #variants)
 
   workload(group, `{#list} lookups by hash`, function(module: any)
     local opened = opener(module)
@@ -237,7 +287,18 @@ local function readWorkloads(
 
       return found
     end
-  end)
+  end, #list)
+
+  -- A real archive's sizes aren't known here: its listing is only held to itself.
+  local listed: unknown = nil
+  if sizes then
+    local total = 0
+    for index, path in list do
+      total += #path + sizes[index]
+    end
+
+    listed = total
+  end
 
   workload(group, 'list paths and sizes', function(module: any)
     return function(): unknown
@@ -249,13 +310,18 @@ local function readWorkloads(
 
       return total
     end
-  end)
+  end, listed or function(result: unknown) assert(type(result) == 'number' and result > 0) end)
 
   local step = math.max(1, #list // sample)
   local chosen = {}
+  local chosenBytes: unknown = nil
   for index = 1, #list, step do
     table.insert(chosen, list[index])
+    if sizes then chosenBytes = (chosenBytes :: number? or 0) + sizes[index] end
   end
+
+  local read = chosenBytes
+    or function(result: unknown) assert(type(result) == 'number' and result > 0) end
 
   workload(group, `read {#chosen} files`, function(module: any)
     local opened = opener(module)
@@ -267,7 +333,7 @@ local function readWorkloads(
 
       return total
     end
-  end)
+  end, read)
 
   workload(group, `readInto {#chosen} files`, function(module: any)
     local opened = opener(module)
@@ -285,8 +351,17 @@ local function readWorkloads(
 
       return total
     end
-  end)
+  end, read)
 end
+
+--- What a stored archive of the build workloads' members must hash to, by workload: the bytes a
+--- builder writes for the same members are the same bytes, whatever it does to make them.
+local StoredDigests: { [string]: string } = {
+  ['tes3, 2000 stored'] = 'de3401da7b708f5e8af9fef9f6e926a8237f937f8026c3f7171828b05c9a4088',
+  ['tes4 104, 2000 stored'] = 'c48f439a7f13114ad728bc3c972091e0a7f2bd7da9be841f918be649df25a3bc',
+  ['ba2, 2000 stored'] = '05bfe5f0d979baa57ab62ce848e0c0076832deb59660b1c7b0318e621e3b4f62',
+  ['dx10, 300 stored'] = '5cefeacd930286d6db15fbd5c6dba0a78c5209362f3480b0ef186c7b5a9b2b12',
+}
 
 local function buildWorkloads()
   local list = paths(2000, '.nif')
@@ -294,6 +369,30 @@ local function buildWorkloads()
   for index in list do
     bodies[index] = payload(1000 + nextRandom() % 3000, false)
     compressible[index] = payload(8192, true)
+  end
+
+  --- Checks an archive a build made: the stored ones by their digest, the rest by reading every
+  --- hundredth member back.
+  local function checker(name: string, contents: { string }): (result: unknown) -> ()
+    return function(result: unknown)
+      local built = result :: buffer
+      local digest = StoredDigests[name]
+      if digest then
+        local actual = bytes.sha256(built)
+        if actual ~= digest then error(`archive bench: build: {name} hashes to {actual}`, 0) end
+
+        return
+      end
+
+      local opened = port.openBytes(built)
+      assert(opened:len() == #list, `archive bench: build: {name} lost members`)
+      for index = 1, #list, 100 do
+        assert(
+          opened:readFileRequired(list[index]) == contents[index],
+          `archive bench: build: {name} changed a member`
+        )
+      end
+    end
   end
 
   local function builds(name: string, make: (module: any) -> any, contents: { string })
@@ -304,16 +403,53 @@ local function buildWorkloads()
           builder:addBytes(path, contents[index])
         end
 
-        return buffer.len(builder:toBuffer())
+        return builder:toBuffer()
       end
-    end)
+    end, checker(name, contents))
   end
 
-  builds(
-    'tes3, 2000 stored',
-    function(module: any): any return module.bsa.tes3.Builder.new() end,
-    bodies
-  )
+  local function adds(name: string, make: (module: any) -> any)
+    workload('build', name, function(module: any)
+      return function(): unknown
+        local builder = make(module)
+        for index, path in list do
+          builder:addBytes(path, bodies[index])
+        end
+
+        return builder:len()
+      end
+    end, #list)
+  end
+
+  local function tes3(module: any): any return module.bsa.tes3.Builder.new() end
+
+  local function tes4(module: any): any return module.bsa.tes4.Builder.new() end
+
+  local function general(module: any): any return module.ba2.Builder.new() end
+
+  adds('tes3, add 2000', tes3)
+  adds('tes4, add 2000', tes4)
+  adds('ba2, add 2000', general)
+  builds('tes3, 2000 stored', tes3, bodies)
+  builds('tes4 104, 2000 stored', tes4, bodies)
+  builds('ba2, 2000 stored', general, bodies)
+
+  local textures = paths(300, '.dds')
+  local texture = payload(256, false)
+  workload('build', 'dx10, 300 stored', function(module: any)
+    return function(): unknown
+      local builder = module.ba2.Dx10Builder.new()
+      for _, path in textures do
+        builder:addTextureBytes(
+          path,
+          { height = 16, width = 16, mipCount = 1, format = 98, flags = 0, tileMode = 0 },
+          texture
+        )
+      end
+
+      return builder:toBuffer()
+    end
+  end, checker('dx10, 300 stored', {}))
 
   builds('tes4 104, 2000 zlib', function(module: any): any
     local builder = module.bsa.tes4.Builder.new()
@@ -344,6 +480,11 @@ end
 
 local function extractWorkloads(input: Input)
   local counter = 0
+  local total = 0
+  for _, size in input.sizes do
+    total += size
+  end
+
   workload('extract', `{input.name} to disk`, function(module: any)
     local opened = module.openBytes(input.data)
     return function(): unknown
@@ -353,13 +494,13 @@ local function extractWorkloads(input: Input)
       assert(fs.remove(target, { recursive = true }))
       return written
     end
-  end, 'on one thread')
+  end, total, 'on one thread')
 end
 
 local made = inputs()
 for _, input in made do
-  readWorkloads(`{input.name} (bytes)`, input.data, nil, input.paths, 1000)
-  readWorkloads(`{input.name} (path)`, nil, input.file, input.paths, 1000)
+  readWorkloads(`{input.name} (bytes)`, input.data, nil, input.paths, input.sizes, 1000)
+  readWorkloads(`{input.name} (path)`, nil, input.file, input.paths, input.sizes, 1000)
 end
 
 buildWorkloads()
@@ -376,13 +517,11 @@ for _, path in realArchives do
     if entry.path then table.insert(list, entry.path) end
   end
 
-  readWorkloads(string.match(path, '[^/]*$') :: string, nil, path, list, 2000)
+  readWorkloads(string.match(path, '[^/]*$') :: string, nil, path, list, nil, 2000)
 end
 
-print(string.format('%-34s %-30s %12s', 'group', 'workload', 'seconds'))
 for _, row in rows do
-  local note = if row.note then `  ({row.note})` else ''
-  print(string.format('%-34s %-30s %10.6f s%s', row.group, row.name, row.port, note))
+  print(`{row.group}: {row.name}\t{string.format('%.9f', row.port)}`)
 end
 
 return rows
