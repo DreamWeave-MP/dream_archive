@@ -207,6 +207,77 @@ suite.describe('reading what the builders write', function()
     expect(function() return ba2:containsHash(1.5, 2, 3) end).toThrow 'not an exact u32'
   end)
 
+  suite.it('writes members in the order of their hashes, whatever order they were added in', function()
+    -- Names that hash alike are where the order has the most to decide: the same file in many
+    -- folders, names apart in their last byte alone, and TES3 names apart in three bits of it.
+    local paths: { string } = {}
+    for folder = 1, 40 do
+      for file = 1, 30 do
+        table.insert(paths, `dir{folder % 8}\\sub{folder}\\file{file}.nif`)
+      end
+    end
+
+    for group = 100, 140 do
+      for _, last in { 'p', 'q', 'r', 's', 't', 'u', 'v', 'w' } do
+        table.insert(paths, `tie\\file{group}{last}`)
+      end
+    end
+
+    local random = support.generator(0x0de7ed)
+    for index = #paths, 2, -1 do
+      local other = random(index) + 1
+      paths[index], paths[other] = paths[other], paths[index]
+    end
+
+    --- Whether no entry comes before one it follows by `fields`, the first that differs deciding.
+    local function inOrder(entries: any, fields: { string }): boolean
+      for index = 2, #entries do
+        local earlier, later = entries[index - 1], entries[index]
+        for _, field in fields do
+          if earlier[field] == later[field] then continue end
+
+          if later[field] < earlier[field] then return false end
+
+          break
+        end
+      end
+
+      return true
+    end
+
+    local families: { { any } } = {
+      { archive.bsa.tes3.Builder.new(), { 'hashHex', 'path' } },
+      { archive.bsa.tes4.Builder.new(), { 'folderHashHex', 'folder', 'hashHex', 'name' } },
+      { archive.ba2.Builder.new(), { 'fileHash', 'extensionHash', 'directoryHash', 'path' } },
+    }
+
+    for _, family in families do
+      local builder, fields = family[1], family[2]
+      for _, path in paths do
+        builder:addBytes(path, path)
+      end
+
+      local opened = archive.openBytes(builder:toBytes())
+      local entries = opened:entries()
+      expect(#entries).toBe(#paths)
+      expect(inOrder(entries, fields)).toBe(true)
+      for _, entry in entries do
+        expect(opened:readEntry(entry.index)).toBe(entry.path)
+      end
+    end
+
+    -- The TES3 names that end in `p` to `w` hash within 2^11 of each other, group by group.
+    local tes3 = archive.openBytes(families[1][1]:toBytes()):entries()
+    local close = 0
+    for index = 2, #tes3 do
+      if string.sub(tes3[index].hashHex, 1, 13) == string.sub(tes3[index - 1].hashHex, 1, 13) then
+        close += 1
+      end
+    end
+
+    expect(close >= 41 * 7).toBe(true)
+  end)
+
   suite.it('reads straight into a buffer', function()
     local payload = string.rep('abcdefgh', 8192)
     local builders: { any } =
