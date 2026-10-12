@@ -1090,6 +1090,33 @@ suite.describe('hand-made archives', function()
     expect(archive.ba2.openBytes(support.ba2(spec)):readFileRequired 'a.txt').toBe 'a'
   end)
 
+  suite.it('find a BA2 name stored with untidy separators by a tidy path, its first entry keeping it', function()
+    local spec = ba2Spec('GNRL', {
+      { name = '\\Lead\\\\Double//Mixed.TXT', chunks = { { data = 'untidy' } } },
+      { name = 'lead/double/mixed.txt', chunks = { { data = 'tidy' } } },
+      { name = 'Trailing\\', chunks = { { data = 'folder' } } },
+      { name = 'nul\0inside.bin', chunks = { { data = 'nul' } } },
+    })
+    local opened = archive.ba2.openBytes(support.ba2(spec))
+    expect(opened:entries()[1].path).toBe '\\Lead\\\\Double//Mixed.TXT'
+    for _, path in
+      {
+        'lead/double/mixed.txt',
+        'LEAD\\DOUBLE\\MIXED.txt',
+        '//lead\\\\double/mixed.TXT',
+        '\\Lead\\\\Double//Mixed.TXT',
+      }
+
+    do
+      expect(opened:readFile(path)).toBe 'untidy'
+    end
+
+    expect(opened:readFile 'NUL\0INSIDE.bin').toBe 'nul'
+    expect(opened:contains 'nul').toBe(false)
+    expect(opened:contains 'trailing').toBe(false)
+    expect(opened:contains 'lead/double').toBe(false)
+  end)
+
   suite.it('read GNMF metadata and refuse its payloads', function()
     local opened = archive.ba2.openBytes(support.ba2(ba2Spec('GNMF', {
       { name = 'textures/a.gnf', chunks = { { data = 'console', first = 0, last = 0 } } },
