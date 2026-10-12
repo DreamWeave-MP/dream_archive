@@ -232,12 +232,19 @@ end
 --- `items` in order, by `key`, a number that orders them as their full order does except among
 --- equal keys, which `before` orders. The keys sort with Luau's own comparison, so a full order
 --- is only asked of the rare items that share a key. The keys are sorted as one column of
---- doubles, natively and stably, so no key is NaN.
+--- doubles, natively and stably. A key that is NaN orders nothing, and is an error.
 local function sortByKey<T>(items: { T }, key: (T) -> number, before: (T, T) -> boolean): { T }
   local count = #items
   local keys, order = buffer.create(8 * count), buffer.create(4 * count)
   into(keys, 'f64')[for item in items => key(item)]
   data.argsort(keys, 'f64', 0, count, order)
+  -- The sort puts NaN keys last and would hand them back as sorted: a key that orders nothing is
+  -- refused instead, in the words Luau has for a table indexed by one.
+  if count > 0 then
+    local greatest = buffer.readf64(keys, 8 * buffer.readu32(order, 4 * count - 4))
+    if greatest ~= greatest then error 'table index is NaN' end
+  end
+
   local sorted: { T } = table.create(count) :: { T }
   local position = 1
   while position <= count do
