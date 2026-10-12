@@ -59,11 +59,9 @@ local function hashNormalized(
     packed = packed * 256 + string.byte(extension, index)
   end
 
-  local directory = if directories then directories[parent] else nil
-  if not directory then
-    directory = crc(parent)
-    if directories then directories[parent] = directory end
-  end
+  local known = if directories then directories[parent] else nil
+  local directory = known or crc(parent)
+  if directories and not known then directories[parent] = directory end
 
   return directory, crc(stem), packed
 end

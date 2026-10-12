@@ -502,7 +502,7 @@ local function newDx10()
             size = chunk.size,
             first = chunk.firstMip,
             last = chunk.lastMip,
-          }
+          } :: PreparedChunk
         ]
         continue
       end
