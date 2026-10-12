@@ -719,6 +719,27 @@ suite.describe('hand-made archives', function()
     expect(opened:readFileRequired 'meshes/foo.nif').toBe 'hello'
   end)
 
+  suite.it('find a name however many an archive has, the first entry of one keeping it', function()
+    for count = 1, 40 do
+      local files: { support.Tes3File } = { { name = '', data = 'empty' } }
+      for index = 2, count do
+        files[index] = { name = `Meshes/File{index}.NIF`, data = `payload {index}` }
+      end
+
+      -- Names an earlier entry already has, spelled another way.
+      table.insert(files, { name = '\\', data = 'second empty' })
+      table.insert(files, { name = 'meshes\\\\FILE2.nif', data = 'second file' })
+      local opened = archive.bsa.tes3.openBytes(support.tes3(files, tes3Hash))
+      expect(opened:readFile '').toBe 'empty'
+      expect(opened:readFile '/').toBe 'empty'
+      expect(opened:contains 'meshes/file1.nif').toBe(false)
+      for index = 2, count do
+        expect(opened:readFile(`meshes\\file{index}.nif`)).toBe(`payload {index}`)
+        expect(opened:readFile(`/MESHES//File{index}.NIF`)).toBe(`payload {index}`)
+      end
+    end
+  end)
+
   suite.it('refuse malformed TES3 indexes as the crate does', function()
     local good = support.tes3({ { name = 'file.txt', data = 'hello' } }, tes3Hash)
     local function patched(offset: number, value: number): string
