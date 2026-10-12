@@ -382,25 +382,6 @@ local function open(store: Store): Backend
   local function buildNames(): names.Index
     local built = names.new()
     local joined = buffer.create(1024)
-    -- With the name block and every folder free of `/`, of `\\` pairs, and of separators at
-    -- either end, a joined path is canonical as it stands.
-    local plain = fileStrings
-      and directoryStrings
-      and names.regionCanonical(index, namesStart, fileNamesLength)
-    if plain then
-      for _, folder in folderNames do
-        if
-          string.find(folder, '/', 1, true)
-          or string.find(folder, '\\\\', 1, true)
-          or string.byte(folder, 1) == 92
-          or string.byte(folder, -1) == 92
-        then
-          plain = false
-          break
-        end
-      end
-    end
-
     for current = 1, fileCount do
       local folder = folderOf(current)
       if not folder then continue end
@@ -427,13 +408,7 @@ local function open(store: Store): Backend
         buffer.writestring(joined, at, embeddedNames[current])
       end
 
-      built.add(
-        joined,
-        0,
-        at + nameLength,
-        current,
-        plain and (nameLength == 0 or buffer.readu8(index, nameStarts[current]) ~= 92)
-      )
+      built.add(joined, 0, at + nameLength, current)
     end
 
     return built

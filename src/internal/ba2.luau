@@ -207,13 +207,12 @@ local function open(store: Store): Backend
 
   -- The string table: a u16 length and that many bytes per entry, in record order.
   local nameRegion: buffer? = nil
-  local namesBase = 0
   local nameStarts: { number } = {}
   if stringTable ~= 0 then
     if stringTable > size then fail(Messages.outOfBounds) end
 
     local region, base = Store.region(store, stringTable, size - stringTable)
-    nameRegion, namesBase = region, base
+    nameRegion = region
     nameStarts = table.create(count) :: { number }
     local cursor = base
     local limit = base + size - stringTable
@@ -344,14 +343,10 @@ local function open(store: Store): Backend
     local region = nameRegion
     if not region then return built end
 
-    local plain = names.regionCanonical(region, namesBase, size - stringTable)
     for entry = 1, count do
       local start = nameStarts[entry]
       local length = buffer.readu16(region, start)
-      if length > 0 then
-        local canonical = plain and buffer.readu8(region, start + 2) ~= 92
-        built.add(region, start + 2, length, entry, canonical)
-      end
+      if length > 0 then built.add(region, start + 2, length, entry) end
     end
 
     return built

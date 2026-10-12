@@ -115,11 +115,9 @@ local function open(store: Store): Backend
 
   local function buildNames(): names.Index
     local built = names.new()
-    local plain = names.regionCanonical(index, namesStart, namesLength)
     for entry = 1, count do
       local start = nameStart(entry)
-      local canonical = plain and buffer.readu8(index, start) ~= 92
-      built.add(index, start, nameLength(entry, start), entry, canonical)
+      built.add(index, start, nameLength(entry, start), entry)
     end
 
     return built
