@@ -106,6 +106,12 @@ local function hashFile(path: string): Hash
   return hashNormalizedFile(normalized)
 end
 
+--- The hash of a name as a builder stores one, which the hash normalization leaves as it is unless
+--- it is overlong: it is lowercased already, and holds no separator.
+local function hashStoredName(name: string): Hash
+  return hashNormalizedFile(if #name >= 260 then '.' else name)
+end
+
 --- The table the binding returns for a hash.
 local function described(hash: Hash)
   local value = numeric(hash)
@@ -544,6 +550,7 @@ return table.freeze {
   open = open,
   hashDirectory = hashDirectory,
   hashFile = hashFile,
+  hashStoredName = hashStoredName,
   described = described,
   numeric = numeric,
   Flags = Flags,

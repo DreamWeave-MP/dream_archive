@@ -60,14 +60,14 @@ local function zlibLevel(what: string, value: unknown): number
   return level
 end
 
---- A stored path as its folder and name: the stored path's last component is the name, and the
---- rest, joined with `\`, the folder.
-local function normalizeStoredPath(path: string): (string, string)
+--- A stored path as its folder and name, and whole: the stored path's last component is the
+--- name, and the rest, joined with `\`, the folder.
+local function normalizeStoredPath(path: string): (string, string, string)
   local stored = util.storedPath(path) or fail(Messages.bsaInvalidPath)
   local at = bytes.rfind(stored, '\\')
-  if not at then return '', stored end
+  if not at then return '', stored, stored end
 
-  return string.sub(stored, 1, at), string.sub(stored, at + 2)
+  return string.sub(stored, 1, at), string.sub(stored, at + 2), stored
 end
 
 --- A hash's 64-bit value as two numbers that order the same way: the CRC, then the low half.
@@ -100,13 +100,26 @@ local function new()
   local level = 6
   local members: { Member } = {}
   local paths: { [string]: boolean } = {}
+  --- Each folder's hash, which every member in it carries.
+  local folderHashes: { [string]: tes4.Hash } = {}
 
-  local function addSource(folder: string, name: string, compression: Override, source: Source)
-    local key = `{folder}\0{name}`
-    if paths[key] then fail(Messages.bsaDuplicate) end
+  local function addSource(
+    folder: string,
+    name: string,
+    stored: string,
+    compression: Override,
+    source: Source
+  )
+    if paths[stored] then fail(Messages.bsaDuplicate) end
 
-    local folderHash, fileHash = tes4.hashDirectory(folder), tes4.hashFile(name)
-    paths[key] = true
+    local folderHash = folderHashes[folder]
+    if not folderHash then
+      folderHash = tes4.hashDirectory(folder)
+      folderHashes[folder] = folderHash
+    end
+
+    local fileHash = tes4.hashStoredName(name)
+    paths[stored] = true
     table.insert(members, {
       folder = folder,
       name = name,
@@ -405,10 +418,10 @@ local function new()
   end
 
   local function addBytes(path: unknown, data: unknown, compression: Override, what: string)
-    local folder, name = normalizeStoredPath(util.checkString(what, path, 1))
-    if paths[`{folder}\0{name}`] then fail(Messages.bsaDuplicate) end
+    local folder, name, stored = normalizeStoredPath(util.checkString(what, path, 1))
+    if paths[stored] then fail(Messages.bsaDuplicate) end
 
-    addSource(folder, name, compression, sources.fromBytes(util.checkBytes(what, data, 2)))
+    addSource(folder, name, stored, compression, sources.fromBytes(util.checkBytes(what, data, 2)))
   end
 
   function builder.addBytes(_self: unknown, path: string, data: buffer | string)
@@ -439,8 +452,8 @@ local function new()
     local what = 'dream.archive.Tes4Builder.addFile'
     local stored = util.checkString(what, archivePath, 1)
     local file = sources.fromFile(util.checkHostPath(what, source, 2))
-    local folder, name = normalizeStoredPath(stored)
-    addSource(folder, name, 'inherit', file)
+    local folder, name, whole = normalizeStoredPath(stored)
+    addSource(folder, name, whole, 'inherit', file)
   end
 
   local function addArchiveEntry(
@@ -460,8 +473,8 @@ local function new()
     local length, problem = chosen.size(index)
     if not length then fail(problem :: string) end
 
-    local folder, name = normalizeStoredPath(stored)
-    addSource(folder, name, mode, sources.fromArchive(chosen, index, length :: number))
+    local folder, name, whole = normalizeStoredPath(stored)
+    addSource(folder, name, whole, mode, sources.fromArchive(chosen, index, length :: number))
   end
 
   function builder.addArchiveEntry(
@@ -491,8 +504,14 @@ local function new()
 
   function builder.addDir(_self: unknown, root: string)
     for _, file in sources.collect(util.checkHostPath('dream.archive.Tes4Builder.addDir', root, 1)) do
-      local folder, name = normalizeStoredPath(file.archivePath)
-      addSource(folder, name, 'inherit', { kind = 'file', path = file.path, length = file.size })
+      local folder, name, stored = normalizeStoredPath(file.archivePath)
+      addSource(
+        folder,
+        name,
+        stored,
+        'inherit',
+        { kind = 'file', path = file.path, length = file.size }
+      )
     end
   end
 
