@@ -1,6 +1,6 @@
 # Archive benchmarks
 
-`bench/bench.luau` times the package through its public API: opening and indexing, lookups by
+`bench/bench.jsl` times the package through its public API: opening and indexing, lookups by
 path and by hash, listing, reads, extraction, and building, over synthetic archives of every
 family. Each workload is warmed up, sized to a batch of about a tenth of a second, and reported
 as the median of seven batches, with a full collection between them. Every workload's result is
@@ -10,7 +10,7 @@ SHA-256, compressed builds by reading members back.
 ```sh
 jess run --package jpk/dream-archive --package-path jpk \
   --capability filesystem.read --capability filesystem.write \
-  jpk/dream-archive/bench/bench.luau <scratch folder> [filter] [real archive]...
+  jpk/dream-archive/bench/bench.jsl <scratch folder> [filter] [real archive]...
 ```
 
 ## The move onto l3i 2.0, base against head
@@ -243,5 +243,5 @@ package.
 The pool is read through its binding, not through the native code an annotated
 `dream_intern_Pool` compiles to: l3i 2.0.1, as 2.0.0 did, leaves that code reading a slot table
 the pool has replaced, once a name it already holds is interned at the pool's load limit. When
-l3i fixes that, annotating the pool in `src/internal/names.luau` is the next lookup win to
+l3i fixes that, annotating the pool in `src/internal/names.jsl` is the next lookup win to
 measure.

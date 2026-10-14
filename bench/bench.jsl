@@ -2,7 +2,7 @@
 -- The archive port, timed from Luau: open and index, lookups by path and by hash, listing, reads
 -- (stored, zlib, LZ4 blocks and frames, DDS headers rebuilt), extraction, and building. Run by
 -- `jess run --capability filesystem.read --capability filesystem.write --package .
--- bench/bench.luau <scratch> [filter] [real archive]...`, on a release build. Prints one line per
+-- bench/bench.jsl <scratch> [filter] [real archive]...`, on a release build. Prints one line per
 -- workload, its name, a tab, and the seconds one call takes; every workload's result is checked
 -- against what the inputs say it must be, so a path that stopped doing the work fails here.
 local bytes = require '@dream/bytes'
