@@ -8,9 +8,9 @@
 -- name bytes are interned where they lie, and a query is found as it was asked.
 local intern = require '@dream/intern'
 
-local Rules = table.freeze {
+local Rules: dream_intern_Rules = {
   nocase = true,
-  replace = table.freeze { ['/'] = '\\' },
+  replace = { ['/'] = '\\' },
   collapse = '\\',
   trimStart = '\\',
 }
