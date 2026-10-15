@@ -1,5 +1,4 @@
 --!strict
---!native
 -- SPDX-License-Identifier: MIT OR Apache-2.0
 -- @dream-archive/bsa/tes3: TES3 (Morrowind) BSAs, as `@dream/archive/bsa/tes3` has them.
 local builder = require '../internal/tes3_builder'

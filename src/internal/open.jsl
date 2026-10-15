@@ -1,5 +1,4 @@
 --!strict
---!native
 -- SPDX-License-Identifier: MIT OR Apache-2.0
 -- Opening archives: by format, or by the first four bytes, from a host path or from bytes.
 local Store = require './store'

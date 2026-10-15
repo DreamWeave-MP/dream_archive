@@ -1,5 +1,4 @@
 --!strict
---!native
 -- SPDX-License-Identifier: MIT OR Apache-2.0
 -- The one archive type every `open*` returns, over any format's backend: the methods the native
 -- `dream.archive.Archive` has, with its arguments, results, and messages. Entries are plain
@@ -65,6 +64,7 @@ local Columns = {
   'extensionHash',
 }
 
+@native
 local function compute(backend: Backend, index: number, key: string): unknown
   if key == 'path' then return backend.path(index) end
 
@@ -113,7 +113,7 @@ local function entryMeta(backend: Backend): { [string]: unknown }
   local meta: { [string]: unknown } = {}
   -- Entries are frozen tables holding their `index`, `id`, and `format`; every other field is
   -- computed here on first read and kept, one column per field.
-  meta.__index = function(entry: { [string]: unknown }, key: string): unknown
+  meta.__index = @native function(entry: { [string]: unknown }, key: string): unknown
     local index = rawget(entry, 'index') :: number
     local column = columns[key]
     if not column then return nil end
@@ -136,6 +136,7 @@ local function entryMeta(backend: Backend): { [string]: unknown }
   return meta
 end
 
+@native
 local function entryOf(state: State, index: number): Entry
   local cached = state.cache[index]
   if cached then return cached end
@@ -162,6 +163,7 @@ local MemoLimit = 65536
 
 --- The entry a path names. Answers are remembered by the path as asked, so asking again is one
 --- table lookup.
+@native
 local function lookup(state: State, path: unknown, method: string): number?
   if type(path) ~= 'string' then util.checkString(`dream.archive.Archive.{method}`, path, 1) end
 
@@ -180,6 +182,7 @@ local function lookup(state: State, path: unknown, method: string): number?
   return found
 end
 
+@native
 local function required(state: State, path: unknown, method: string): number
   local index = lookup(state, path, method)
   if not index then util.fileNotFound(path :: string) end
@@ -188,6 +191,7 @@ local function required(state: State, path: unknown, method: string): number
 end
 
 --- The entry `target` names: an entry of this archive, or a path.
+@native
 local function target(state: State, value: unknown): number
   if type(value) == 'string' then
     local index = lookup(state, value, 'readInto')
@@ -236,6 +240,7 @@ function Methods.archiveSize(self: Archive): number
   return stateOf(self, 'archiveSize').backend.store.size
 end
 
+@native
 function Methods.entries(self: Archive): Entries
   local state = stateOf(self, 'entries')
   local list = state.list
@@ -255,6 +260,7 @@ function Methods.entry(self: Archive, index: number): Entry?
   return entryOf(state, position)
 end
 
+@native
 function Methods.contains(self: Archive, path: string): boolean
   return lookup(stateOf(self, 'contains'), path, 'contains') ~= nil
 end
@@ -265,6 +271,7 @@ function Methods.get(self: Archive, path: string): Entry?
   return if index then entryOf(state, index) else nil
 end
 
+@native
 function Methods.containsHash(
   self: Archive,
   first: unknown,
@@ -286,6 +293,7 @@ function Methods.readFile(self: Archive, path: string): string?
   return if index then state.backend.decodeString(index) else nil
 end
 
+@native
 function Methods.readFileRequired(self: Archive, path: string): string
   local state = stateOf(self, 'readFileRequired')
   return state.backend.decodeString(required(state, path, 'readFileRequired'))
@@ -320,6 +328,7 @@ function Methods.extractEntryToPath(self: Archive, index: number, path: string):
   return extract.writeAtomically(output, function(): buffer return backend.decode(position) end)
 end
 
+@native
 function Methods.readInto(
   self: Archive,
   entry: Entry | string,

@@ -1,5 +1,4 @@
 --!strict
---!native
 -- SPDX-License-Identifier: MIT OR Apache-2.0
 -- What every format shares: the crate's error messages, argument checks, lookup normalization,
 -- 64-bit hashes as Luau integers, the codecs with the crate's size and trailing-data rules, and
@@ -93,6 +92,7 @@ local function receiver(what: string, expected: string, value: unknown): never
   return fail(`invalid argument #1 to '{what}' ({expected} expected, got {typeof(value)})`)
 end
 
+@native
 local function checkString(what: string, value: unknown, position: number): string
   if type(value) == 'string' then return value end
 
@@ -109,6 +109,7 @@ local function checkHostPath(what: string, value: unknown, position: number): st
   return path
 end
 
+@native
 local function checkBytes(what: string, value: unknown, position: number): buffer | string
   if type(value) == 'string' or type(value) == 'buffer' then return value :: buffer | string end
 
@@ -149,6 +150,7 @@ end
 local Scratch = buffer.create(8)
 
 --- The 64-bit integer whose low and high halves are these two u32 values.
+@native
 local function int64(low: number, high: number): integer
   buffer.writeu32(Scratch, 0, low)
   buffer.writeu32(Scratch, 4, high)
@@ -191,6 +193,7 @@ end
 --- A path as builders store it: both separators split it, empty and `.` components go, ASCII is
 --- lowercased, and the components are joined with `\`; nil when it has no component, or one that
 --- is `..` or holds a NUL or a `:`. A path with none of those to undo takes only C calls.
+@native
 local function storedPath(path: string): string?
   local lowered = string.lower(path)
   if string.find(lowered, '/', 1, true) then lowered = (string.gsub(lowered, '/', '\\')) end
@@ -233,6 +236,7 @@ end
 --- equal keys, which `before` orders. The keys sort with Luau's own comparison, so a full order
 --- is only asked of the rare items that share a key. The keys are sorted as one column of
 --- doubles, natively and stably. A key that is NaN orders nothing, and is an error.
+@native
 local function sortByKey<T>(items: { T }, key: (T) -> number, before: (T, T) -> boolean): { T }
   local count = #items
   local keys, order = buffer.create(8 * count), buffer.create(4 * count)
@@ -314,6 +318,7 @@ local function hostMessage(message: unknown, path: string?): string
   return text
 end
 
+@native
 local function hostResult<Value>(value: Value?, message: string?, path: string): Value
   if message then fail(hostMessage(message, path)) end
 
@@ -331,6 +336,7 @@ end
 --- the crate's messages. The crate fills the expected size and then decodes one byte more to tell
 --- a longer stream from a finished one, so the cap is one byte past the size: a stream corrupt
 --- just past it fails as corrupt there too, and a longer one is reported one byte long.
+@native
 local function inflateExact(source: buffer, expected: number): buffer
   -- bytes.inflate throws for a corrupt stream and for one longer than maxSize.
   local ok, result = pcall(
@@ -364,6 +370,7 @@ local function inflateExact(source: buffer, expected: number): buffer
 end
 
 --- An LZ4 block that decodes to exactly `expected` bytes (BA2).
+@native
 local function lz4BlockExact(source: buffer, expected: number): buffer
   -- bytes.lz4Decompress throws for a malformed block or one that needs more room.
   local ok, result = pcall(bytes.lz4Decompress, source, expected, nil)
@@ -388,6 +395,7 @@ local BlockSizes: { [number]: number } =
 --- lz4_flex's frame decoder accepts, checked as it checks it (header, block, and content
 --- checksums, block sizes, content size), and nothing more. Anything else, or anything that
 --- fails, is nil, and the frame decoder reads the frame again for its own answer.
+@native
 local function lz4FrameBlocks(source: buffer, expected: number): buffer?
   local length = buffer.len(source)
   if length < 7 then return nil end
@@ -484,6 +492,7 @@ local function lz4FrameBlocks(source: buffer, expected: number): buffer?
 end
 
 --- An LZ4 frame that decodes to exactly `expected` bytes (TES4 version 105).
+@native
 local function lz4FrameExact(source: buffer, expected: number): buffer
   local fast = lz4FrameBlocks(source, expected)
   if fast then return fast end

@@ -1,5 +1,4 @@
 --!strict
---!native
 -- SPDX-License-Identifier: MIT OR Apache-2.0
 -- @dream-archive/bsa: BSA filename encodings and the TES3 and TES4 modules, as
 -- `@dream/archive/bsa` has them.

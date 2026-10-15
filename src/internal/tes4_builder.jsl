@@ -1,5 +1,4 @@
 --!strict
---!native
 -- SPDX-License-Identifier: MIT OR Apache-2.0
 -- Builds TES4-family PC BSAs (versions 103, 104, 105): folders and files ordered by hash, names
 -- in string tables, embedded, both, or neither, and each member stored or compressed by the
@@ -145,6 +144,7 @@ local function new()
   end
 
   --- A member's stored body, and the decoded length that goes before it when it's compressed.
+  @native
   local function stored(member: Member): (buffer | string, number?)
     local data = sources.load(member.source)
     if not isCompressed(member) then return data, nil end
@@ -407,6 +407,7 @@ local function new()
     level = zlibLevel('dream.archive.Tes4Builder.setZlibLevel', value)
   end
 
+  @native
   local function addBytes(path: unknown, data: unknown, compression: Override, what: string)
     local folder, name, stored = normalizeStoredPath(util.checkString(what, path, 1))
     if paths[stored] then fail(Messages.bsaDuplicate) end

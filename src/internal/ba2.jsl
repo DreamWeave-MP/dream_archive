@@ -1,5 +1,4 @@
 --!strict
---!native
 -- SPDX-License-Identifier: MIT OR Apache-2.0
 -- BA2 (Fallout 4, Fallout 76, Starfield): general files (GNRL) in chunks, zlib or LZ4 block
 -- compressed; textures (DX10) whose DDS header is rebuilt from the record on extraction; and
@@ -29,6 +28,7 @@ local Versions: { [number]: boolean } =
 --- The CRC-32 the BA2 hash uses: IEEE, but from 0 with no final inversion, skipping bytes past
 --- 127. From `bytes.crc32`, whose seed continues a finished CRC: seeding it with all ones starts
 --- the register at 0, and inverting the result undoes the finish.
+@native
 local function crc(text: string): number
   if text == '' then return 0 end
 
@@ -44,6 +44,7 @@ local function normalize(path: string): string return util.normalizeHashPath(pat
 
 --- The three hash fields of a normalized path. Given `directories`, each parent folder's hash is
 --- kept there for the next path in it.
+@native
 local function hashNormalized(
   path: string,
   directories: { [string]: number }?
@@ -78,6 +79,7 @@ local function u64(data: buffer, offset: number): number
 end
 
 --- A hash field as the binding reads one: an exact u32, from a number or an integer.
+@native
 local function exact(value: unknown, stack: number): number
   local number: number
   if type(value) == 'number' then
@@ -95,6 +97,7 @@ local function exact(value: unknown, stack: number): number
   return number
 end
 
+@native
 local function open(store: Store): Backend
   local size = store.size
   local loaded = math.min(size, 65536)
@@ -234,6 +237,7 @@ local function open(store: Store): Backend
     end
   end
 
+  @native
   local function nameOf(entry: number): string?
     local region = nameRegion
     if not region then return nil end
@@ -249,12 +253,14 @@ local function open(store: Store): Backend
     return buffer.readu8(index, records[entry] + 13)
   end
 
+  @native
   local function chunkAt(entry: number, chunk: number): number
     return records[entry]
       + (if format == Dx10 then 24 elseif format == Gnmf then 48 else 16)
       + (if chunked then 24 else 20) * chunk
   end
 
+  @native
   local function textureOf(entry: number): TextureHeader?
     if format ~= Dx10 then return nil end
 
@@ -269,6 +275,7 @@ local function open(store: Store): Backend
     }
   end
 
+  @native
   local function chunksSize(entry: number): number
     return sum[
       for chunk in range(0, chunkCountOf(entry) - 1)
@@ -276,6 +283,7 @@ local function open(store: Store): Backend
     ]
   end
 
+  @native
   local function decodedSize(entry: number): (number?, string?)
     if format == Gnmf then
       return nil, 'support for this feature is not implemented: BA2 GNMF extraction'
@@ -290,6 +298,7 @@ local function open(store: Store): Backend
   end
 
   --- One chunk's decoded bytes.
+  @native
   local function chunkBytes(entry: number, chunk: number): buffer
     local at = chunkAt(entry, chunk)
     local offset = u64(index, at)
@@ -304,6 +313,7 @@ local function open(store: Store): Backend
 
   --- Writes an entry's decoded bytes into `target` at `at`, uncompressed chunks straight from the
   --- archive; returns the count.
+  @native
   local function decodeInto(entry: number, target: buffer, at: number): number
     if format == Gnmf then util.notImplemented 'BA2 GNMF extraction' end
 
@@ -330,6 +340,7 @@ local function open(store: Store): Backend
     return cursor - at
   end
 
+  @native
   local function decode(entry: number): buffer
     if format == Gnmf then util.notImplemented 'BA2 GNMF extraction' end
 
@@ -343,6 +354,7 @@ local function open(store: Store): Backend
 
   local nameIndex: names.Index? = nil
 
+  @native
   local function buildNames(): names.Index
     local built = names.new()
     local region = nameRegion
@@ -359,6 +371,7 @@ local function open(store: Store): Backend
 
   local hashes: { [number]: { [integer]: number } }? = nil
 
+  @native
   local function hashIndex(): { [number]: { [integer]: number } }
     local map = hashes
     if map then return map end
@@ -380,11 +393,13 @@ local function open(store: Store): Backend
     return built
   end
 
+  @native
   local function find(directory: number, file: number, extension: number): number?
     local files = hashIndex()[directory]
     return if files then files[util.int64(file, extension)] else nil
   end
 
+  @native
   local function lookup(raw: string): number?
     local built = nameIndex or buildNames()
     nameIndex = built
@@ -400,6 +415,7 @@ local function open(store: Store): Backend
 
   local missing = 'a BA2 hash lookup takes three numbers: the directory, file, and extension hashes'
 
+  @native
   local function hashLookup(first: unknown, second: unknown, third: unknown): number?
     if second == nil or third == nil then fail(missing) end
 
@@ -475,7 +491,7 @@ local function open(store: Store): Backend
       }
     end,
     decode = decode,
-    decodeString = function(entry: number): string
+    decodeString = @native function(entry: number): string
       if format == Gnrl and chunkCountOf(entry) == 1 then
         local at = chunkAt(entry, 0)
         if buffer.readu32(index, at + 8) == 0 then
@@ -487,7 +503,7 @@ local function open(store: Store): Backend
     end,
     decodeInto = decodeInto,
 
-    row = function(entry: number): { [string]: unknown }
+    row = @native function(entry: number): { [string]: unknown }
       local at = records[entry]
       local chunkCount = chunkCountOf(entry)
       local stored, unpacked, compressed = 0, 0, false

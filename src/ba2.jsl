@@ -1,5 +1,4 @@
 --!strict
---!native
 -- SPDX-License-Identifier: MIT OR Apache-2.0
 -- @dream-archive/ba2: BA2 archives (Fallout 4, Fallout 76, Starfield): opening, hashing,
 -- and the general and texture builders, as `@dream/archive/ba2` has them.

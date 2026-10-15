@@ -1,5 +1,4 @@
 --!strict
---!native
 -- SPDX-License-Identifier: MIT OR Apache-2.0
 -- The legacy filename encodings BSA tools wrote paths in. Archive paths stay bytes; these are for
 -- showing them and for turning text into them, losslessly or not at all.

@@ -1,5 +1,4 @@
 --!strict
---!native
 -- SPDX-License-Identifier: MIT OR Apache-2.0
 -- @dream-archive: Bethesda BA2 and BSA archives in Luau, a port of the dream_archive crate
 -- whose `@dream/archive` binding this replaces under its own name: open, list, look up, read,

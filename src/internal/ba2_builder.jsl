@@ -1,5 +1,4 @@
 --!strict
---!native
 -- SPDX-License-Identifier: MIT OR Apache-2.0
 -- Builds BA2s: general archives (GNRL), one chunk per member, and texture archives (DX10) from
 -- DDS files, from texture metadata and payloads, or from another archive's texture records copied
@@ -109,6 +108,7 @@ local function writeHeader(
   if version == 3 then buffer.writeu32(out, 32, if lz4 then 3 else 0) end
 end
 
+@native
 local function stringTable(list: { Member }): buffer
   local out = buffer.create(sum[for member in list => 2 + #member.name])
   local cursor = 0
@@ -156,6 +156,7 @@ local function new()
     })
   end
 
+  @native
   local function write(sink: sources.Sink?): buffer?
     if
       compression == 'lz4'
@@ -241,6 +242,7 @@ local function new()
     level = tes4Builder.zlibLevel('dream.archive.Ba2Builder.setZlibLevel', value)
   end
 
+  @native
   local function addBytes(
     path: unknown,
     data: unknown,
@@ -359,6 +361,7 @@ local TextureLimits: { [string]: { number | string } } = {
 }
 
 --- The `header` table `addTextureBytes` takes, read as the binding's options reader reads it.
+@native
 local function readTextureHeader(value: unknown): TextureHeader
   local what = 'Dx10Builder:addTextureBytes'
   if type(value) ~= 'table' then fail(`{what}: options must be a table, got {typeof(value)}`) end
@@ -530,6 +533,7 @@ local function newDx10()
     return prepared
   end
 
+  @native
   local function storedLength(chunk: PreparedChunk): number
     if chunk.stored then return sources.length(chunk.stored :: buffer | string) end
 
@@ -537,6 +541,7 @@ local function newDx10()
     return if raw.packedSize == 0 then raw.size else raw.packedSize
   end
 
+  @native
   local function write(sink: sources.Sink?): buffer?
     local list = sortMembers(members)
     local prepared = prepare(list)

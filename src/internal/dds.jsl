@@ -1,5 +1,4 @@
 --!strict
---!native
 -- SPDX-License-Identifier: MIT OR Apache-2.0
 -- DDS headers for BA2 DX10 textures: the header a texture record reconstructs on extraction, the
 -- payload sizes its mips must have, and the DDS files the DX10 builder takes apart. Tightly packed
@@ -137,6 +136,7 @@ end
 
 --- The OpenMW-compatible DDS header a BA2 DX10 record stands for: 128 bytes, or 148 with the
 --- DX10 extension.
+@native
 local function header(
   height: number,
   width: number,
@@ -234,6 +234,7 @@ end
 
 --- What `header` checks, without writing one: an archive's texture records are checked once, when
 --- it opens.
+@native
 local function check(height: number, width: number, mipCount: number, format: number)
   if width == 0 or height == 0 then dds 'zero-sized texture' end
 
@@ -243,15 +244,18 @@ local function check(height: number, width: number, mipCount: number, format: nu
 end
 
 --- How long `header` is for a format it takes: 148 bytes with the DX10 extension, 128 without.
+@native
 local function headerLength(format: number): number
   return if Dx10Blocks[format] or Dx10Pitched[format] then 148 else 128
 end
 
+@native
 local function headerOf({ height, width, mipCount, format, flags }: TextureHeader): buffer
   return header(height, width, mipCount, format, flags)
 end
 
 --- The payload bytes mips `first` to `last` of a texture take, every face of a cubemap included.
+@native
 local function mipBytes(
   height: number,
   width: number,

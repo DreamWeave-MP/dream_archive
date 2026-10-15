@@ -1,5 +1,4 @@
 --!strict
---!native
 -- SPDX-License-Identifier: MIT OR Apache-2.0
 -- Writing members to the host: archive paths made into safe output paths below a folder, and each
 -- file written beside its target and renamed over it, so a failed write leaves the old file whole.

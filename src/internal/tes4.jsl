@@ -1,5 +1,4 @@
 --!strict
---!native
 -- SPDX-License-Identifier: MIT OR Apache-2.0
 -- TES4-family PC BSA (Oblivion to Skyrim SE): versions 103 and 104 with zlib, 105 with LZ4
 -- frames; names from string tables, from embedded payload names, both, or neither. The index is
@@ -27,6 +26,7 @@ local Flags = table.freeze {
 }
 
 --- The crate's checksum of a hash's middle bytes: `crc = byte + crc * 0x1003f`, wrapping.
+@native
 local function crc(text: string, first: number, last: number): number
   local value = 0
   for index = first, last do
@@ -41,6 +41,7 @@ export type Hash = { last: number, last2: number, length: number, first: number,
 local Scratch = buffer.create(8)
 
 --- The on-disk 64-bit value: `last`, `last2`, `length`, `first`, then `crc`, little-endian.
+@native
 local function numeric(hash: Hash): integer
   buffer.writeu8(Scratch, 0, hash.last)
   buffer.writeu8(Scratch, 1, hash.last2)
@@ -50,6 +51,7 @@ local function numeric(hash: Hash): integer
   return buffer.readinteger(Scratch, 0)
 end
 
+@native
 local function hashNormalizedDirectory(path: string): Hash
   local length = #path
   local hash = { last = 0, last2 = 0, length = length % 256, first = 0, crc = 0 }
@@ -69,6 +71,7 @@ end
 local Extensions: { [string]: number } =
   { ['.nif'] = 1, ['.kf'] = 2, ['.dds'] = 3, ['.wav'] = 4, ['.adp'] = 5 }
 
+@native
 local function hashNormalizedFile(path: string): Hash
   local dot = bytes.rfind(path, '.')
   local stem = if dot then string.sub(path, 1, dot) else path
@@ -108,6 +111,7 @@ end
 
 --- The hash of a name as a builder stores one, which the hash normalization leaves as it is unless
 --- it is overlong: it is lowercased already, and holds no separator.
+@native
 local function hashStoredName(name: string): Hash
   return hashNormalizedFile(if #name >= 260 then '.' else name)
 end
@@ -135,12 +139,14 @@ local function pathHash(key: string): (integer, integer)
 end
 
 --- The stored path of a folder and a name, joined as the crate joins them.
+@native
 local function join(folder: string, name: string): string
   if folder == '' or name == '' then return folder .. name end
 
   return `{folder}\\{name}`
 end
 
+@native
 local function open(store: Store): Backend
   local size = store.size
   local loaded = math.min(size, 4096)
@@ -318,6 +324,7 @@ local function open(store: Store): Backend
     return if embedded then embeddedFolders[current] else nil
   end
 
+  @native
   local function nameOf(current: number): string?
     if fileStrings then
       return buffer.readstring(index, nameStarts[current], nameLengths[current])
@@ -351,6 +358,7 @@ local function open(store: Store): Backend
     return start, length
   end
 
+  @native
   local function decodedSize(current: number): (number?, string?)
     local start, length = payload(current)
     if not isCompressed(current) then return length, nil end
@@ -360,6 +368,7 @@ local function open(store: Store): Backend
     return Store.u32(store, start), nil
   end
 
+  @native
   local function decode(current: number): buffer
     local start, length = payload(current)
     if not isCompressed(current) then return Store.read(store, start, length) end
@@ -383,6 +392,7 @@ local function open(store: Store): Backend
 
   --- The paths of the entries that have one, joined into a scratch buffer as the crate joins
   --- them, without making strings.
+  @native
   local function buildNames(): names.Index
     local built = names.new()
     local joined = buffer.create(1024)
@@ -420,6 +430,7 @@ local function open(store: Store): Backend
 
   local hashes: { [integer]: { [integer]: number } }? = nil
 
+  @native
   local function hashIndex(): { [integer]: { [integer]: number } }
     local map = hashes
     if map then return map end
@@ -442,6 +453,7 @@ local function open(store: Store): Backend
 
   local nameIndex: names.Index? = nil
 
+  @native
   local function lookup(raw: string): number?
     local built = nameIndex or buildNames()
     nameIndex = built
@@ -458,6 +470,7 @@ local function open(store: Store): Backend
 
   local message = 'a TES4 hash lookup takes two integers: the folder hash and the file hash'
 
+  @native
   local function hashLookup(first: unknown, second: unknown, third: unknown): number?
     if third ~= nil or second == nil then fail(message) end
 
@@ -501,14 +514,14 @@ local function open(store: Store): Backend
     end,
     ba2Hash = function(): { directory: number, file: number, extension: number }? return nil end,
     decode = decode,
-    decodeString = function(current: number): string
+    decodeString = @native function(current: number): string
       if isCompressed(current) then return buffer.tostring(decode(current)) end
 
       local start, length = payload(current)
       return Store.readString(store, start, length)
     end,
 
-    row = function(current: number): { [string]: unknown }
+    row = @native function(current: number): { [string]: unknown }
       local record = entryRecord[current]
       local row: { [string]: unknown } = {
         index = current,
@@ -530,7 +543,7 @@ local function open(store: Store): Backend
       return row
     end,
 
-    decodeInto = function(current: number, target: buffer, at: number): number
+    decodeInto = @native function(current: number, target: buffer, at: number): number
       if isCompressed(current) then
         local decoded = decode(current)
         buffer.copy(target, at, decoded)
