@@ -74,7 +74,7 @@ local function collect(root: string): { CollectedFile }
     if rows.kinds[index] ~= 'dir'
     => {
       archivePath = relative,
-      path = jess.fs.join(root, relative),
+      path = fs.join(root, relative),
       size = (rows.sizes :: { number })[index],
     }
   ]

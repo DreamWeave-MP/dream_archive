@@ -1368,7 +1368,8 @@ local function filesystemSuite(root: string)
   local function folder(name: string): string
     counter += 1
     local path = `{root}/{name}-{counter}`
-    assert(fs.mkdir(path, { recursive = true }))
+    local done, problem = fs.mkdir(path, { recursive = true })
+    if not done then error(problem, 0) end
     return path
   end
 
@@ -1378,9 +1379,12 @@ local function filesystemSuite(root: string)
 
   suite.it('build from files and folders, then extract', function()
     local base = folder 'round-trip'
-    assert(fs.writeFile(`{base}/source.txt`, 'from source file'))
-    assert(fs.mkdir(`{base}/dir/nested`, { recursive = true }))
-    assert(fs.writeFile(`{base}/dir/nested/from-dir.txt`, 'from directory'))
+    local done, problem = fs.writeFile(`{base}/source.txt`, 'from source file')
+    if not done then error(problem, 0) end
+    local done, problem = fs.mkdir(`{base}/dir/nested`, { recursive = true })
+    if not done then error(problem, 0) end
+    local done, problem = fs.writeFile(`{base}/dir/nested/from-dir.txt`, 'from directory')
+    if not done then error(problem, 0) end
     local builder = archive.ba2.Builder.new()
     builder:addFile('from-source.txt', `{base}/source.txt`)
     builder:addDir(`{base}/dir`)
@@ -1398,18 +1402,23 @@ local function filesystemSuite(root: string)
 
   suite.it('read deferred files when the archive is written', function()
     local base = folder 'deferred'
-    assert(fs.writeFile(`{base}/source.txt`, 'first'))
+    local done, problem = fs.writeFile(`{base}/source.txt`, 'first')
+    if not done then error(problem, 0) end
+
     for _, make: any in
       { archive.bsa.tes3.Builder.new, archive.bsa.tes4.Builder.new, archive.ba2.Builder.new }
 
     do
       local builder = make()
       builder:addFile('data/source.txt', `{base}/source.txt`)
-      assert(fs.writeFile(`{base}/source.txt`, 'later'))
+      local done, problem = fs.writeFile(`{base}/source.txt`, 'later')
+      if not done then error(problem, 0) end
       expect(archive.openBytes(builder:toBytes()):readFileRequired 'data/source.txt').toBe 'later'
-      assert(fs.writeFile(`{base}/source.txt`, 'longer than it was'))
+      local done, problem = fs.writeFile(`{base}/source.txt`, 'longer than it was')
+      if not done then error(problem, 0) end
       expect(function() builder:toBytes() end).toThrow 'deferred source file size changed'
-      assert(fs.writeFile(`{base}/source.txt`, 'first'))
+      local done, problem = fs.writeFile(`{base}/source.txt`, 'first')
+      if not done then error(problem, 0) end
     end
   end)
 
@@ -1476,7 +1485,9 @@ local function filesystemSuite(root: string)
 
   suite.it('leave the old file whole when an extraction fails', function()
     local base = folder 'failed'
-    assert(fs.writeFile(`{base}/a.txt`, 'existing'))
+    local done, problem = fs.writeFile(`{base}/a.txt`, 'existing')
+    if not done then error(problem, 0) end
+
     local spec: support.Ba2Spec = {
       version = 1,
       format = 'GNRL',
@@ -1490,7 +1501,10 @@ local function filesystemSuite(root: string)
     expect(function() opened:extractTo(base) end).toThrow 'expected 7 bytes'
     expect(function() opened:extractEntryToPath(1, `{base}/a.txt`) end).toThrow 'expected 7 bytes'
     expect(read(`{base}/a.txt`)).toBe 'existing'
-    for _, name in assert(fs.list(base)) do
+    local names, problem = fs.list(base)
+    if not names then error(problem, 0) end
+
+    for _, name in names do
       expect((string.find(name, 'dream-archive-tmp', 1, true))).toBeNil()
     end
   end)
@@ -1515,7 +1529,8 @@ local function filesystemSuite(root: string)
     end
 
     expect(function() archive.detectPath(`{root}/missing.bin`) end).toThrow 'No such file or directory'
-    assert(fs.writeFile(`{root}/short.bin`, 'BS'))
+    local done, problem = fs.writeFile(`{root}/short.bin`, 'BS')
+    if not done then error(problem, 0) end
     expect(archive.detectPath(`{root}/short.bin`)).toBeNil()
     expect(function() archive.openPath(`{root}/short.bin`) end).toThrow 'failed to fill whole buffer'
   end)

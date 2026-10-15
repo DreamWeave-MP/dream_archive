@@ -136,7 +136,8 @@ local function inputs(): { Input }
   local function add(name: string, builder: any, list: { string }, sizes: { number })
     local data = builder:toBytes()
     local file = `{scratch}/{name}.archive`
-    assert(fs.writeFile(file, data))
+    local done, problem = fs.writeFile(file, data)
+    if not done then error(problem, 0) end
     table.insert(made, { name = name, data = data, paths = list, sizes = sizes, file = file })
   end
 
@@ -491,7 +492,8 @@ local function extractWorkloads(input: Input)
       counter += 1
       local target = `{scratch}/extract-{counter}`
       local written = opened:extractTo(target)
-      assert(fs.remove(target, { recursive = true }))
+      local done, problem = fs.remove(target, { recursive = true })
+      if not done then error(problem, 0) end
       return written
     end
   end, total, 'on one thread')
