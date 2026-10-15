@@ -245,3 +245,171 @@ The pool is read through its binding, not through the native code an annotated
 the pool has replaced, once a name it already holds is interned at the pool's load limit. When
 l3i fixes that, annotating the pool in `src/internal/names.jsl` is the next lookup win to
 measure.
+
+## Which modules are native, and why
+
+Jess compiles to machine code only what is marked (`--!native` on a module, `@native` on one
+function), and every load pays for what is marked. A module carries `--!native` when a row below
+spends its time there and the module is small (12 KB or less); a larger module carries `@native`
+on the functions the row spends its time in, and nothing else.
+
+Measured 2026-10-14 with `jess 0.1.0`, the verified release build of jess `07c38cb` on l3i
+2.0.3, on the i7-10870H, the one-minute load 1.06 and 0.93 at the start of the two
+sessions. In each session the bench ran alternately on this package and on a copy of it with
+every module marked, three fresh runs of `bench/bench.jsl` each, every run's row the median of
+its batches; a column is the median of the three, and a ratio is against the all-marked runs of
+the same session. Which functions a row spends its time in comes from `jess run --profile` of
+that row alone, unmarked. The load cost is a fresh `jess run --package <this package>
+--package-path jpk` of a script that only requires `@dream-archive`, the two sides alternating, the
+median of five each after one warm-up.
+
+| Requiring `@dream-archive` | All marked | This state |
+| --- | ---: | ---: |
+| Unmarked | 0.103 s | 0.064 s |
+| Final | 0.103 s | 0.085 s |
+
+| Row | All marked (ms) | Unmarked / all marked | Final (ms) | Final / all marked |
+| --- | ---: | ---: | ---: | ---: |
+| tes3 4000 stored (bytes): open + index | 2.864 | **1.112×** | 2.937 | 1.026× |
+| tes3 4000 stored (bytes): open + first lookup | 2.294 | **1.236×** | 2.446 | **1.066×** |
+| tes3 4000 stored (bytes): open + 8000 lookups | 5.247 | **1.269×** | 7.186 | **1.370×** |
+| tes3 4000 stored (bytes): 8000 lookups by path | 0.8383 | **1.520×** | 0.8061 | 0.962× |
+| tes3 4000 stored (bytes): 4000 lookups by hash | 0.4695 | **1.412×** | 0.4511 | 0.961× |
+| tes3 4000 stored (bytes): list paths and sizes | 3.258 | **2.001×** | 3.362 | 1.032× |
+| tes3 4000 stored (bytes): read 1000 files | 0.7124 | **1.151×** | 0.7316 | 1.027× |
+| tes3 4000 stored (bytes): readInto 1000 files | 0.3073 | **1.662×** | 0.2971 | 0.967× |
+| tes3 4000 stored (path): open + index | 0.07131 | **2.706×** | 0.07243 | 1.016× |
+| tes3 4000 stored (path): open + first lookup | 0.8301 | **1.632×** | 0.8404 | 1.012× |
+| tes3 4000 stored (path): open + 8000 lookups | 3.964 | **1.298×** | 4.054 | 1.023× |
+| tes3 4000 stored (path): 8000 lookups by path | 0.7839 | **1.491×** | 0.8102 | 1.034× |
+| tes3 4000 stored (path): 4000 lookups by hash | 0.4667 | **1.405×** | 0.4455 | 0.954× |
+| tes3 4000 stored (path): list paths and sizes | 1.911 | **1.643×** | 1.917 | 1.003× |
+| tes3 4000 stored (path): read 1000 files | 1.114 | **1.144×** | 1.143 | 1.026× |
+| tes3 4000 stored (path): readInto 1000 files | 0.5853 | **1.354×** | 0.5983 | 1.022× |
+| tes4 1000 zlib (bytes): open + index | 0.4354 | **1.287×** | 0.4378 | 1.006× |
+| tes4 1000 zlib (bytes): open + first lookup | 0.6690 | **1.502×** | 0.6556 | 0.980× |
+| tes4 1000 zlib (bytes): open + 2000 lookups | 1.295 | **1.371×** | 1.333 | 1.030× |
+| tes4 1000 zlib (bytes): 2000 lookups by path | 0.1915 | **1.520×** | 0.1868 | 0.976× |
+| tes4 1000 zlib (bytes): 1000 lookups by hash | 0.1394 | **1.373×** | 0.1354 | 0.972× |
+| tes4 1000 zlib (bytes): list paths and sizes | 0.9495 | **1.639×** | 0.9662 | 1.018× |
+| tes4 1000 zlib (bytes): read 1000 files | 36.85 | **1.051×** | 37.71 | 1.023× |
+| tes4 1000 zlib (bytes): readInto 1000 files | 34.78 | 1.014× | 34.54 | 0.993× |
+| tes4 1000 zlib (path): open + index | 0.1108 | **2.120×** | 0.1145 | 1.034× |
+| tes4 1000 zlib (path): open + first lookup | 0.3629 | **1.725×** | 0.3633 | 1.001× |
+| tes4 1000 zlib (path): open + 2000 lookups | 1.162 | **1.406×** | 1.154 | 0.993× |
+| tes4 1000 zlib (path): 2000 lookups by path | 0.1894 | **1.540×** | 0.1939 | 1.023× |
+| tes4 1000 zlib (path): 1000 lookups by hash | 0.1412 | **1.391×** | 0.1365 | 0.966× |
+| tes4 1000 zlib (path): list paths and sizes | 1.138 | **1.598×** | 1.125 | 0.989× |
+| tes4 1000 zlib (path): read 1000 files | 38.58 | 1.003× | 37.97 | 0.984× |
+| tes4 1000 zlib (path): readInto 1000 files | 36.02 | 1.007× | 35.80 | 0.994× |
+| tes4 1000 lz4 frames (bytes): open + index | 0.7314 | **1.197×** | 0.7486 | 1.024× |
+| tes4 1000 lz4 frames (bytes): open + first lookup | 1.006 | **1.368×** | 0.9453 | 0.939× |
+| tes4 1000 lz4 frames (bytes): open + 2000 lookups | 1.854 | **1.205×** | 1.540 | 0.831× |
+| tes4 1000 lz4 frames (bytes): 2000 lookups by path | 0.1885 | **1.499×** | 0.1837 | 0.975× |
+| tes4 1000 lz4 frames (bytes): 1000 lookups by hash | 0.1408 | **1.413×** | 0.1364 | 0.969× |
+| tes4 1000 lz4 frames (bytes): list paths and sizes | 1.512 | **1.283×** | 1.302 | 0.861× |
+| tes4 1000 lz4 frames (bytes): read 1000 files | 10.06 | **1.079×** | 10.24 | 1.018× |
+| tes4 1000 lz4 frames (bytes): readInto 1000 files | 7.103 | **1.176×** | 7.282 | 1.025× |
+| tes4 1000 lz4 frames (path): open + index | 0.1125 | **2.130×** | 0.1159 | 1.030× |
+| tes4 1000 lz4 frames (path): open + first lookup | 0.3597 | **1.713×** | 0.3619 | 1.006× |
+| tes4 1000 lz4 frames (path): open + 2000 lookups | 1.164 | **1.409×** | 1.148 | 0.986× |
+| tes4 1000 lz4 frames (path): 2000 lookups by path | 0.1869 | **1.442×** | 0.1852 | 0.991× |
+| tes4 1000 lz4 frames (path): 1000 lookups by hash | 0.1397 | **1.375×** | 0.1376 | 0.985× |
+| tes4 1000 lz4 frames (path): list paths and sizes | 1.153 | **1.590×** | 1.128 | 0.979× |
+| tes4 1000 lz4 frames (path): read 1000 files | 10.91 | **1.094×** | 10.89 | 0.998× |
+| tes4 1000 lz4 frames (path): readInto 1000 files | 8.291 | **1.156×** | 8.183 | 0.987× |
+| ba2 1000 zip (bytes): open + index | 0.3781 | **1.361×** | 0.4178 | **1.105×** |
+| ba2 1000 zip (bytes): open + first lookup | 0.5861 | **1.530×** | 0.5507 | 0.940× |
+| ba2 1000 zip (bytes): open + 2000 lookups | 1.200 | **1.396×** | 1.195 | 0.996× |
+| ba2 1000 zip (bytes): 2000 lookups by path | 0.1931 | **1.522×** | 0.1900 | 0.984× |
+| ba2 1000 zip (bytes): 1000 lookups by hash | 0.2211 | **1.972×** | 0.2322 | 1.050× |
+| ba2 1000 zip (bytes): list paths and sizes | 0.7275 | **1.746×** | 0.7368 | 1.013× |
+| ba2 1000 zip (bytes): read 1000 files | 37.78 | 0.999× | 37.92 | 1.004× |
+| ba2 1000 zip (bytes): readInto 1000 files | 34.76 | 1.016× | 34.99 | 1.007× |
+| ba2 1000 zip (path): open + index | 0.08090 | **3.129×** | 0.08226 | 1.017× |
+| ba2 1000 zip (path): open + first lookup | 0.2431 | **1.964×** | 0.2492 | 1.025× |
+| ba2 1000 zip (path): open + 2000 lookups | 1.024 | **1.382×** | 1.052 | 1.027× |
+| ba2 1000 zip (path): 2000 lookups by path | 0.1881 | **1.505×** | 0.1904 | 1.012× |
+| ba2 1000 zip (path): 1000 lookups by hash | 0.2204 | **1.939×** | 0.2224 | 1.009× |
+| ba2 1000 zip (path): list paths and sizes | 0.5567 | **1.928×** | 0.5552 | 0.997× |
+| ba2 1000 zip (path): read 1000 files | 37.97 | 0.981× | 38.38 | 1.011× |
+| ba2 1000 zip (path): readInto 1000 files | 34.95 | 0.999× | 35.18 | 1.007× |
+| ba2 1000 lz4 (bytes): open + index | 0.7121 | **1.561×** | 0.6794 | 0.954× |
+| ba2 1000 lz4 (bytes): open + first lookup | 0.9025 | **1.397×** | 0.9965 | **1.104×** |
+| ba2 1000 lz4 (bytes): open + 2000 lookups | 1.422 | **1.341×** | 1.699 | **1.195×** |
+| ba2 1000 lz4 (bytes): 2000 lookups by path | 0.1907 | **1.474×** | 0.1878 | 0.985× |
+| ba2 1000 lz4 (bytes): 1000 lookups by hash | 0.2220 | **1.979×** | 0.2232 | 1.005× |
+| ba2 1000 lz4 (bytes): list paths and sizes | 1.140 | **2.125×** | 1.216 | **1.067×** |
+| ba2 1000 lz4 (bytes): read 1000 files | 9.793 | 1.021× | 9.660 | 0.986× |
+| ba2 1000 lz4 (bytes): readInto 1000 files | 6.513 | **1.084×** | 6.470 | 0.993× |
+| ba2 1000 lz4 (path): open + index | 0.08051 | **3.149×** | 0.08236 | 1.023× |
+| ba2 1000 lz4 (path): open + first lookup | 0.2470 | **1.938×** | 0.2440 | 0.988× |
+| ba2 1000 lz4 (path): open + 2000 lookups | 1.035 | **1.410×** | 1.063 | 1.027× |
+| ba2 1000 lz4 (path): 2000 lookups by path | 0.1848 | **1.483×** | 0.1932 | 1.045× |
+| ba2 1000 lz4 (path): 1000 lookups by hash | 0.2254 | **1.981×** | 0.2252 | 0.999× |
+| ba2 1000 lz4 (path): list paths and sizes | 0.5564 | **1.934×** | 0.5428 | 0.975× |
+| ba2 1000 lz4 (path): read 1000 files | 10.07 | **1.092×** | 9.960 | 0.989× |
+| ba2 1000 lz4 (path): readInto 1000 files | 6.862 | **1.068×** | 7.012 | 1.022× |
+| dx10 300 BC7 (bytes): open + index | 7.340 | **1.206×** | 5.698 | 0.776× |
+| dx10 300 BC7 (bytes): open + first lookup | 3.543 | **1.205×** | 6.498 | **1.834×** |
+| dx10 300 BC7 (bytes): open + 600 lookups | 5.587 | 0.948× | 5.728 | 1.025× |
+| dx10 300 BC7 (bytes): 600 lookups by path | 0.05338 | **1.544×** | 0.05523 | 1.035× |
+| dx10 300 BC7 (bytes): 300 lookups by hash | 0.06515 | **2.027×** | 0.06660 | 1.022× |
+| dx10 300 BC7 (bytes): list paths and sizes | 5.551 | **1.436×** | 5.075 | 0.914× |
+| dx10 300 BC7 (bytes): read 300 files | 8.115 | **1.092×** | 8.040 | 0.991× |
+| dx10 300 BC7 (bytes): readInto 300 files | 1.633 | **1.368×** | 1.763 | **1.080×** |
+| dx10 300 BC7 (path): open + index | 0.1440 | **3.313×** | 0.1417 | 0.984× |
+| dx10 300 BC7 (path): open + first lookup | 0.2005 | **2.750×** | 0.2032 | 1.013× |
+| dx10 300 BC7 (path): open + 600 lookups | 0.4427 | **1.942×** | 0.4445 | 1.004× |
+| dx10 300 BC7 (path): 600 lookups by path | 0.05450 | **1.550×** | 0.05517 | 1.012× |
+| dx10 300 BC7 (path): 300 lookups by hash | 0.06403 | **2.022×** | 0.06525 | 1.019× |
+| dx10 300 BC7 (path): list paths and sizes | 0.3043 | **2.442×** | 0.3030 | 0.996× |
+| dx10 300 BC7 (path): read 300 files | 8.645 | **1.066×** | 8.380 | 0.969× |
+| dx10 300 BC7 (path): readInto 300 files | 1.771 | **1.325×** | 1.744 | 0.985× |
+| build: tes3, add 2000 | 1.712 | **2.471×** | 1.702 | 0.994× |
+| build: tes4, add 2000 | 3.171 | **1.719×** | 3.637 | **1.147×** |
+| build: ba2, add 2000 | 2.666 | **1.343×** | 2.876 | **1.079×** |
+| build: tes3, 2000 stored | 3.201 | **2.181×** | 3.193 | 0.998× |
+| build: tes4 104, 2000 stored | 5.401 | **1.789×** | 6.802 | **1.259×** |
+| build: ba2, 2000 stored | 4.340 | **1.544×** | 4.757 | **1.096×** |
+| build: dx10, 300 stored | 1.105 | **1.868×** | 1.284 | **1.162×** |
+| build: tes4 104, 2000 zlib | 272.4 | 1.038× | 282.0 | 1.035× |
+| build: tes4 105, 2000 lz4 frames | 27.30 | **1.148×** | 29.70 | **1.088×** |
+| build: ba2, 2000 zip | 271.1 | **1.060×** | 277.8 | 1.025× |
+| build: ba2 v3, 2000 lz4 | 23.71 | **1.083×** | 23.91 | 1.009× |
+| extract: tes3 4000 stored to disk | 339.6 | 1.015× | 346.4 | 1.020× |
+| extract: ba2 1000 zip to disk | 135.4 | 1.030× | 138.9 | 1.026× |
+
+What carries the directive (every module and function here is one a row spends its time in,
+unmarked):
+
+- Whole: `internal/names`, `internal/sources`, `internal/store`, `internal/tes3`,
+  `internal/tes3_builder`.
+- `internal/archive`, by function: `compute`, a closure at line 116, `entryOf`, `lookup`,
+  `required`, `target`, `Methods.entries`, `Methods.contains`, `Methods.containsHash`,
+  `Methods.readFileRequired`, `Methods.readInto`.
+- `internal/ba2`, by function: `crc`, `hashNormalized`, `exact`, `open`, `nameOf`, `chunkAt`,
+  `textureOf`, `chunksSize`, `decodedSize`, `chunkBytes`, `decodeInto`, `decode`, `buildNames`,
+  `hashIndex`, `find`, `lookup`, `hashLookup`, `decodeString`, `row`.
+- `internal/ba2_builder`, by function: `stringTable`, `write`, `addBytes`, `readTextureHeader`,
+  `storedLength`, `write`.
+- `internal/dds`, by function: `header`, `check`, `headerLength`, `headerOf`, `mipBytes`.
+- `internal/tes4`, by function: `crc`, `numeric`, `hashNormalizedDirectory`, `hashNormalizedFile`,
+  `hashStoredName`, `join`, `open`, `nameOf`, `decodedSize`, `decode`, `buildNames`, `hashIndex`,
+  `lookup`, `hashLookup`, `decodeString`, `row`, `decodeInto`.
+- `internal/tes4_builder`, by function: `stored`, `addBytes`.
+- `internal/util`, by function: `checkString`, `checkBytes`, `int64`, `storedPath`, `sortByKey`,
+  `hostResult`, `inflateExact`, `lz4BlockExact`, `lz4FrameBlocks`, `lz4FrameExact`.
+- Unmarked: `ba2`, `bsa`, `bsa/tes3`, `bsa/tes4`, `init`, `internal/encoding`, `internal/extract`,
+  `internal/open`, `internal/types`.
+
+This bench is noisy: the all-marked copy against a second all-marked copy, run the same way, put
+10 of its 109 rows more than 5% apart (the 95th percentile 1.074x, the worst 1.375x, on `dx10 300
+BC7 (bytes): open + first lookup`). So a row counts as slower here only when two final sessions
+both put it more than 5% behind all marked. Those are the in-memory BA2 LZ4 opens and lookups
+(1.10x to 1.24x) and the TES4, BA2, and DX10 builds (1.06x to 1.34x); every function their
+profiles name is native already, and what is left is the long tail of each format's code around
+them. The other rows the table marks were within 5% in the other session (`tes3 4000 stored
+(bytes): open + 8000 lookups` among them, 1.37x here). Marking the builders whole would charge every archive a reader opens for code only a writer
+runs, since `ba2` and `bsa` load them with the package; loading them only when an archive is
+built is the per-format split this package is due, not a directive.
