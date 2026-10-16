@@ -127,6 +127,15 @@ local function isCompressed(member: Member, default: string?): boolean
   return member.compression == 'compress'
 end
 
+--- Refuses LZ4 in an archive older than version 3, which can't hold it, when a member of `list`
+--- would be compressed.
+local function refuseOldLz4(compression: string?, version: number, list: { Member })
+  if compression ~= 'lz4' or version == 3 then return end
+
+  local compressed = any[for member in list => isCompressed(member, compression)]
+  if compressed then util.notImplemented 'BA2 LZ4 writer requires version 3' end
+end
+
 local function compress(data: buffer | string, default: string?, level: number): buffer
   if default == 'lz4' then return bytes.lz4Compress(data) end
 
@@ -158,13 +167,7 @@ local function new()
 
   @native
   local function write(sink: sources.Sink?): buffer?
-    if
-      compression == 'lz4'
-      and version ~= 3
-      and any[for member in members => isCompressed(member, compression)]
-    then
-      util.notImplemented 'BA2 LZ4 writer requires version 3'
-    end
+    refuseOldLz4(compression, version, members)
 
     local list = sortMembers(members)
     local count = #list
@@ -189,7 +192,8 @@ local function new()
     if not target then
       -- A compressed member's stored length isn't known until it is written.
       local total: number? = nil
-      if not any[for member in list => isCompressed(member, compression)] then
+      local compressed = any[for member in list => isCompressed(member, compression)]
+      if not compressed then
         total = buffer.len(head)
           + buffer.len(names)
           + sum[for member in list => member.source.length]
@@ -470,13 +474,7 @@ local function newDx10()
 
   --- Each member's chunks, compressed or copied, as the crate prepares them before writing.
   local function prepare(list: { Member }): { { PreparedChunk } }
-    if
-      compression == 'lz4'
-      and version ~= 3
-      and any[for member in list => isCompressed(member, compression)]
-    then
-      util.notImplemented 'BA2 LZ4 writer requires version 3'
-    end
+    refuseOldLz4(compression, version, list)
 
     local prepared = table.create(#list) :: { { PreparedChunk } }
     for position, member in list do

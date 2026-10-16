@@ -309,7 +309,8 @@ local function open(store: Store): Backend
   end
 
   -- Fallout 3's voice archives pad the name block with NULs after the last name.
-  if any[for byte in index[(cursor + 1):namesEnd] => byte ~= 0] then fail(Messages.outOfBounds) end
+  local padded = any[for byte in index[(cursor + 1):namesEnd] => byte ~= 0]
+  if padded then fail(Messages.outOfBounds) end
 
   for current = 1, fileCount do
     local record = entryRecord[current]

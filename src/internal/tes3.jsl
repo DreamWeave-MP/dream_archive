@@ -91,7 +91,8 @@ local function open(store: Store): Backend
   -- reduction over the offsets clears them all, and only an archive it doesn't clear is walked
   -- for the offset that is wrong and how.
   local firstOffset = offsetsStart // 4
-  if any[for relative in index[(firstOffset + 1):(firstOffset + count), 'u32'] => relative > lastNul] then
+  local outside = any[for relative in index[(firstOffset + 1):(firstOffset + count), 'u32'] => relative > lastNul]
+  if outside then
     for entry = 0, count - 1 do
       local relative = buffer.readu32(index, offsetsStart + 4 * entry)
       if relative > namesLength then fail(Messages.outOfBounds) end

@@ -71,7 +71,8 @@ local function workload(
 
   local function verify(result: unknown)
     if type(expected) == 'function' then
-      expected(result)
+      local check = expected :: (result: unknown) -> ()
+      check(result)
       return
     end
 

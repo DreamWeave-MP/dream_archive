@@ -271,7 +271,8 @@ suite.describe('reading what the builders write', function()
     local tes3 = archive.openBytes(families[1][1]:toBytes()):entries()
     local close = 0
     for index = 2, #tes3 do
-      if string.sub(tes3[index].hashHex, 1, 13) == string.sub(tes3[index - 1].hashHex, 1, 13) then
+      local hash, previous = tes3[index].hashHex, tes3[index - 1].hashHex
+      if hash and previous and string.sub(hash, 1, 13) == string.sub(previous, 1, 13) then
         close += 1
       end
     end
