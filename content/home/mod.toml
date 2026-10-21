@@ -1,6 +1,6 @@
-# DreamWeave Archive as a DreamWeave project: a Jess package. The repository root is its Package Source;
-# jess.toml names the package and its version, and each release tag `archive-<version>` is one
-# version of the package, packed by CI with `jess pack`.
+# DreamWeave Archive as a DreamWeave project: a Jess package. `jess` names the Package Source it publishes,
+# the repository root's own jess.toml, and each release tag `archive-<version>` is one version of
+# the package, packed by the Mod Template from that tag; every push packs a development build.
 id = "b328958f-26c6-4f38-b1df-29dec9c387db"
 slug = "archive"
 type = "library"
@@ -12,6 +12,7 @@ url = "https://github.com/DreamWeave-MP"
 
 [package]
 format = "jpk"
+jess = "org.dreamweave.dream-archive"
 
 [[releases]]
 version = "0.1.0"

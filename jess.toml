@@ -34,8 +34,3 @@ exports = [
     "@dream-archive/util",
     "@dream-archive/backend",
 ]
-
-# The Mod Template builds this repository's site and releases; `jess workspace run --trusted
-# dreamweave-build` runs it over this folder from the lock, as a site built from the template does.
-[dev-dependencies]
-"org.dreamweave.mod-template" = "0.3"
