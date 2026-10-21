@@ -161,8 +161,8 @@ migration = """
 Compose `dream_archive::luau::ArchiveExtension` into the host's l3i `RuntimePlan`. A host that
 still wants the `dreamArchive` global adds
 `RuntimePolicy::compat_global("@dream/archive", "dreamArchive")`.
-[Embedding Luau](https://dreamweave-mp.github.io/dream_archive/docs/luau-hosts/#from-0-2) lists
-what scripts must change.
+That release's Embedding Luau page listed what scripts must change; the Luau port's
+documentation replaces it.
 """
 
 [[releases]]
