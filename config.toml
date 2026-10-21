@@ -5,7 +5,7 @@
 # value matters for local previews.
 base_url = "https://DreamWeave-MP.github.io/dream_archive"
 title = "dream_archive"
-description = "Read, extract and write Bethesda BSA and BA2 archives in pure Rust, from Morrowind to Starfield, with a Luau module for scripts."
+description = "Read, extract and write Bethesda BSA and BA2 archives, from Morrowind to Starfield, as a Jess package in Luau."
 
 compile_sass = true
 build_search_index = true
@@ -50,9 +50,7 @@ font_override_titles_only = true
 
 menu_items = [
     { name = "Overview", url = "@/home/index.md" },
-    { name = "Guide", url = "@/docs/_index.md" },
-    { name = "Rust API", url = "@/docs/api/_index.md" },
-    { name = "Luau API", url = "@/docs/luau/_index.md" },
+    { name = "Network", url = "@/network.md" },
     { name = "Command line", url = "https://DreamWeave-MP.github.io/dream_archivetool/" },
 ]
 

@@ -1,12 +1,12 @@
 +++
 title = "dream_archive"
-description = "Read, extract and write Bethesda BSA and BA2 archives in pure Rust, from Morrowind to Starfield, with a Luau module for scripts."
+description = "Read, extract and write Bethesda BSA and BA2 archives, from Morrowind to Starfield, as a Jess package in Luau."
 
 [taxonomies]
-tags = ["Rust", "Luau", "BSA", "BA2", "Morrowind", "OpenMW"]
+tags = ["Jess", "Luau", "BSA", "BA2", "Morrowind", "OpenMW"]
 
 [extra]
-sections = ["overview", "install", "releases", "credits"]
+sections = ["overview", "releases", "credits"]
 +++
 
 Every Bethesda game since Morrowind keeps its meshes, textures and sounds in archives: BSA from
@@ -19,34 +19,26 @@ a Fallout 4 BA2. Where a format really is different, its own module has the rest
 archives, BA2 texture metadata, each builder's settings. It writes every family it reads, from
 bytes, files, directories, or entries of another archive.
 
-It is pure Rust, with no DirectXTex and no C++ unless you build the Luau module. Archive paths stay
-bytes: the crate never guesses a code page, and it tells you when a path cannot be stored or
-extracted safely instead of writing it somewhere else.
+It is Luau all the way down, a Jess package with no native code. Archive paths stay bytes: the
+package never guesses a code page, and it tells you when a path cannot be stored or extracted safely
+instead of writing it somewhere else.
 
 {{ schematic(data_path="data/schematics/archives.json") }}
 
-```rust
-use dream_archive::Archive;
-
-fn main() -> dream_archive::Result<()> {
-    let archive = Archive::open_path("Morrowind.bsa")?;
-    println!("{:?}, {} entries", archive.format(), archive.len());
-
-    let texture = archive.read_file_required(r"Textures\Tx_Wood.DDS")?;
-    println!("tx_wood.dds: {} bytes", texture.len());
-    Ok(())
-}
-```
-
 ```lua
-local dreamArchive = require("@dream/archive")
+local dreamArchive = require '@dream-archive'
 
-local archive = dreamArchive.openPath("Morrowind.bsa")
+local archive = dreamArchive.openPath 'Morrowind.bsa'
+print(archive:format())
+
 for _, entry in archive:entries() do
-    if entry.path == [[meshes\m\probe_journeyman_01.nif]] then
-        print(entry.index, entry.size)
-    end
+  if entry.path == [[meshes\m\probe_journeyman_01.nif]] then
+    print(entry.index, entry.size)
+  end
 end
+
+local texture = archive:readFileRequired [[Textures\Tx_Wood.DDS]]
+print(#texture, 'bytes')
 ```
 
 ## What it covers
@@ -59,18 +51,14 @@ end
 | BA2 DX10 | Fallout 4, Fallout 76, Starfield | yes, as DDS files | from DDS files or texture metadata |
 | BA2 GNMF | console textures | metadata only | no |
 
-Console layouts and XMem compression are refused with an error. [Formats](@/docs/formats.md) has
-the details, down to which header fields matter.
+Console layouts and XMem compression are refused with an error.
 
 ## Documentation
 
-- **[Start here](@/docs/start-here.md)**: add the crate, open an archive, read a file, extract
-  everything, build one.
-- **[Guide](@/docs/_index.md)**: reading, archive paths, hashes, extracting, building, and BA2
-  textures.
-- **[Rust API](@/docs/api/_index.md)** and **[Luau API](@/docs/luau/_index.md)**: every type,
-  function and method.
+The package's reference is `src/init.jsl` and the modules beside it: every function is documented
+where it is written, and `jess luau-types` prints the module's types. The guide that explained the
+Rust crate lives with it on the `rust` branch; the Luau package's own guide is being written.
 
 Want a command line instead of a library?
 [dream_archivetool](https://DreamWeave-MP.github.io/dream_archivetool/) lists, verifies, diffs,
-extracts, creates and updates archives, built on this crate.
+extracts, creates and updates archives, built on this package.

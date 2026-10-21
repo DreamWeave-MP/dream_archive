@@ -15,17 +15,18 @@ name = "DreamWeave"
 url = "https://github.com/DreamWeave-MP"
 
 [links]
-documentation = "@/docs/_index.md"
 donate = "https://ko-fi.com/magicaldave"
 
-# A Rust library. StroggForge's library workflow (.github/workflows/ci.yml) tests it on every push;
-# pushing a bare version tag, like 1.0.0, publishes that version to crates.io and records it here.
+# A Jess package: `jess` names the Package Source this project publishes, the repository root's
+# own jess.toml. Each release tag `dream_archive-<version>` is one version of the package, packed
+# by the Mod Template from that tag; every push to main packs a development build. Versions 1.1.0
+# and below are the Rust crate, which lives on the `rust` branch and stays on crates.io.
 [package]
-format = "crate"
-crate = "dream_archive"
+format = "jpk"
+jess = "org.dreamweave.dream-archive"
 
-# Every version on crates.io, oldest first. To release, add the next one here with the day you
-# publish it, set the same version in Cargo.toml, commit, and push its tag: git tag 1.0.1.
+# Every version, oldest first. To release, add the next one here with the day you publish it, set
+# the same version in jess.toml, commit, and push its tag: git tag dream_archive-2.0.1.
 
 [[releases]]
 version = "0.1.0"
@@ -172,4 +173,12 @@ changed = [
     "Relicensed from GPL-3.0 to MIT OR Apache-2.0: this is the first release under the new terms, and releases up to and including 1.0.0 stay GPL.",
     "Requires dream-path 1.1, its first MIT OR Apache-2.0 release.",
     "l3i 1.1.0 comes from crates.io; the `@dream/archive` module is unchanged.",
+]
+
+[[releases]]
+version = "2.0.0"
+date = 2026-10-21
+summary = "dream_archive is a Jess package, written in Luau; the Rust crate continues on the rust branch at 1.1.0."
+breaking = [
+    "The library is the Jess package `org.dreamweave.dream-archive`, module `@dream-archive`, installed with jess rather than Cargo. The Rust crate `dream_archive` stays at 1.1.0 on crates.io and on this repository's `rust` branch, and is no longer developed on main.",
 ]
