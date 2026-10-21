@@ -1,5 +1,5 @@
 {
-  "schema_version": "2",
+  "schema_version": "3",
   "document": "lock",
   "project": "a8ec99fb-1938-42cc-8b9f-87994e046594",
   "note": "Written by CI when a release tag is pushed: what each published release's archive contains. Do not edit.",
@@ -401,6 +401,47 @@
           "size": 7404128,
           "digests": {
             "sha256": "ef05ce9b63b87ff34e29708aa5d58829608063a64cf236420adbba101dbc24c7"
+          }
+        }
+      ],
+      "runtimes": {},
+      "platforms": [],
+      "provides": [],
+      "relationships": [],
+      "components": [
+        {
+          "id": "main",
+          "name": "dream_archive",
+          "path": ".",
+          "required": true,
+          "default": true,
+          "requires": [],
+          "conflicts": [],
+          "suggested_with": []
+        }
+      ],
+      "groups": [],
+      "extensions": {},
+      "critical_extensions": []
+    },
+    {
+      "version": "2.0.0",
+      "locked_from": "7af9ffda382883ac72038a23518cf79509d77900",
+      "artifacts": [
+        {
+          "id": "jpk",
+          "format": "jpk",
+          "filename": "org.dreamweave.dream-archive-2.0.0.jpk",
+          "media_type": "application/vnd.jess.jpk",
+          "size": 261432,
+          "digests": {
+            "sha256": "281c27bf86a2b9ea14dc9baa4959a9a9d213784332acfefcc9a9a9e623035730"
+          },
+          "jess": {
+            "package": "org.dreamweave.dream-archive",
+            "jess_api": "1",
+            "content_digest": "2542758bf2af0319bcecca13eb44158c43b87733d207eb02f13d647412ee9dc1",
+            "dependencies": {}
           }
         }
       ],
